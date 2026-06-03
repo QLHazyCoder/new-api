@@ -242,6 +242,18 @@ export interface AffiliateTransferRequest {
 }
 
 /**
+ * Aggregated active subscription quota summary for display only.
+ */
+export interface SubscriptionQuotaSummary {
+  /** Remaining quota across active finite subscriptions */
+  available_quota: number
+  /** Whether any active subscription provides unlimited quota */
+  has_unlimited_quota: boolean
+  /** Number of currently active subscriptions */
+  active_subscription_count: number
+}
+
+/**
  * User wallet data
  */
 export interface UserWalletData {

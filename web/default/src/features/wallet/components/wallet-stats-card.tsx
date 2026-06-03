@@ -22,12 +22,16 @@ import type { BillingDisplayMode } from '@/lib/billing-display'
 import { getBillingDisplayText } from '@/lib/billing-display'
 import { formatQuota } from '@/lib/format'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { UserWalletData } from '../types'
+import type {
+  SubscriptionQuotaSummary,
+  UserWalletData,
+} from '../types'
 
 interface WalletStatsCardProps {
   user: UserWalletData | null
   loading?: boolean
   billingDisplayMode?: BillingDisplayMode
+  subscriptionQuotaSummary?: SubscriptionQuotaSummary
 }
 
 export function WalletStatsCard(props: WalletStatsCardProps) {
@@ -48,19 +52,25 @@ export function WalletStatsCard(props: WalletStatsCardProps) {
     )
   }
 
+  const walletQuota = Math.max(0, Number(props.user?.quota ?? 0))
+  const subscriptionQuota = Math.max(
+    0,
+    Number(props.subscriptionQuotaSummary?.available_quota ?? 0)
+  )
+  const hasUnlimitedSubscription =
+    props.subscriptionQuotaSummary?.has_unlimited_quota === true
+  const totalAvailableValue = hasUnlimitedSubscription
+    ? t('Unlimited')
+    : formatQuota(walletQuota + subscriptionQuota)
+  const totalAvailableDescription = hasUnlimitedSubscription
+    ? `${getBillingDisplayText('walletBalance', t, props.billingDisplayMode)}: ${formatQuota(walletQuota)} · ${getBillingDisplayText('subscriptionAvailable', t, props.billingDisplayMode)}: ${t('Unlimited')}`
+    : `${getBillingDisplayText('walletBalance', t, props.billingDisplayMode)}: ${formatQuota(walletQuota)} · ${getBillingDisplayText('subscriptionAvailable', t, props.billingDisplayMode)}: ${formatQuota(subscriptionQuota)}`
+
   const stats = [
     {
-      label: getBillingDisplayText(
-        'currentBalance',
-        t,
-        props.billingDisplayMode
-      ),
-      value: formatQuota(props.user?.quota ?? 0),
-      description: getBillingDisplayText(
-        'remainingQuota',
-        t,
-        props.billingDisplayMode
-      ),
+      label: getBillingDisplayText('totalAvailable', t, props.billingDisplayMode),
+      value: totalAvailableValue,
+      description: totalAvailableDescription,
       icon: WalletCards,
     },
     {

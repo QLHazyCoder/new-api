@@ -9,7 +9,10 @@ export type BillingDisplayTextKey =
   | 'addFunds'
   | 'orderHistory'
   | 'balance'
+  | 'totalAvailable'
   | 'currentBalance'
+  | 'walletBalance'
+  | 'subscriptionAvailable'
   | 'remainingQuota'
   | 'totalConsumedQuota'
   | 'quota'
@@ -33,7 +36,10 @@ const DEFAULT_KEYS: Record<BillingDisplayTextKey, string> = {
   addFunds: 'Add Funds',
   orderHistory: 'Order History',
   balance: 'Balance',
+  totalAvailable: 'Total Available',
   currentBalance: 'Current Balance',
+  walletBalance: 'Wallet Balance',
+  subscriptionAvailable: 'Subscription Available',
   remainingQuota: 'Remaining quota',
   totalConsumedQuota: 'Total consumed quota',
   quota: 'Quota',
@@ -58,7 +64,10 @@ const PUBLIC_WELFARE_KEYS: Record<BillingDisplayTextKey, string> = {
   addFunds: 'Support Project',
   orderHistory: 'Support Records',
   balance: 'Available Points',
+  totalAvailable: 'Total Available Points',
   currentBalance: 'Current Points',
+  walletBalance: 'Wallet Points',
+  subscriptionAvailable: 'Subscription Points Available',
   remainingQuota: 'Remaining Model Points',
   totalConsumedQuota: 'Total Consumed Points',
   quota: 'Model Points',

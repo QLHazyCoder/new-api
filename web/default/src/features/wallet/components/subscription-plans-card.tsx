@@ -59,11 +59,16 @@ import type {
   PlanRecord,
   UserSubscriptionRecord,
 } from '@/features/subscriptions/types'
-import type { PaymentMethod, TopupInfo } from '../types'
+import type {
+  PaymentMethod,
+  SubscriptionQuotaSummary,
+  TopupInfo,
+} from '../types'
 
 interface SubscriptionPlansCardProps {
   topupInfo: TopupInfo | null
   onAvailabilityChange?: (available: boolean) => void
+  onQuotaSummaryChange?: (summary: SubscriptionQuotaSummary) => void
   billingDisplayMode?: BillingDisplayMode
   userQuota?: number
   onPurchaseSuccess?: () => void | Promise<void>
@@ -97,6 +102,7 @@ function getBillingPreferenceLabel(
 export function SubscriptionPlansCard({
   topupInfo,
   onAvailabilityChange,
+  onQuotaSummaryChange,
   billingDisplayMode,
   userQuota,
   onPurchaseSuccess,
@@ -231,6 +237,41 @@ export function SubscriptionPlansCard({
   useEffect(() => {
     onAvailabilityChange?.(isAvailable)
   }, [isAvailable, onAvailabilityChange])
+
+  const subscriptionQuotaSummary = useMemo<SubscriptionQuotaSummary>(() => {
+    let availableQuota = 0
+    let hasUnlimitedQuota = false
+    let activeSubscriptionCount = 0
+    const now = Date.now() / 1000
+
+    for (const record of activeSubscriptions) {
+      const subscription = record.subscription
+      if (!subscription) continue
+      if (subscription.status !== 'active') continue
+      if ((subscription.end_time || 0) <= now) continue
+
+      activeSubscriptionCount += 1
+      const totalAmount = Number(subscription.amount_total || 0)
+      const usedAmount = Math.max(0, Number(subscription.amount_used || 0))
+
+      if (totalAmount <= 0) {
+        hasUnlimitedQuota = true
+        continue
+      }
+
+      availableQuota += Math.max(0, totalAmount - usedAmount)
+    }
+
+    return {
+      available_quota: availableQuota,
+      has_unlimited_quota: hasUnlimitedQuota,
+      active_subscription_count: activeSubscriptionCount,
+    }
+  }, [activeSubscriptions])
+
+  useEffect(() => {
+    onQuotaSummaryChange?.(subscriptionQuotaSummary)
+  }, [onQuotaSummaryChange, subscriptionQuotaSummary])
 
   const planTitleMap = useMemo(() => {
     const map = new Map<number, string>()

@@ -48,6 +48,7 @@ import type {
   PaymentMethod,
   PresetAmount,
   CreemProduct,
+  SubscriptionQuotaSummary,
 } from './types'
 
 interface WalletProps {
@@ -70,6 +71,12 @@ export function Wallet(props: WalletProps) {
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
+  const [subscriptionQuotaSummary, setSubscriptionQuotaSummary] =
+    useState<SubscriptionQuotaSummary>({
+      available_quota: 0,
+      has_unlimited_quota: false,
+      active_subscription_count: 0,
+    })
 
   const { status } = useStatus()
   const { billingDisplay, currency } = useSystemConfig()
@@ -287,6 +294,13 @@ export function Wallet(props: WalletProps) {
     []
   )
 
+  const handleSubscriptionQuotaSummaryChange = useCallback(
+    (summary: SubscriptionQuotaSummary) => {
+      setSubscriptionQuotaSummary(summary)
+    },
+    []
+  )
+
   return (
     <>
       <SectionPageLayout>
@@ -302,6 +316,7 @@ export function Wallet(props: WalletProps) {
               user={user}
               loading={userLoading}
               billingDisplayMode={billingDisplayMode}
+              subscriptionQuotaSummary={subscriptionQuotaSummary}
             />
 
             <div
@@ -351,6 +366,7 @@ export function Wallet(props: WalletProps) {
               <SubscriptionPlansCard
                 topupInfo={topupInfo}
                 onAvailabilityChange={handleSubscriptionAvailabilityChange}
+                onQuotaSummaryChange={handleSubscriptionQuotaSummaryChange}
                 billingDisplayMode={billingDisplayMode}
                 userQuota={user?.quota}
                 onPurchaseSuccess={fetchUser}
