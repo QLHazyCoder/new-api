@@ -161,6 +161,10 @@ function ModelSignalsSection(props: {
   output: Modality[]
 }) {
   const { t } = useTranslation()
+  const hasCapabilities = props.capabilities.length > 0
+  const hasModalities = props.input.length > 0 || props.output.length > 0
+
+  if (!hasCapabilities && !hasModalities) return null
 
   return (
     <section>
@@ -168,8 +172,12 @@ function ModelSignalsSection(props: {
         {t('Capabilities')} / {t('Supported modalities')}
       </SectionTitle>
       <div className='grid gap-3 rounded-xl border p-3 @2xl/details:grid-cols-[minmax(0,1.5fr)_minmax(260px,1fr)]'>
-        <CompactCapabilityList capabilities={props.capabilities} />
-        <CompactModalities input={props.input} output={props.output} />
+        {hasCapabilities && (
+          <CompactCapabilityList capabilities={props.capabilities} />
+        )}
+        {hasModalities && (
+          <CompactModalities input={props.input} output={props.output} />
+        )}
       </div>
     </section>
   )

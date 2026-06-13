@@ -23,52 +23,8 @@ import { hashStringToSeed, seededRandom } from './seed'
 // Model metadata inference
 // ----------------------------------------------------------------------------
 //
-// Hard specification fields, such as context length and release dates, are
-// displayed only when the backend returns explicit model-management values.
-// The remaining inference below is limited to soft capability/modality hints.
-
-const TEXT_INPUT_ENDPOINTS = new Set([
-  'openai',
-  'openai-response',
-  'anthropic',
-  'gemini',
-  'embeddings',
-  'jina-rerank',
-])
-
-const IMAGE_OUTPUT_ENDPOINTS = new Set(['image-generation'])
-const VIDEO_OUTPUT_ENDPOINTS = new Set(['openai-video'])
-const EMBEDDING_ENDPOINTS = new Set(['embeddings', 'jina-rerank'])
-
-const REASONING_NAME_PATTERNS = [
-  /^o[1-4](?:[-:_].+)?$/i,
-  /reasoning/i,
-  /thinking/i,
-  /qwq/i,
-  /deepseek-r\d/i,
-  /grok.*-(?:thinking|reasoning)/i,
-]
-
-const VISION_NAME_PATTERNS = [
-  /vision/i,
-  /vl(?:[-_]|$)/i,
-  /multimodal/i,
-  /-omni/i,
-]
-
-const AUDIO_NAME_PATTERNS = [
-  /audio/i,
-  /whisper/i,
-  /tts/i,
-  /voice/i,
-  /-realtime/i,
-]
-
-const VIDEO_NAME_PATTERNS = [/video/i, /sora/i, /veo/i, /kling/i, /pika/i]
-
-const CODE_NAME_PATTERNS = [/code/i, /-coder/i]
-
-const WEB_SEARCH_PATTERNS = [/web[-_ ]?search/i, /-online/i, /perplexity/i]
+// Model metadata shown as factual display data comes only from explicit
+// model-management configuration. Tags may still opt into capability badges.
 
 const TAG_TO_CAPABILITY: Record<string, ModelCapability> = {
   vision: 'vision',
@@ -86,16 +42,6 @@ const TAG_TO_CAPABILITY: Record<string, ModelCapability> = {
   embedding: 'embeddings',
 }
 
-const TAG_TO_MODALITY: Record<string, Modality> = {
-  text: 'text',
-  image: 'image',
-  audio: 'audio',
-  video: 'video',
-  file: 'file',
-  document: 'file',
-  pdf: 'file',
-}
-
 function parseModelTags(tagsString?: string): string[] {
   if (!tagsString) return []
   return tagsString
@@ -104,96 +50,8 @@ function parseModelTags(tagsString?: string): string[] {
     .filter(Boolean)
 }
 
-function nameMatches(name: string, patterns: RegExp[]): boolean {
-  return patterns.some((re) => re.test(name))
-}
-
-function inferInputModalities(
-  model: PricingModel,
-  tags: string[],
-  endpoints: string[],
-  name: string
-): Modality[] {
-  const set = new Set<Modality>()
-
-  if (
-    endpoints.length === 0 ||
-    endpoints.some((e) => TEXT_INPUT_ENDPOINTS.has(e))
-  ) {
-    set.add('text')
-  }
-
-  if (model.image_ratio != null || nameMatches(name, VISION_NAME_PATTERNS)) {
-    set.add('image')
-  }
-  if (model.audio_ratio != null || nameMatches(name, AUDIO_NAME_PATTERNS)) {
-    set.add('audio')
-  }
-  if (nameMatches(name, VIDEO_NAME_PATTERNS)) {
-    set.add('video')
-  }
-
-  for (const tag of tags) {
-    const m = TAG_TO_MODALITY[tag]
-    if (m) set.add(m)
-  }
-
-  if (set.size === 0) set.add('text')
-  return ordered(set)
-}
-
-function inferOutputModalities(
-  model: PricingModel,
-  endpoints: string[],
-  name: string
-): Modality[] {
-  const set = new Set<Modality>()
-
-  if (endpoints.some((e) => IMAGE_OUTPUT_ENDPOINTS.has(e))) set.add('image')
-  if (endpoints.some((e) => VIDEO_OUTPUT_ENDPOINTS.has(e))) set.add('video')
-  if (endpoints.some((e) => EMBEDDING_ENDPOINTS.has(e))) set.add('text')
-
-  if (
-    model.audio_completion_ratio != null ||
-    /tts|voice|audio-out/i.test(name)
-  ) {
-    set.add('audio')
-  }
-
-  if (set.size === 0) set.add('text')
-  return ordered(set)
-}
-
-function inferCapabilities(
-  model: PricingModel,
-  tags: string[],
-  endpoints: string[],
-  name: string,
-  outputs: Modality[],
-  inputs: Modality[]
-): ModelCapability[] {
+function capabilitiesFromTags(tags: string[]): ModelCapability[] {
   const set = new Set<ModelCapability>()
-
-  if (outputs.includes('text') && !endpoints.includes('image-generation')) {
-    set.add('streaming')
-    set.add('system_prompt')
-  }
-  if (
-    !endpoints.includes('image-generation') &&
-    !endpoints.includes('embeddings') &&
-    !endpoints.includes('jina-rerank')
-  ) {
-    set.add('function_calling')
-    set.add('tools')
-    set.add('json_mode')
-    set.add('structured_output')
-  }
-  if (inputs.includes('image')) set.add('vision')
-  if (model.cache_ratio != null) set.add('caching')
-  if (endpoints.some((e) => EMBEDDING_ENDPOINTS.has(e))) set.add('embeddings')
-  if (nameMatches(name, REASONING_NAME_PATTERNS)) set.add('reasoning')
-  if (nameMatches(name, CODE_NAME_PATTERNS)) set.add('code_interpreter')
-  if (nameMatches(name, WEB_SEARCH_PATTERNS)) set.add('web_search')
 
   for (const tag of tags) {
     const cap = TAG_TO_CAPABILITY[tag]
@@ -241,23 +99,15 @@ export type ModelMetadata = {
 
 /**
  * Build model metadata for display. Hard specification fields come only from
- * model management configuration; inferred values are limited to soft
- * capability/modality hints so the UI does not present guesses as facts.
+ * model management configuration, and capability badges come only from
+ * explicitly configured tags.
  */
 export function inferModelMetadata(model: PricingModel): ModelMetadata {
-  const name = model.model_name || ''
   const tags = parseModelTags(model.tags)
-  const endpoints = model.supported_endpoint_types || []
 
   const configuredInputs = normalizeModalities(model.input_modalities)
   const configuredOutputs = normalizeModalities(model.output_modalities)
-  const inputs =
-    configuredInputs ?? inferInputModalities(model, tags, endpoints, name)
-  const outputs =
-    configuredOutputs ?? inferOutputModalities(model, endpoints, name)
-  const capabilities =
-    model.capabilities ??
-    inferCapabilities(model, tags, endpoints, name, outputs, inputs)
+  const capabilities = model.capabilities ?? capabilitiesFromTags(tags)
 
   return {
     context_length: normalizePositiveNumber(model.context_length),
@@ -265,8 +115,8 @@ export function inferModelMetadata(model: PricingModel): ModelMetadata {
     knowledge_cutoff: model.knowledge_cutoff || undefined,
     release_date: model.release_date || undefined,
     parameter_count: model.parameter_count || undefined,
-    input_modalities: inputs,
-    output_modalities: outputs,
+    input_modalities: configuredInputs ?? [],
+    output_modalities: configuredOutputs ?? [],
     capabilities,
   }
 }
