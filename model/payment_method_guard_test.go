@@ -226,6 +226,36 @@ func TestCompleteTopUp_RejectsMismatchedPaymentProviderWithoutReward(t *testing.
 	assert.Zero(t, affHistory)
 }
 
+func TestUpdateOption_RejectsInvalidTopUpInviteRewardPercent(t *testing.T) {
+	oldPercent := common.TopUpInviteRewardPercent
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = map[string]string{}
+	}
+	oldOptionValue, hadOptionValue := common.OptionMap["TopUpInviteRewardPercent"]
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.TopUpInviteRewardPercent = oldPercent
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		if !hadOptionValue {
+			delete(common.OptionMap, "TopUpInviteRewardPercent")
+		} else {
+			common.OptionMap["TopUpInviteRewardPercent"] = oldOptionValue
+		}
+	})
+
+	common.TopUpInviteRewardPercent = 3
+	err := updateOptionMap("TopUpInviteRewardPercent", "NaN")
+	require.Error(t, err)
+	assert.Equal(t, 3.0, common.TopUpInviteRewardPercent)
+
+	err = updateOptionMap("TopUpInviteRewardPercent", "12.5")
+	require.NoError(t, err)
+	assert.Equal(t, 12.5, common.TopUpInviteRewardPercent)
+	assert.Equal(t, "12.5", common.OptionMap["TopUpInviteRewardPercent"])
+}
+
 func TestRechargeWaffoPancake_RejectsMismatchedPaymentMethod(t *testing.T) {
 	truncateTables(t)
 

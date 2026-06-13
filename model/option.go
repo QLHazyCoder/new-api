@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -213,6 +214,13 @@ func UpdateOption(key string, value string) error {
 		}
 		value = normalizedValue
 	}
+	if key == "TopUpInviteRewardPercent" {
+		normalizedValue, _, err := normalizeTopUpInviteRewardPercentOptionValue(value)
+		if err != nil {
+			return err
+		}
+		value = normalizedValue
+	}
 
 	// Save to database first
 	option := Option{
@@ -242,6 +250,14 @@ func UpdateOptionsBulk(values map[string]string) error {
 	for k, v := range values {
 		if k == "LogRetentionDays" {
 			normalizedValue, _, err := normalizeLogRetentionDaysOptionValue(v)
+			if err != nil {
+				return err
+			}
+			normalizedValues[k] = normalizedValue
+			continue
+		}
+		if k == "TopUpInviteRewardPercent" {
+			normalizedValue, _, err := normalizeTopUpInviteRewardPercentOptionValue(v)
 			if err != nil {
 				return err
 			}
@@ -284,6 +300,15 @@ func updateOptionMap(key string, value string) (err error) {
 			return err
 		}
 		common.LogRetentionDays = intValue
+		common.OptionMap[key] = normalizedValue
+		return nil
+	}
+	if key == "TopUpInviteRewardPercent" {
+		normalizedValue, floatValue, err := normalizeTopUpInviteRewardPercentOptionValue(value)
+		if err != nil {
+			return err
+		}
+		common.TopUpInviteRewardPercent = floatValue
 		common.OptionMap[key] = normalizedValue
 		return nil
 	}
@@ -534,8 +559,6 @@ func updateOptionMap(key string, value string) (err error) {
 		common.QuotaForInviter, _ = strconv.Atoi(value)
 	case "QuotaForInvitee":
 		common.QuotaForInvitee, _ = strconv.Atoi(value)
-	case "TopUpInviteRewardPercent":
-		common.TopUpInviteRewardPercent, _ = strconv.ParseFloat(value, 64)
 	case "QuotaRemindThreshold":
 		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
 	case "PreConsumedQuota":
@@ -616,6 +639,15 @@ func normalizeLogRetentionDaysOptionValue(value string) (string, int, error) {
 		return "", 0, fmt.Errorf("LogRetentionDays must be less than or equal to %d", common.MaxLogRetentionDays)
 	}
 	return strconv.Itoa(intValue), intValue, nil
+}
+
+func normalizeTopUpInviteRewardPercentOptionValue(value string) (string, float64, error) {
+	normalizedValue := strings.TrimSpace(value)
+	floatValue, err := strconv.ParseFloat(normalizedValue, 64)
+	if err != nil || math.IsNaN(floatValue) || math.IsInf(floatValue, 0) || floatValue < 0 {
+		return "", 0, fmt.Errorf("TopUpInviteRewardPercent must be a non-negative finite number")
+	}
+	return strconv.FormatFloat(floatValue, 'f', -1, 64), floatValue, nil
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理
