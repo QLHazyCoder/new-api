@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { PasswordInput } from '@/components/password-input'
 import { updateUserSettings } from '../../api'
 import {
@@ -55,6 +56,8 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
   const { t } = useTranslation()
   const isAdmin = (profile?.role ?? 0) >= ROLE.ADMIN
   const [loading, setLoading] = useState(false)
+  const [disableIpLogConfirmOpen, setDisableIpLogConfirmOpen] =
+    useState(false)
   const [settings, setSettings] = useState<UserSettings>({
     notify_type: 'email',
     quota_warning_threshold: DEFAULT_QUOTA_WARNING_THRESHOLD,
@@ -66,7 +69,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
     gotify_token: '',
     gotify_priority: 5,
     accept_unset_model_ratio_model: false,
-    record_ip_log: false,
+    record_ip_log: true,
     upstream_model_update_notify_enabled: false,
   })
 
@@ -94,7 +97,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
         gotify_priority: parsed.gotify_priority ?? 5,
         accept_unset_model_ratio_model:
           parsed.accept_unset_model_ratio_model || false,
-        record_ip_log: parsed.record_ip_log || false,
+        record_ip_log: parsed.record_ip_log ?? true,
         upstream_model_update_notify_enabled:
           parsed.upstream_model_update_notify_enabled || false,
       })
@@ -117,6 +120,14 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleRecordIpLogChange = (checked: boolean) => {
+    if (!checked) {
+      setDisableIpLogConfirmOpen(true)
+      return
+    }
+    updateField('record_ip_log', true)
   }
 
   return (
@@ -376,8 +387,8 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
           <Switch
             id='recordIp'
             className='shrink-0'
-            checked={settings.record_ip_log}
-            onCheckedChange={(checked) => updateField('record_ip_log', checked)}
+            checked={settings.record_ip_log ?? true}
+            onCheckedChange={handleRecordIpLogChange}
           />
         </div>
       </div>
@@ -389,6 +400,22 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
           {loading ? t('Saving...') : t('Save Settings')}
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={disableIpLogConfirmOpen}
+        onOpenChange={setDisableIpLogConfirmOpen}
+        title={t('Disable IP logging?')}
+        desc={t(
+          'After disabling IP logging, if an issue occurs, it may not be possible to investigate it using IP records. Please choose carefully.'
+        )}
+        cancelBtnText={t('Keep Enabled')}
+        confirmText={t('Disable')}
+        destructive
+        handleConfirm={() => {
+          updateField('record_ip_log', false)
+          setDisableIpLogConfirmOpen(false)
+        }}
+      />
     </div>
   )
 }

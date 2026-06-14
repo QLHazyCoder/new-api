@@ -24,6 +24,7 @@ import {
   Card,
   Avatar,
   Form,
+  Modal,
   Radio,
   Toast,
   Tabs,
@@ -227,6 +228,26 @@ const NotificationSettings = ({
   // 处理表单字段变化
   const handleFormChange = (field, value) => {
     handleNotificationSettingChange(field, value);
+  };
+
+  const handleRecordIpLogChange = (value) => {
+    if (value) {
+      handleFormChange('recordIpLog', true);
+      return;
+    }
+    formApiRef.current?.setValue?.('recordIpLog', true);
+    Modal.confirm({
+      title: t('关闭 IP 记录？'),
+      content: t(
+        '关闭后，如果遇到问题无法通过 IP 辅助核查问题，请谨慎选择',
+      ),
+      okText: t('确认关闭'),
+      cancelText: t('保持开启'),
+      onOk: () => {
+        handleFormChange('recordIpLog', false);
+        formApiRef.current?.setValue?.('recordIpLog', false);
+      },
+    });
   };
 
   // 检查功能是否被管理员允许
@@ -789,7 +810,7 @@ const NotificationSettings = ({
                   label={t('记录请求与错误日志IP')}
                   checkedText={t('开')}
                   uncheckedText={t('关')}
-                  onChange={(value) => handleFormChange('recordIpLog', value)}
+                  onChange={handleRecordIpLogChange}
                   extraText={t(
                     '开启后，仅"消费"和"错误"日志将记录您的客户端IP地址',
                   )}
