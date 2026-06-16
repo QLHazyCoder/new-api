@@ -461,6 +461,33 @@ export function formatQuotaWithCurrency(
 }
 
 /**
+ * Convert raw quota units into the editable display amount used by balance
+ * fields. In token display mode, the display amount is the raw quota value.
+ */
+export function quotaToDisplayAmount(quota: number | null | undefined): number {
+  if (quota == null || Number.isNaN(quota)) return 0
+
+  const { config, meta } = getCurrencyDisplay()
+  if (meta.kind === 'tokens') return quota
+
+  return (quota / config.quotaPerUnit) * meta.exchangeRate
+}
+
+/**
+ * Convert a user-entered balance display amount into raw quota units for API
+ * storage and backend threshold comparison. A value of 0 intentionally remains
+ * 0 so the backend can treat it as "disable reminder".
+ */
+export function displayAmountToQuota(amount: number | null | undefined): number {
+  if (amount == null || Number.isNaN(amount) || amount === 0) return 0
+
+  const { config, meta } = getCurrencyDisplay()
+  if (meta.kind === 'tokens') return Math.round(amount)
+
+  return Math.round((amount / meta.exchangeRate) * config.quotaPerUnit)
+}
+
+/**
  * Get the current currency label for UI display.
  *
  * Returns a simple string label representing the current display currency.

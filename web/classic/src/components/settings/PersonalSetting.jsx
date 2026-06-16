@@ -47,6 +47,10 @@ import AccountDeleteModal from './personal/modals/AccountDeleteModal';
 import ChangePasswordModal from './personal/modals/ChangePasswordModal';
 import SecureVerificationModal from '../common/modals/SecureVerificationModal';
 import { useSecureVerification } from '../../hooks/common/useSecureVerification';
+import {
+  displayAmountToQuota,
+  quotaToDisplayAmount,
+} from '../../helpers/quota';
 
 const PersonalSetting = () => {
   const [userState, userDispatch] = useContext(UserContext);
@@ -84,7 +88,7 @@ const PersonalSetting = () => {
   ] = useState(null);
   const [notificationSettings, setNotificationSettings] = useState({
     warningType: 'email',
-    warningThreshold: 100000,
+    warningThreshold: 0,
     webhookUrl: '',
     webhookSecret: '',
     notificationEmail: '',
@@ -180,11 +184,19 @@ const PersonalSetting = () => {
   }, [disableButton, countdown]);
 
   useEffect(() => {
+    const defaultAmount = quotaToDisplayAmount(
+      Number(status?.quota_remind_threshold ?? 500000),
+    );
     if (userState?.user?.setting) {
       const settings = JSON.parse(userState.user.setting);
+      const threshold =
+        settings.quota_warning_threshold ?? status?.quota_remind_threshold ?? 500000;
       setNotificationSettings({
         warningType: settings.notify_type || 'email',
-        warningThreshold: settings.quota_warning_threshold || 500000,
+        warningThreshold:
+          settings.quota_warning_threshold == null
+            ? defaultAmount
+            : quotaToDisplayAmount(threshold),
         webhookUrl: settings.webhook_url || '',
         webhookSecret: settings.webhook_secret || '',
         notificationEmail: settings.notification_email || '',
@@ -199,8 +211,13 @@ const PersonalSetting = () => {
           settings.accept_unset_model_ratio_model || false,
         recordIpLog: settings.record_ip_log ?? true,
       });
+    } else {
+      setNotificationSettings((prev) => ({
+        ...prev,
+        warningThreshold: defaultAmount,
+      }));
     }
-  }, [userState?.user?.setting]);
+  }, [userState?.user?.setting, status?.quota_remind_threshold]);
 
   const handleInputChange = (name, value) => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
@@ -510,8 +527,8 @@ const PersonalSetting = () => {
     try {
       const res = await API.put('/api/user/setting', {
         notify_type: notificationSettings.warningType,
-        quota_warning_threshold: parseFloat(
-          notificationSettings.warningThreshold,
+        quota_warning_threshold: displayAmountToQuota(
+          parseFloat(notificationSettings.warningThreshold),
         ),
         webhook_url: notificationSettings.webhookUrl,
         webhook_secret: notificationSettings.webhookSecret,

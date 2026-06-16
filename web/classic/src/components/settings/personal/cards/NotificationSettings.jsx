@@ -36,11 +36,13 @@ import {
 import { IconMail, IconKey, IconBell, IconLink } from '@douyinfe/semi-icons';
 import { ShieldCheck, Bell, DollarSign, Settings } from 'lucide-react';
 import {
-  renderQuotaWithPrompt,
   API,
   showSuccess,
   showError,
 } from '../../../../helpers';
+import {
+  quotaToDisplayAmount,
+} from '../../../../helpers/quota';
 import CodeViewer from '../../../playground/CodeViewer';
 import { StatusContext } from '../../../../context/Status';
 import { UserContext } from '../../../../context/User';
@@ -460,22 +462,29 @@ const NotificationSettings = ({
                   label={
                     <span>
                       {t('额度预警阈值')}{' '}
-                      {renderQuotaWithPrompt(
-                        notificationSettings.warningThreshold,
-                      )}
+                      {t('（余额）')}
                     </span>
                   }
-                  placeholder={t('请输入预警额度')}
+                  placeholder={t('请输入预警余额')}
                   data={[
-                    { value: 100000, label: '0.2$' },
-                    { value: 500000, label: '1$' },
-                    { value: 1000000, label: '2$' },
-                    { value: 5000000, label: '10$' },
+                    { value: 0, label: t('关闭提醒') },
+                    {
+                      value: quotaToDisplayAmount(500000),
+                      label: '$1',
+                    },
+                    {
+                      value: quotaToDisplayAmount(2500000),
+                      label: '$5',
+                    },
+                    {
+                      value: quotaToDisplayAmount(5000000),
+                      label: '$10',
+                    },
                   ]}
                   onChange={(val) => handleFormChange('warningThreshold', val)}
                   prefix={<IconBell />}
                   extraText={t(
-                    '当钱包或订阅剩余额度低于此数值时，系统将通过选择的方式发送通知',
+                    '当钱包或订阅剩余余额低于此金额时，系统将通过选择的方式发送通知；填 0 则关闭提醒',
                   )}
                   style={{ width: '100%', maxWidth: '300px' }}
                   rules={[
@@ -483,8 +492,8 @@ const NotificationSettings = ({
                     {
                       validator: (rule, value) => {
                         const numValue = Number(value);
-                        if (isNaN(numValue) || numValue <= 0) {
-                          return Promise.reject(t('预警阈值必须为正数'));
+                        if (isNaN(numValue) || numValue < 0) {
+                          return Promise.reject(t('预警阈值必须为非负数'));
                         }
                         return Promise.resolve();
                       },

@@ -118,6 +118,7 @@ export interface SystemStatus {
     display_token_stat_enabled?: boolean
     perf_metrics_enabled?: boolean
     quota_per_unit?: number
+    quota_remind_threshold?: number
     quota_display_type?: string
     usd_exchange_rate?: number
     custom_currency_symbol?: string
@@ -162,6 +163,7 @@ export interface SystemStatus {
   display_token_stat_enabled?: boolean
   perf_metrics_enabled?: boolean
   quota_per_unit?: number
+  quota_remind_threshold?: number
   quota_display_type?: string
   usd_exchange_rate?: number
   custom_currency_symbol?: string

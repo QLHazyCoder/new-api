@@ -99,6 +99,17 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 	user.Setting = string(settingBytes)
 }
 
+func UpdateUserQuotaWarningNotified(userId int, notified bool) error {
+	user, err := GetUserById(userId, true)
+	if err != nil {
+		return err
+	}
+	settings := user.GetSetting()
+	settings.QuotaWarningNotified = &notified
+	user.SetSetting(settings)
+	return user.Update(false)
+}
+
 // 根据用户角色生成默认的边栏配置
 func generateDefaultSidebarConfigForRole(userRole int) string {
 	defaultConfig := map[string]interface{}{}

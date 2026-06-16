@@ -28,6 +28,8 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { PasswordInput } from '@/components/password-input'
+import { displayAmountToQuota, quotaToDisplayAmount } from '@/lib/currency'
+import { useStatus } from '@/hooks/use-status'
 import { updateUserSettings } from '../../api'
 import {
   DEFAULT_QUOTA_WARNING_THRESHOLD,
@@ -54,13 +56,14 @@ interface NotificationTabProps {
 
 export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
   const { t } = useTranslation()
+  const { status } = useStatus()
   const isAdmin = (profile?.role ?? 0) >= ROLE.ADMIN
   const [loading, setLoading] = useState(false)
   const [disableIpLogConfirmOpen, setDisableIpLogConfirmOpen] =
     useState(false)
   const [settings, setSettings] = useState<UserSettings>({
     notify_type: 'email',
-    quota_warning_threshold: DEFAULT_QUOTA_WARNING_THRESHOLD,
+    quota_warning_threshold: 0,
     notification_email: '',
     webhook_url: '',
     webhook_secret: '',
@@ -82,12 +85,18 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
   )
 
   useEffect(() => {
+    const defaultThreshold = Number(
+      status?.quota_remind_threshold ??
+        status?.data?.quota_remind_threshold ??
+        DEFAULT_QUOTA_WARNING_THRESHOLD
+    )
     if (profile?.setting) {
       const parsed = parseUserSettings(profile.setting)
+      const threshold =
+        parsed.quota_warning_threshold ?? defaultThreshold
       setSettings({
         notify_type: parsed.notify_type || 'email',
-        quota_warning_threshold:
-          parsed.quota_warning_threshold ?? DEFAULT_QUOTA_WARNING_THRESHOLD,
+        quota_warning_threshold: quotaToDisplayAmount(threshold),
         notification_email: parsed.notification_email ?? '',
         webhook_url: parsed.webhook_url ?? '',
         webhook_secret: parsed.webhook_secret ?? '',
@@ -101,13 +110,22 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
         upstream_model_update_notify_enabled:
           parsed.upstream_model_update_notify_enabled || false,
       })
+    } else {
+      setSettings((prev) => ({
+        ...prev,
+        quota_warning_threshold: quotaToDisplayAmount(defaultThreshold),
+      }))
     }
-  }, [profile])
+  }, [profile, status])
 
   const handleSave = async () => {
     try {
       setLoading(true)
-      const response = await updateUserSettings(settings)
+      const threshold = Number(settings.quota_warning_threshold ?? 0)
+      const response = await updateUserSettings({
+        ...settings,
+        quota_warning_threshold: displayAmountToQuota(threshold),
+      })
 
       if (response.success) {
         toast.success(t('Settings updated successfully'))
@@ -182,9 +200,11 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
             updateField('quota_warning_threshold', Number(e.target.value))
           }
           placeholder={t('Enter threshold')}
+          min={0}
+          step='any'
         />
         <p className='text-muted-foreground text-xs'>
-          {t('Get notified when balance falls below this value')}
+          {t('Get notified when balance falls below this value. Set 0 to disable.')}
         </p>
       </div>
 

@@ -1862,6 +1862,7 @@
     "Generation was interrupted": "Generation was interrupted",
     "Generic cache": "Generic cache",
     "Get notified when balance falls below this value": "Get notified when balance falls below this value",
+    "Get notified when balance falls below this value. Set 0 to disable.": "Get notified when balance falls below this value. Set 0 to disable.",
     "Get one here": "Get one here",
     "Get started": "Get started",
     "Get Started": "Get Started",
