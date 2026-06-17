@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   DEFAULT_CONFIG,
   DEFAULT_IMAGE_CONFIG,
@@ -35,6 +35,7 @@ import {
   savePlaygroundMode,
   loadMessages,
   saveMessages,
+  persistInterruptedImageTasks,
 } from '../lib'
 import type {
   ImageGenerationConfig,
@@ -80,9 +81,28 @@ export function usePlaygroundState() {
   const [imageTasks, setImageTasks] = useState<ImageTask[]>(() => {
     return loadImageTasks()
   })
+  const imageTasksRef = useRef(imageTasks)
 
   const [models, setModels] = useState<ModelOption[]>([])
   const [groups, setGroups] = useState<GroupOption[]>([])
+
+  useEffect(() => {
+    imageTasksRef.current = imageTasks
+  }, [imageTasks])
+
+  useEffect(() => {
+    const handlePageExit = () => {
+      persistInterruptedImageTasks(imageTasksRef.current)
+    }
+
+    window.addEventListener('pagehide', handlePageExit)
+    window.addEventListener('beforeunload', handlePageExit)
+
+    return () => {
+      window.removeEventListener('pagehide', handlePageExit)
+      window.removeEventListener('beforeunload', handlePageExit)
+    }
+  }, [])
 
   // Update config with automatic save
   const setMode = useCallback((value: PlaygroundMode) => {

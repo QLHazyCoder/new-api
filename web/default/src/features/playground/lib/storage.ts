@@ -174,15 +174,6 @@ function sanitizeImageTasksForStorage(tasks: ImageTask[]): ImageTask[] {
   let persistedBase64Count = 0
 
   return tasks.slice(0, MAX_IMAGE_TASKS).map((task) => {
-    const status =
-      task.status === 'running' ? ('interrupted' as const) : task.status
-    const error =
-      task.status === 'running' ? 'Generation was interrupted' : task.error
-    const finishedAt =
-      task.status === 'running'
-        ? (task.finishedAt ?? Date.now())
-        : task.finishedAt
-
     let image = task.image
     if (image?.b64_json) {
       persistedBase64Count += 1
@@ -197,7 +188,7 @@ function sanitizeImageTasksForStorage(tasks: ImageTask[]): ImageTask[] {
       id: task.id,
       prompt: task.prompt,
       config: task.config,
-      status,
+      status: task.status,
       createdAt: task.createdAt,
     }
 
@@ -212,11 +203,24 @@ function sanitizeImageTasksForStorage(tasks: ImageTask[]): ImageTask[] {
       }))
     }
     if (image) sanitized.image = image
-    if (error) sanitized.error = error
+    if (task.error) sanitized.error = task.error
     if (task.errorCode) sanitized.errorCode = task.errorCode
-    if (finishedAt) sanitized.finishedAt = finishedAt
+    if (task.finishedAt) sanitized.finishedAt = task.finishedAt
 
     return sanitized
+  })
+}
+
+export function markRunningImageTasksInterrupted(tasks: ImageTask[]): ImageTask[] {
+  return tasks.map((task) => {
+    if (task.status !== 'running') return task
+
+    return {
+      ...task,
+      status: 'interrupted',
+      error: task.error || 'Generation was interrupted',
+      finishedAt: task.finishedAt ?? Date.now(),
+    }
   })
 }
 
@@ -248,6 +252,10 @@ export function saveImageTasks(tasks: ImageTask[]): void {
     // eslint-disable-next-line no-console
     console.error('Failed to save image tasks:', error)
   }
+}
+
+export function persistInterruptedImageTasks(tasks: ImageTask[]): void {
+  saveImageTasks(markRunningImageTasksInterrupted(tasks))
 }
 
 /**

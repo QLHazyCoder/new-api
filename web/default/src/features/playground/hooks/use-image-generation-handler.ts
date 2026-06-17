@@ -27,6 +27,7 @@ import {
   buildImageGenerationPayload,
   normalizePlaygroundImageConfig,
   normalizeImageGenerationCount,
+  saveImageTasks,
   supportsImageEditingModel,
 } from '../lib'
 import type {
@@ -108,9 +109,13 @@ export function useImageGenerationHandler({
 
   const updateTask = useCallback(
     (taskId: string, updater: (task: ImageTask) => ImageTask) => {
-      onTasksUpdate((prev) =>
-        prev.map((task) => (task.id === taskId ? updater(task) : task))
-      )
+      onTasksUpdate((prev) => {
+        const nextTasks = prev.map((task) =>
+          task.id === taskId ? updater(task) : task
+        )
+        saveImageTasks(nextTasks)
+        return nextTasks
+      })
     },
     [onTasksUpdate]
   )
