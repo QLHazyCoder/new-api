@@ -56,7 +56,10 @@ export type PricingModel = {
   billing_expr?: string
   /** Pricing version returned by backend, useful for cache busting */
   pricing_version?: string
-  /** Optional model metadata fields configured in model management. */
+  /**
+   * Optional model metadata fields reserved for backend-provided catalog data.
+   * Keep them data-driven; do not synthesize display values on the client.
+   */
   context_length?: number
   max_output_tokens?: number
   knowledge_cutoff?: string

@@ -85,7 +85,8 @@ func Distribute() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
 				return
 			}
-			if !isChannelUsableForEndpoint(channel, relayEndpointType(c.Request.URL.Path), modelRequest.Model) {
+			if !isChannelUsableForEndpoint(channel, relayEndpointType(c.Request.URL.Path), modelRequest.Model) ||
+				!channelSupportsRequestPath(channel, c.Request.URL.Path) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
@@ -133,7 +134,9 @@ func Distribute() func(c *gin.Context) {
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 					affinityUsable := false
 					preferred, err := model.CacheGetChannel(preferredChannelID)
-					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled && isChannelUsableForEndpoint(preferred, endpointType, modelRequest.Model) {
+					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
+						isChannelUsableForEndpoint(preferred, endpointType, modelRequest.Model) &&
+						channelSupportsRequestPath(preferred, c.Request.URL.Path) {
 						if usingGroup == "auto" {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 							autoGroups := service.GetUserAutoGroup(userGroup)
@@ -166,6 +169,7 @@ func Distribute() func(c *gin.Context) {
 						TokenGroup:   usingGroup,
 						Retry:        common.GetPointer(0),
 						EndpointType: endpointType,
+						RequestPath:  c.Request.URL.Path,
 					})
 					if err != nil {
 						showGroup := usingGroup
@@ -219,6 +223,20 @@ func applyPlaygroundGroupOverride(c *gin.Context, usingGroup string) (string, er
 	common.SetContextKey(c, constant.ContextKeyUsingGroup, playgroundRequest.Group)
 	common.SetContextKey(c, constant.ContextKeyTokenGroup, playgroundRequest.Group)
 	return playgroundRequest.Group, nil
+}
+
+// channelSupportsRequestPath reports whether a channel can serve the request path.
+// Only Advanced Custom (type 58) channels are path-checked; all other channel types
+// always pass. A type-58 channel is usable only when one of its routes matches.
+func channelSupportsRequestPath(channel *model.Channel, requestPath string) bool {
+	if channel == nil {
+		return false
+	}
+	if channel.Type != constant.ChannelTypeAdvancedCustom {
+		return true
+	}
+	config := channel.GetOtherSettings().AdvancedCustom
+	return config != nil && config.SupportsPath(requestPath)
 }
 
 // getModelFromRequest 从请求中读取模型信息

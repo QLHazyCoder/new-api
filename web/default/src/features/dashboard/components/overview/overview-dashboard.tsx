@@ -600,7 +600,9 @@ export function OverviewDashboard() {
 
   const completedStepCount = startSteps.filter((step) => step.completed).length
   const setupComplete = completedStepCount === startSteps.length
-  const setupGuideExpanded = manualSetupGuideExpanded ?? !setupComplete
+  const setupStatusReady = apiKeysQuery.isFetched && Boolean(user)
+  const setupGuideExpanded =
+    manualSetupGuideExpanded ?? (setupStatusReady && !setupComplete)
   const showAdminPerformancePanel = isAdmin && perfMetricsVisible
   const showLeftContentPanels =
     showAdminPerformancePanel ||

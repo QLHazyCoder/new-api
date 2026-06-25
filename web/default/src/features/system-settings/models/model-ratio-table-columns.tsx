@@ -16,12 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef } from '@tanstack/react-table'
-import { Pencil, Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { DataTableColumnHeader } from '@/components/data-table'
+import type { ColumnDef } from '@tanstack/react-table'
+import { DataTableColumnHeader } from '@/components/data-table/core/column-header'
+import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
 import { StatusBadge } from '@/components/status-badge'
+import { Checkbox } from '@/components/ui/checkbox'
+
 import {
   getModeLabel,
   getModeVariant,
@@ -71,7 +71,7 @@ export function buildModelRatioColumns({
       ),
       enableSorting: false,
       enableHiding: false,
-      meta: { label: t('Select') },
+      size: 40,
     },
     {
       accessorKey: 'name',
@@ -79,16 +79,22 @@ export function buildModelRatioColumns({
         <DataTableColumnHeader column={column} title={t('Model name')} />
       ),
       cell: ({ row }) => (
-        <div className='flex items-center gap-2 font-medium'>
-          {row.getValue('name')}
+        <div className='flex min-w-0 items-center gap-2 font-medium'>
+          <span className='min-w-0 truncate'>{row.getValue('name')}</span>
           {row.original.billingMode === 'tiered_expr' && (
-            <StatusBadge label={t('Tiered')} variant='info' copyable={false} />
+            <StatusBadge
+              label={t('Tiered')}
+              variant='info'
+              copyable={false}
+              className='shrink-0'
+            />
           )}
           {row.original.hasConflict && (
             <StatusBadge
               label={t('Conflict')}
               variant='danger'
               copyable={false}
+              className='shrink-0'
             />
           )}
         </div>
@@ -106,7 +112,7 @@ export function buildModelRatioColumns({
           variant={getModeVariant(row.original.billingMode)}
           copyable={false}
           showDot={false}
-          className='px-0'
+          className='-ml-1.5 px-0'
         />
       ),
       filterFn: (row, id, value) =>
@@ -119,11 +125,11 @@ export function buildModelRatioColumns({
         <DataTableColumnHeader column={column} title={t('Price summary')} />
       ),
       cell: ({ row }) => (
-        <div className='flex min-w-[180px] flex-col gap-1'>
-          <span className='font-medium'>
+        <div className='flex min-w-0 flex-col gap-1'>
+          <span className='truncate font-medium'>
             {getPriceSummary(row.original, t)}
           </span>
-          <span className='text-muted-foreground max-w-[320px] truncate text-xs'>
+          <span className='text-muted-foreground truncate text-xs'>
             {getPriceDetail(row.original, t)}
           </span>
         </div>
@@ -136,24 +142,15 @@ export function buildModelRatioColumns({
     },
     {
       id: 'actions',
-      header: () => <div className='text-right'>{t('Actions')}</div>,
+      header: () => <div>{t('Actions')}</div>,
       cell: ({ row }) => (
-        <div className='flex justify-end gap-2'>
-          <Button
-            variant='ghost'
-            size='sm'
-            onClick={() => onEdit(row.original)}
-          >
-            <Pencil />
-          </Button>
-          <Button
-            variant='ghost'
-            size='sm'
-            onClick={() => onDelete(row.original.name)}
-          >
-            <Trash2 />
-          </Button>
-        </div>
+        <StaticRowActions
+          editLabel={t('Edit')}
+          deleteLabel={t('Delete')}
+          menuLabel={t('Open menu')}
+          onEdit={() => onEdit(row.original)}
+          onDelete={() => onDelete(row.original.name)}
+        />
       ),
       enableHiding: false,
     },

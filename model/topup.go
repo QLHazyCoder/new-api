@@ -108,7 +108,7 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 	}
 
 	refCol := "`trade_no`"
-	if common.UsingPostgreSQL {
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
 		refCol = `"trade_no"`
 	}
 
@@ -181,7 +181,7 @@ func CompleteTopUp(opts CompleteTopUpOptions) (*TopUpCompletionResult, error) {
 	}
 
 	refCol := "`trade_no`"
-	if common.UsingPostgreSQL {
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
 		refCol = `"trade_no"`
 	}
 

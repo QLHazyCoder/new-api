@@ -16,9 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useMemo, useEffect, useCallback, memo, useRef } from 'react'
-import { Pencil, Plus, Trash2, GripVertical, ChevronDown } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback, memo } from 'react'
+import { Plus, Trash2, GripVertical, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
+import { StaticDataTable } from '@/components/data-table/static/static-data-table'
+import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
+import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -35,15 +39,7 @@ import {
 } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-import { Dialog } from '@/components/dialog'
+
 import { safeJsonParse } from '../utils/json-parser'
 
 type GroupRatioVisualEditorProps = {
@@ -115,11 +111,11 @@ function buildGroupPricingRows(
     ...Object.keys(descriptionMap),
   ])
 
-  return Array.from(names).map((name) => ({
+  return [...names].map((name) => ({
     _id: createGroupPricingId(),
     name,
     ratio: normalizeRatio(ratioMap[name]),
-    selectable: Object.prototype.hasOwnProperty.call(usableMap, name),
+    selectable: Object.hasOwn(usableMap, name),
     description: String(descriptionMap[name] ?? usableMap[name] ?? ''),
   }))
 }
@@ -150,12 +146,6 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
 
 function groupPricingSignature(rows: GroupPricingRow[]): string {
   const serialized = serializeGroupPricingRows(rows)
-  return groupPricingSerializedSignature(serialized)
-}
-
-function groupPricingSerializedSignature(
-  serialized: ReturnType<typeof serializeGroupPricingRows>
-): string {
   return JSON.stringify({
     groupRatio: safeJsonParse(serialized.GroupRatio, {
       fallback: {},
@@ -287,7 +277,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
       delete map[simpleEditData.name]
     }
 
-    map[name] = parseFloat(value)
+    map[name] = Number.parseFloat(value)
 
     const field =
       simpleDialogType === 'groupRatio' ? 'GroupRatio' : 'TopupGroupRatio'
@@ -462,54 +452,42 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
               {t('Add group')}
             </Button>
             {topupRatioList.length > 0 && (
-              <div className='rounded-md border'>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('Group name')}</TableHead>
-                      <TableHead>{t('Multiplier')}</TableHead>
-                      <TableHead className='text-right'>
-                        {t('Actions')}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {topupRatioList.map((group) => (
-                      <TableRow key={group.name}>
-                        <TableCell className='font-medium'>
-                          {group.name}
-                        </TableCell>
-                        <TableCell>{group.value}</TableCell>
-                        <TableCell className='text-right'>
-                          <div className='flex justify-end gap-2'>
-                            <Button
-                              variant='ghost'
-                              size='sm'
-                              onClick={() =>
-                                handleSimpleEdit('topupGroupRatio', group)
-                              }
-                            >
-                              <Pencil className='h-4 w-4' />
-                            </Button>
-                            <Button
-                              variant='ghost'
-                              size='sm'
-                              onClick={() =>
-                                handleSimpleDelete(
-                                  'topupGroupRatio',
-                                  group.name
-                                )
-                              }
-                            >
-                              <Trash2 className='h-4 w-4' />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              <StaticDataTable
+                data={topupRatioList}
+                getRowKey={(group) => group.name}
+                columns={[
+                  {
+                    id: 'group',
+                    header: t('Group name'),
+                    cellClassName: 'font-medium',
+                    cell: (group) => group.name,
+                  },
+                  {
+                    id: 'multiplier',
+                    header: t('Multiplier'),
+                    cell: (group) => group.value,
+                  },
+                  {
+                    id: 'actions',
+                    header: t('Actions'),
+                    className: 'text-right',
+                    cellClassName: 'text-right',
+                    cell: (group) => (
+                      <StaticRowActions
+                        editLabel={t('Edit')}
+                        deleteLabel={t('Delete')}
+                        menuLabel={t('Open menu')}
+                        onEdit={() =>
+                          handleSimpleEdit('topupGroupRatio', group)
+                        }
+                        onDelete={() =>
+                          handleSimpleDelete('topupGroupRatio', group.name)
+                        }
+                      />
+                    ),
+                  },
+                ]}
+              />
             )}
           </div>
         </CardContent>
@@ -576,55 +554,49 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
                       <CollapsibleContent>
                         {userGroupData.overrides.length > 0 && (
                           <div className='border-t'>
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>{t('Target group')}</TableHead>
-                                  <TableHead>{t('Ratio')}</TableHead>
-                                  <TableHead className='text-right'>
-                                    {t('Actions')}
-                                  </TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {userGroupData.overrides.map((override) => (
-                                  <TableRow key={override.targetGroup}>
-                                    <TableCell className='font-medium'>
-                                      {override.targetGroup}
-                                    </TableCell>
-                                    <TableCell>{override.ratio}</TableCell>
-                                    <TableCell className='text-right'>
-                                      <div className='flex justify-end gap-2'>
-                                        <Button
-                                          variant='ghost'
-                                          size='sm'
-                                          onClick={() =>
-                                            handleOverrideEdit(
-                                              userGroupData.userGroup,
-                                              override
-                                            )
-                                          }
-                                        >
-                                          <Pencil className='h-4 w-4' />
-                                        </Button>
-                                        <Button
-                                          variant='ghost'
-                                          size='sm'
-                                          onClick={() =>
-                                            handleOverrideDelete(
-                                              userGroupData.userGroup,
-                                              override.targetGroup
-                                            )
-                                          }
-                                        >
-                                          <Trash2 className='h-4 w-4' />
-                                        </Button>
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
+                            <StaticDataTable
+                              className='rounded-none border-0'
+                              data={userGroupData.overrides}
+                              getRowKey={(override) => override.targetGroup}
+                              columns={[
+                                {
+                                  id: 'target-group',
+                                  header: t('Target group'),
+                                  cellClassName: 'font-medium',
+                                  cell: (override) => override.targetGroup,
+                                },
+                                {
+                                  id: 'ratio',
+                                  header: t('Ratio'),
+                                  cell: (override) => override.ratio,
+                                },
+                                {
+                                  id: 'actions',
+                                  header: t('Actions'),
+                                  className: 'text-right',
+                                  cellClassName: 'text-right',
+                                  cell: (override) => (
+                                    <StaticRowActions
+                                      editLabel={t('Edit')}
+                                      deleteLabel={t('Delete')}
+                                      menuLabel={t('Open menu')}
+                                      onEdit={() =>
+                                        handleOverrideEdit(
+                                          userGroupData.userGroup,
+                                          override
+                                        )
+                                      }
+                                      onDelete={() =>
+                                        handleOverrideDelete(
+                                          userGroupData.userGroup,
+                                          override.targetGroup
+                                        )
+                                      }
+                                    />
+                                  ),
+                                },
+                              ]}
+                            />
                           </div>
                         )}
                       </CollapsibleContent>
@@ -657,7 +629,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
               <div className='space-y-2'>
                 {autoGroupsList.map((group, index) => (
                   <div
-                    key={index}
+                    key={group}
                     className='flex items-center gap-2 rounded-md border p-3'
                   >
                     <GripVertical className='text-muted-foreground h-4 w-4' />
@@ -796,7 +768,6 @@ function GroupPricingTable({
   onChange,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
-  const pendingLocalSignatureRef = useRef<string | null>(null)
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
     buildGroupPricingRows(groupRatio, userUsableGroups, groupDescriptions)
   )
@@ -808,41 +779,24 @@ function GroupPricingTable({
       groupDescriptions
     )
     setRows((currentRows) => {
-      const currentSignature = groupPricingSignature(currentRows)
-      const pendingLocalSignature = pendingLocalSignatureRef.current
-
-      if (currentSignature === incomingSignature) {
-        if (pendingLocalSignature === incomingSignature) {
-          pendingLocalSignatureRef.current = null
-        }
+      if (groupPricingSignature(currentRows) === incomingSignature) {
         return currentRows
       }
-
-      if (pendingLocalSignature && currentSignature === pendingLocalSignature) {
-        if (incomingSignature === pendingLocalSignature) {
-          pendingLocalSignatureRef.current = null
-        }
-        return currentRows
-      }
-
-      pendingLocalSignatureRef.current = null
       return buildGroupPricingRows(
         groupRatio,
         userUsableGroups,
         groupDescriptions
       )
     })
-  }, [groupRatio, userUsableGroups, groupDescriptions])
+  }, [groupRatio, groupDescriptions, userUsableGroups])
 
   const emitRows = useCallback(
     (nextRows: GroupPricingRow[]) => {
-      const serialized = serializeGroupPricingRows(nextRows)
-      pendingLocalSignatureRef.current =
-        groupPricingSerializedSignature(serialized)
       setRows(nextRows)
+      const serialized = serializeGroupPricingRows(nextRows)
       onChange('GroupRatio', serialized.GroupRatio)
-      onChange('GroupDescriptions', serialized.GroupDescriptions)
       onChange('UserUsableGroups', serialized.UserUsableGroups)
+      onChange('GroupDescriptions', serialized.GroupDescriptions)
     },
     [onChange]
   )
@@ -894,7 +848,7 @@ function GroupPricingTable({
       if (!name) continue
       counts.set(name, (counts.get(name) ?? 0) + 1)
     }
-    return Array.from(counts.entries())
+    return [...counts.entries()]
       .filter(([, count]) => count > 1)
       .map(([name]) => name)
   }, [rows])
@@ -919,100 +873,94 @@ function GroupPricingTable({
       </CardHeader>
       <CardContent>
         <div className='space-y-3'>
-          <div className='overflow-hidden rounded-md border'>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className='min-w-40'>{t('Group name')}</TableHead>
-                  <TableHead className='w-28'>{t('Ratio')}</TableHead>
-                  <TableHead className='w-28 text-center'>
-                    {t('User selectable')}
-                  </TableHead>
-                  <TableHead className='min-w-56'>{t('Description')}</TableHead>
-                  <TableHead className='w-16 text-right'>
-                    {t('Actions')}
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className='text-muted-foreground h-20 text-center text-sm'
-                    >
-                      {t('No groups yet. Add a group to get started.')}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  rows.map((row) => (
-                    <TableRow key={row._id}>
-                      <TableCell>
-                        <Input
-                          value={row.name}
-                          onChange={(event) =>
-                            updateRow(row._id, 'name', event.target.value)
-                          }
-                          aria-invalid={duplicateNames.includes(
-                            row.name.trim()
-                          )}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          type='number'
-                          min={0}
-                          step={0.1}
-                          value={String(row.ratio)}
-                          onChange={(event) =>
-                            updateRow(
-                              row._id,
-                              'ratio',
-                              normalizeRatio(event.target.value)
-                            )
-                          }
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <div className='flex justify-center'>
-                          <Checkbox
-                            checked={row.selectable}
-                            onCheckedChange={(checked) =>
-                              updateRow(row._id, 'selectable', checked === true)
-                            }
-                            aria-label={t('User selectable')}
-                          />
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Input
-                          value={row.description}
-                          placeholder={t('Group description')}
-                          onChange={(event) =>
-                            updateRow(
-                              row._id,
-                              'description',
-                              event.target.value
-                            )
-                          }
-                        />
-                      </TableCell>
-                      <TableCell className='text-right'>
-                        <Button
-                          variant='ghost'
-                          size='sm'
-                          onClick={() => removeRow(row._id)}
-                          aria-label={t('Delete')}
-                        >
-                          <Trash2 className='h-4 w-4' />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+          <StaticDataTable
+            data={rows}
+            getRowKey={(row) => row._id}
+            emptyClassName='text-muted-foreground h-20 text-sm'
+            emptyContent={t('No groups yet. Add a group to get started.')}
+            columns={[
+              {
+                id: 'group',
+                header: t('Group name'),
+                className: 'min-w-40',
+                cell: (row) => (
+                  <Input
+                    value={row.name}
+                    onChange={(event) =>
+                      updateRow(row._id, 'name', event.target.value)
+                    }
+                    aria-invalid={duplicateNames.includes(row.name.trim())}
+                  />
+                ),
+              },
+              {
+                id: 'ratio',
+                header: t('Ratio'),
+                className: 'w-28',
+                cell: (row) => (
+                  <Input
+                    type='number'
+                    min={0}
+                    step={0.1}
+                    value={String(row.ratio)}
+                    onChange={(event) =>
+                      updateRow(
+                        row._id,
+                        'ratio',
+                        normalizeRatio(event.target.value)
+                      )
+                    }
+                  />
+                ),
+              },
+              {
+                id: 'selectable',
+                header: t('User selectable'),
+                className: 'w-28 text-center',
+                cell: (row) => (
+                  <div className='flex justify-center'>
+                    <Checkbox
+                      checked={row.selectable}
+                      onCheckedChange={(checked) =>
+                        updateRow(row._id, 'selectable', checked === true)
+                      }
+                      aria-label={t('User selectable')}
+                    />
+                  </div>
+                ),
+              },
+              {
+                id: 'description',
+                header: t('Description'),
+                className: 'min-w-56',
+                cell: (row) => (
+                  <Input
+                    value={row.description}
+                    placeholder={t('Group description')}
+                    onChange={(event) =>
+                      updateRow(row._id, 'description', event.target.value)
+                    }
+                  />
+                ),
+              },
+              {
+                id: 'actions',
+                header: t('Actions'),
+                className: 'text-right',
+                cellClassName: 'text-right',
+                cell: (row) => (
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={() => removeRow(row._id)}
+                    aria-label={t('Delete')}
+                  >
+                    <Trash2 className='h-4 w-4' />
+                  </Button>
+                ),
+              },
+            ]}
+          />
 
           {duplicateNames.length > 0 && (
             <p className='text-destructive text-sm'>
@@ -1106,7 +1054,7 @@ function SimpleGroupDialog({
             value={value}
             onChange={(e) => {
               const val = e.target.value
-              if (val === '' || !isNaN(parseFloat(val))) {
+              if (val === '' || !isNaN(Number.parseFloat(val))) {
                 setValue(val)
               }
             }}
@@ -1151,7 +1099,7 @@ function GroupOverrideDialog({
 
   const handleSave = () => {
     if (!targetGroup.trim() || !ratio.trim()) return
-    const parsedRatio = parseFloat(ratio)
+    const parsedRatio = Number.parseFloat(ratio)
     if (isNaN(parsedRatio)) return
 
     onSave(targetGroup.trim(), parsedRatio, editData?.targetGroup)
@@ -1206,7 +1154,7 @@ function GroupOverrideDialog({
             value={ratio}
             onChange={(e) => {
               const val = e.target.value
-              if (val === '' || !isNaN(parseFloat(val))) {
+              if (val === '' || !isNaN(Number.parseFloat(val))) {
                 setRatio(val)
               }
             }}

@@ -20,7 +20,7 @@ import { useEffect, useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Edit, Trash2, Save } from 'lucide-react'
+import { Plus, Trash2, Save } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -45,15 +45,9 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
+import { StaticDataTable } from '@/components/data-table/static/static-data-table'
+import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
 import { Dialog } from '@/components/dialog'
 import { SettingsSwitchField } from '../components/settings-form-layout'
 import { SettingsSection } from '../components/settings-section'
@@ -265,82 +259,62 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
             checked={isEnabled}
             onCheckedChange={handleToggleEnabled}
             label={t('Enabled')}
-            className='border-b-0 py-0'
+            className='py-0'
           />
         </div>
 
-        <div className='rounded-md border'>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className='w-12'>
-                  <Checkbox
-                    checked={
-                      selectedIds.length === faqList.length &&
-                      faqList.length > 0
-                    }
-                    onCheckedChange={toggleSelectAll}
-                  />
-                </TableHead>
-                <TableHead>{t('Question')}</TableHead>
-                <TableHead>{t('Answer')}</TableHead>
-                <TableHead className='w-32'>{t('Actions')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {faqList.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className='h-24 text-center'>
-                    {t('No FAQ entries yet. Click "Add FAQ" to create one.')}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                faqList.map((faq) => (
-                  <TableRow key={faq.id}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selectedIds.includes(faq.id)}
-                        onCheckedChange={(checked) =>
-                          toggleSelectOne(faq.id, checked as boolean)
-                        }
-                      />
-                    </TableCell>
-                    <TableCell
-                      className='max-w-xs truncate font-medium'
-                      title={faq.question}
-                    >
-                      {faq.question}
-                    </TableCell>
-                    <TableCell
-                      className='text-muted-foreground max-w-md truncate'
-                      title={faq.answer}
-                    >
-                      {faq.answer}
-                    </TableCell>
-                    <TableCell>
-                      <div className='flex gap-2'>
-                        <Button
-                          onClick={() => handleEdit(faq)}
-                          size='sm'
-                          variant='ghost'
-                        >
-                          <Edit className='h-4 w-4' />
-                        </Button>
-                        <Button
-                          onClick={() => handleDelete(faq)}
-                          size='sm'
-                          variant='ghost'
-                        >
-                          <Trash2 className='h-4 w-4' />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        <StaticDataTable
+          data={faqList}
+          getRowKey={(faq) => faq.id}
+          emptyContent={t('No FAQ entries yet. Click "Add FAQ" to create one.')}
+          columns={[
+            {
+              id: 'select',
+              header: (
+                <Checkbox
+                  checked={
+                    selectedIds.length === faqList.length && faqList.length > 0
+                  }
+                  onCheckedChange={toggleSelectAll}
+                />
+              ),
+              className: 'w-12',
+              cell: (faq) => (
+                <Checkbox
+                  checked={selectedIds.includes(faq.id)}
+                  onCheckedChange={(checked) =>
+                    toggleSelectOne(faq.id, checked as boolean)
+                  }
+                />
+              ),
+            },
+            {
+              id: 'question',
+              header: t('Question'),
+              cellClassName: 'max-w-xs truncate font-medium',
+              cell: (faq) => faq.question,
+            },
+            {
+              id: 'answer',
+              header: t('Answer'),
+              cellClassName: 'text-muted-foreground max-w-md truncate',
+              cell: (faq) => faq.answer,
+            },
+            {
+              id: 'actions',
+              header: t('Actions'),
+              cell: (faq) => (
+                <StaticRowActions
+                  editLabel={t('Edit')}
+                  deleteLabel={t('Delete')}
+                  menuLabel={t('Open menu')}
+                  onEdit={() => handleEdit(faq)}
+                  onDelete={() => handleDelete(faq)}
+                />
+              ),
+            },
+          ]}
+        />
       </div>
 
       <Dialog
@@ -423,13 +397,15 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
             <AlertDialogTitle>{t('Are you sure?')}</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget === 'single'
-                ? 'This FAQ entry will be removed from the list.'
-                : `${selectedIds.length} FAQ entries will be removed from the list.`}
+                ? t('This FAQ entry will be removed from the list.')
+                : t('{{count}} FAQ entries will be removed from the list.', {
+                    count: selectedIds.length,
+                  })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDelete}>
+            <AlertDialogAction variant='destructive' onClick={confirmDelete}>
               {t('Delete')}
             </AlertDialogAction>
           </AlertDialogFooter>

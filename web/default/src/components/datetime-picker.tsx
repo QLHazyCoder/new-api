@@ -59,6 +59,7 @@ export function DateTimePicker({
   const placeholderText = placeholder ?? t('Select date')
   const calendarLocale =
     calendarLocales[i18n.language as keyof typeof calendarLocales] ?? enUS
+  const currentYear = new Date().getFullYear()
   const [open, setOpen] = React.useState(false)
   const [date, setDate] = React.useState<Date | undefined>(value)
   const [month, setMonth] = React.useState<Date | undefined>(value)
@@ -149,6 +150,8 @@ export function DateTimePicker({
             onSelect={handleDateSelect}
             disabled={maxDate ? { after: maxDate } : undefined}
             locale={calendarLocale}
+            startMonth={new Date(currentYear - 100, 0)}
+            endMonth={new Date(currentYear + 100, 11)}
           />
         </PopoverContent>
       </Popover>

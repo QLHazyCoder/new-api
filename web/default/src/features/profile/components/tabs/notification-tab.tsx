@@ -24,8 +24,8 @@ import { ROLE } from '@/lib/roles'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { PasswordInput } from '@/components/password-input'
 import { displayAmountToQuota, quotaToDisplayAmount } from '@/lib/currency'
@@ -38,11 +38,22 @@ import {
 import { parseUserSettings } from '../../lib'
 import type { UserProfile, UserSettings, NotifyType } from '../../types'
 
-const NOTIFICATION_ICONS: Record<string, typeof Mail> = {
+const NOTIFICATION_ICONS: Record<NotifyType, typeof Mail> = {
   email: Mail,
   webhook: Webhook,
   bark: Bell,
   gotify: Server,
+}
+
+const NOTIFICATION_VALUES = new Set<NotifyType>(
+  NOTIFICATION_METHODS.map((method) => method.value)
+)
+
+function normalizeNotifyType(value: unknown): NotifyType {
+  return typeof value === 'string' &&
+    NOTIFICATION_VALUES.has(value as NotifyType)
+    ? (value as NotifyType)
+    : 'email'
 }
 
 // ============================================================================
@@ -72,7 +83,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
     gotify_token: '',
     gotify_priority: 5,
     accept_unset_model_ratio_model: false,
-    record_ip_log: true,
+    record_ip_log: false,
     upstream_model_update_notify_enabled: false,
   })
 
@@ -95,7 +106,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
       const threshold =
         parsed.quota_warning_threshold ?? defaultThreshold
       setSettings({
-        notify_type: parsed.notify_type || 'email',
+        notify_type: normalizeNotifyType(parsed.notify_type),
         quota_warning_threshold: quotaToDisplayAmount(threshold),
         notification_email: parsed.notification_email ?? '',
         webhook_url: parsed.webhook_url ?? '',
@@ -148,44 +159,42 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
     updateField('record_ip_log', true)
   }
 
+  const notifyType = normalizeNotifyType(settings.notify_type)
+
   return (
     <div className='space-y-4 sm:space-y-6'>
       {/* Notification Type */}
       <div className='space-y-2.5'>
         <Label>{t('Notification Method')}</Label>
-        <RadioGroup
-          value={settings.notify_type}
-          onValueChange={(value) =>
-            updateField('notify_type', value as NotifyType)
-          }
-          className='grid grid-cols-4 gap-1.5 sm:gap-3'
+        <ToggleGroup
+          value={[notifyType]}
+          onValueChange={(value) => {
+            const nextValue = value.find((item) => item !== notifyType)
+            if (nextValue)
+              updateField('notify_type', normalizeNotifyType(nextValue))
+          }}
+          aria-label={t('Notification Method')}
+          variant='outline'
+          size='lg'
+          spacing={2}
+          className='grid w-full grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3'
         >
           {NOTIFICATION_METHODS.map((method) => {
             const Icon = NOTIFICATION_ICONS[method.value]
-            const isSelected = settings.notify_type === method.value
             return (
-              <Label
+              <ToggleGroupItem
                 key={method.value}
-                htmlFor={method.value}
-                className={`flex min-h-16 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border p-2 text-center transition-colors sm:min-h-20 sm:gap-2 sm:border-2 sm:p-3 ${
-                  isSelected
-                    ? 'border-primary bg-primary/5 text-primary'
-                    : 'border-muted hover:border-muted-foreground/25 hover:bg-muted/50'
-                }`}
+                value={method.value}
+                className='h-auto min-h-14 w-full flex-col gap-1.5 px-3 py-3 sm:min-h-16'
               >
-                <RadioGroupItem
-                  value={method.value}
-                  id={method.value}
-                  className='sr-only'
-                />
                 <Icon className='h-4 w-4 sm:h-5 sm:w-5' />
                 <span className='max-w-full truncate text-xs font-medium sm:text-sm'>
                   {t(method.label)}
                 </span>
-              </Label>
+              </ToggleGroupItem>
             )
           })}
-        </RadioGroup>
+        </ToggleGroup>
       </div>
 
       {/* Warning Threshold */}
@@ -209,7 +218,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
       </div>
 
       {/* Email Settings */}
-      {settings.notify_type === 'email' && (
+      {notifyType === 'email' && (
         <div className='space-y-1.5'>
           <Label htmlFor='notifyEmail'>{t('Notification Email')}</Label>
           <Input
@@ -224,7 +233,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
       )}
 
       {/* Webhook Settings */}
-      {settings.notify_type === 'webhook' && (
+      {notifyType === 'webhook' && (
         <>
           <div className='space-y-1.5'>
             <Label htmlFor='webhookUrl'>{t('Webhook URL')}</Label>
@@ -250,7 +259,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
       )}
 
       {/* Bark Settings */}
-      {settings.notify_type === 'bark' && (
+      {notifyType === 'bark' && (
         <div className='space-y-1.5'>
           <Label htmlFor='barkUrl'>{t('Bark Push URL')}</Label>
           <Input
@@ -268,7 +277,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
       )}
 
       {/* Gotify Settings */}
-      {settings.notify_type === 'gotify' && (
+      {notifyType === 'gotify' && (
         <>
           <div className='space-y-1.5'>
             <Label htmlFor='gotifyUrl'>{t('Gotify Server URL')}</Label>
@@ -331,7 +340,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
                 href='https://gotify.net/'
                 target='_blank'
                 rel='noopener noreferrer'
-                className='text-primary hover:underline'
+                className='text-primary underline underline-offset-4'
               >
                 {t('Gotify Documentation')}
               </a>
