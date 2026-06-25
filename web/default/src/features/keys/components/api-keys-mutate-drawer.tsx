@@ -245,6 +245,19 @@ export function ApiKeysMutateDrawer({
     : t('Enter quota in {{currency}}', { currency: currencyLabel })
   const selectedGroup = form.watch('group')
   const unlimitedQuota = form.watch('unlimited_quota')
+  const handleGroupChange = (value: string) => {
+    form.setValue('group', value, {
+      shouldDirty: true,
+      shouldTouch: true,
+      shouldValidate: true,
+    })
+    if (value === 'auto') {
+      form.setValue('cross_group_retry', true, {
+        shouldDirty: true,
+        shouldTouch: true,
+      })
+    }
+  }
 
   return (
     <Sheet
@@ -305,7 +318,7 @@ export function ApiKeysMutateDrawer({
                       <ApiKeyGroupCombobox
                         options={groups}
                         value={field.value}
-                        onValueChange={field.onChange}
+                        onValueChange={handleGroupChange}
                         placeholder={t('Select a group')}
                       />
                     </FormControl>

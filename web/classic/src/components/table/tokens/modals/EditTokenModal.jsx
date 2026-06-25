@@ -215,6 +215,14 @@ const EditTokenModal = (props) => {
     return result;
   };
 
+  const handleGroupChange = (value) => {
+    if (value === 'auto') {
+      formApiRef.current?.setValue('cross_group_retry', true);
+    } else {
+      formApiRef.current?.setValue('cross_group_retry', false);
+    }
+  };
+
   const submit = async (values) => {
     setLoading(true);
     if (isEdit) {
@@ -398,6 +406,7 @@ const EditTokenModal = (props) => {
                               option.label.toLowerCase().includes(q))
                           );
                         }}
+                        onChange={handleGroupChange}
                         showClear
                         style={{ width: '100%' }}
                       />
