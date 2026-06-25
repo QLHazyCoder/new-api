@@ -467,14 +467,6 @@ func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preCon
 			quotaTooLow = true
 		}
 		if !quotaTooLow {
-			if userSetting.QuotaWarningNotified != nil && *userSetting.QuotaWarningNotified {
-				if err := model.UpdateUserQuotaWarningNotified(relayInfo.UserId, false); err != nil {
-					common.SysError(fmt.Sprintf("failed to clear quota notify state for user %d: %s", relayInfo.UserId, err.Error()))
-				}
-			}
-			return
-		}
-		if userSetting.QuotaWarningNotified != nil && *userSetting.QuotaWarningNotified {
 			return
 		}
 
@@ -506,10 +498,6 @@ func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preCon
 		err := NotifyUser(relayInfo.UserId, relayInfo.UserEmail, relayInfo.UserSetting, dto.NewNotify(dto.NotifyTypeQuotaExceed, prompt, content, values))
 		if err != nil {
 			common.SysError(fmt.Sprintf("failed to send quota notify to user %d: %s", relayInfo.UserId, err.Error()))
-			return
-		}
-		if err := model.UpdateUserQuotaWarningNotified(relayInfo.UserId, true); err != nil {
-			common.SysError(fmt.Sprintf("failed to persist quota notify state for user %d: %s", relayInfo.UserId, err.Error()))
 		}
 	})
 }
@@ -535,14 +523,6 @@ func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 		usedAfter := relayInfo.SubscriptionAmountUsedAfterPreConsume + relayInfo.SubscriptionPostDelta
 		remaining := relayInfo.SubscriptionAmountTotal - usedAfter
 		if remaining >= int64(threshold) {
-			if userSetting.QuotaWarningNotified != nil && *userSetting.QuotaWarningNotified {
-				if err := model.UpdateUserQuotaWarningNotified(relayInfo.UserId, false); err != nil {
-					common.SysError(fmt.Sprintf("failed to clear subscription quota notify state for user %d: %s", relayInfo.UserId, err.Error()))
-				}
-			}
-			return
-		}
-		if userSetting.QuotaWarningNotified != nil && *userSetting.QuotaWarningNotified {
 			return
 		}
 
@@ -569,10 +549,6 @@ func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 
 		if err := NotifyUser(relayInfo.UserId, relayInfo.UserEmail, relayInfo.UserSetting, dto.NewNotify(dto.NotifyTypeQuotaExceed, prompt, content, values)); err != nil {
 			common.SysError(fmt.Sprintf("failed to send subscription quota notify to user %d: %s", relayInfo.UserId, err.Error()))
-			return
-		}
-		if err := model.UpdateUserQuotaWarningNotified(relayInfo.UserId, true); err != nil {
-			common.SysError(fmt.Sprintf("failed to persist subscription quota notify state for user %d: %s", relayInfo.UserId, err.Error()))
 		}
 	})
 }

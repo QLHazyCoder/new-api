@@ -1285,7 +1285,6 @@ func UpdateUserSetting(c *gin.Context) {
 	settings := existingSettings
 	settings.NotifyType = req.QuotaWarningType
 	settings.QuotaWarningThreshold = req.QuotaWarningThreshold
-	settings.QuotaWarningNotified = nil
 	settings.UpstreamModelUpdateNotifyEnabled = upstreamModelUpdateNotifyEnabled
 	settings.AcceptUnsetRatioModel = req.AcceptUnsetModelRatioModel
 	settings.WebhookUrl = ""
