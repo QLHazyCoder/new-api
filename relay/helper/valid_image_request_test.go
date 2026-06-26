@@ -53,6 +53,24 @@ func TestGetAndValidOpenAIImageRequestAcceptsGPTImage2Options(t *testing.T) {
 	}
 }
 
+func TestGetAndValidOpenAIImageRequestAcceptsGPTImage2AutoSize(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ctx := newImageGenerationContext(t, map[string]any{
+		"model":  "gpt-image-2",
+		"prompt": "a clean product photo",
+		"size":   "auto",
+	})
+
+	request, err := GetAndValidOpenAIImageRequest(ctx, relayconstant.RelayModeImagesGenerations)
+	if err != nil {
+		t.Fatalf("GetAndValidOpenAIImageRequest returned error: %v", err)
+	}
+	if request.Size != "auto" {
+		t.Fatalf("size = %q, want auto", request.Size)
+	}
+}
+
 func TestGetAndValidOpenAIImageRequestRejectsGPTImage2InvalidSize(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

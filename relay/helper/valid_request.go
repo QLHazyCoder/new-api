@@ -282,21 +282,23 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 
 func validateGPTImage2Request(imageRequest *dto.ImageRequest) error {
 	if imageRequest.Size != "" {
-		width, height, err := parseImageSize(imageRequest.Size)
-		if err != nil {
-			return fmt.Errorf("size must use WIDTHxHEIGHT format for gpt-image-2")
-		}
-		if width%16 != 0 || height%16 != 0 {
-			return errors.New("size width and height must be divisible by 16 for gpt-image-2")
-		}
-		if width > gptImage2MaxWidth || height > gptImage2MaxHeight {
-			return fmt.Errorf("size must not exceed %dx%d for gpt-image-2", gptImage2MaxWidth, gptImage2MaxHeight)
-		}
-		if width*height > gptImage2MaxPixels {
-			return errors.New("size pixel count must not exceed 3840x2160 for gpt-image-2")
-		}
-		if width > height*3 || height > width*3 {
-			return errors.New("size aspect ratio must be between 1:3 and 3:1 for gpt-image-2")
+		if !strings.EqualFold(strings.TrimSpace(imageRequest.Size), "auto") {
+			width, height, err := parseImageSize(imageRequest.Size)
+			if err != nil {
+				return fmt.Errorf("size must use WIDTHxHEIGHT format for gpt-image-2")
+			}
+			if width%16 != 0 || height%16 != 0 {
+				return errors.New("size width and height must be divisible by 16 for gpt-image-2")
+			}
+			if width > gptImage2MaxWidth || height > gptImage2MaxHeight {
+				return fmt.Errorf("size must not exceed %dx%d for gpt-image-2", gptImage2MaxWidth, gptImage2MaxHeight)
+			}
+			if width*height > gptImage2MaxPixels {
+				return errors.New("size pixel count must not exceed 3840x2160 for gpt-image-2")
+			}
+			if width > height*3 || height > width*3 {
+				return errors.New("size aspect ratio must be between 1:3 and 3:1 for gpt-image-2")
+			}
 		}
 	}
 

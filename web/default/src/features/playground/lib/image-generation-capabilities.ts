@@ -19,7 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import type { ImageGenerationConfig } from '../types'
 
 export const MAX_IMAGE_GENERATION_COUNT = 4
+export const DEFAULT_PLAYGROUND_IMAGE_SIZE = '1024x1024'
 export const PLAYGROUND_IMAGE_SIZE_OPTIONS = [
+  'auto',
   '1024x1024',
   '1024x1536',
   '1536x1024',
@@ -56,7 +58,7 @@ export function normalizePlaygroundImageConfig(
     config.size as (typeof PLAYGROUND_IMAGE_SIZE_OPTIONS)[number]
   )
     ? config.size
-    : PLAYGROUND_IMAGE_SIZE_OPTIONS[0]
+    : DEFAULT_PLAYGROUND_IMAGE_SIZE
   const quality = PLAYGROUND_IMAGE_QUALITY_OPTIONS.includes(
     config.quality as (typeof PLAYGROUND_IMAGE_QUALITY_OPTIONS)[number]
   )
