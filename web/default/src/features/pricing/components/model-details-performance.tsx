@@ -29,16 +29,22 @@ import { GroupBadge } from '@/components/group-badge'
 import { getPerfMetrics } from '@/features/performance-metrics/api'
 import { usePerformanceMetricsVisibility } from '@/features/performance-metrics/hooks/use-performance-metrics-visibility'
 import {
+  sumPerformanceCounters,
+  weightedSuccessRate,
+} from '@/features/performance-metrics/lib/aggregate'
+import {
   formatLatency,
   formatThroughput,
   formatUptimePct,
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
 import type { PerformanceGroup } from '@/features/performance-metrics/types'
-import { type UptimeDayPoint } from '../lib/mock-stats'
+import type { UptimeDayPoint } from '../lib/mock-stats'
 import type { PricingModel } from '../types'
 import { LatencyTrendChart, UptimeTrendChart } from './model-details-charts'
 import { UptimeSparkline } from './model-details-uptime-sparkline'
+
+const DETAILS_PERFORMANCE_WINDOW_HOURS = 1
 
 function StatCard(props: {
   icon: React.ComponentType<{ className?: string }>
@@ -77,6 +83,8 @@ type PerformanceRow = {
   avg_latency_ms: number
   success_rate: number
   avg_tps: number
+  request_count?: number
+  success_count?: number
 }
 
 function toUptimePct(value: number): number {
@@ -96,7 +104,7 @@ function toLatencySeries(groups: PerformanceGroup[]) {
     }
   }
 
-  return Array.from(byTs.entries())
+  return [...byTs.entries()]
     .sort(([a], [b]) => a - b)
     .map(([ts, values]) => ({
       timestamp: new Date(ts * 1000).toISOString(),
@@ -108,26 +116,51 @@ function toLatencySeries(groups: PerformanceGroup[]) {
 }
 
 function toUptimeSeries(groups: PerformanceGroup[]): UptimeDayPoint[] {
-  const byTs = new Map<number, { rates: number[]; incidents: number }>()
+  const byTs = new Map<
+    number,
+    {
+      rates: number[]
+      incidents: number
+      requestCount: number
+      successCount: number
+    }
+  >()
   for (const group of groups) {
     for (const point of group.series) {
-      const current = byTs.get(point.ts) ?? { rates: [], incidents: 0 }
+      const current = byTs.get(point.ts) ?? {
+        rates: [],
+        incidents: 0,
+        requestCount: 0,
+        successCount: 0,
+      }
       if (Number.isFinite(point.success_rate)) {
         const successRate = toUptimePct(point.success_rate)
         current.rates.push(successRate)
         if (successRate < 100) current.incidents += 1
       }
+      const requestCount = Number(point.request_count)
+      const successCount = Number(point.success_count)
+      if (
+        Number.isFinite(requestCount) &&
+        requestCount > 0 &&
+        Number.isFinite(successCount)
+      ) {
+        current.requestCount += requestCount
+        current.successCount += Math.min(successCount, requestCount)
+      }
       byTs.set(point.ts, current)
     }
   }
-  return Array.from(byTs.entries())
+  return [...byTs.entries()]
     .sort(([a], [b]) => a - b)
     .map(([ts, value]) => {
-      const uptime =
-        value.rates.length > 0
-          ? value.rates.reduce((sum, rate) => sum + rate, 0) /
-            value.rates.length
-          : 0
+      let uptime = 0
+      if (value.requestCount > 0) {
+        uptime = (value.successCount / value.requestCount) * 100
+      } else if (value.rates.length > 0) {
+        uptime =
+          value.rates.reduce((sum, rate) => sum + rate, 0) / value.rates.length
+      }
       return {
         date: new Date(ts * 1000).toISOString(),
         uptime_pct: toUptimePct(uptime),
@@ -164,8 +197,14 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
   const { t } = useTranslation()
   const perfMetricsVisible = usePerformanceMetricsVisibility()
   const metricsQuery = useQuery({
-    queryKey: ['perf-metrics', props.model.model_name, perfMetricsVisible],
-    queryFn: () => getPerfMetrics(props.model.model_name, 24),
+    queryKey: [
+      'perf-metrics',
+      props.model.model_name,
+      DETAILS_PERFORMANCE_WINDOW_HOURS,
+      perfMetricsVisible,
+    ],
+    queryFn: () =>
+      getPerfMetrics(props.model.model_name, DETAILS_PERFORMANCE_WINDOW_HOURS),
     enabled: perfMetricsVisible,
     staleTime: 60 * 1000,
   })
@@ -181,6 +220,8 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
         avg_latency_ms: group.avg_latency_ms,
         success_rate: group.success_rate,
         avg_tps: group.avg_tps,
+        request_count: group.request_count,
+        success_count: group.success_count,
       })),
     [groups]
   )
@@ -214,14 +255,8 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
       ? tpsValues.reduce((sum, value) => sum + value, 0) / tpsValues.length
       : 0
   const avgLatency = average(performances, 'avg_latency_ms')
-  const successRates = performances
-    .map((perf) => perf.success_rate)
-    .filter((value) => Number.isFinite(value))
-  const successRate =
-    successRates.length > 0
-      ? successRates.reduce((sum, value) => sum + value, 0) /
-        successRates.length
-      : 0
+  const successRate = weightedSuccessRate(performances)
+  const totals = sumPerformanceCounters(performances)
   const incidentCount = uptimeSeries.reduce((s, p) => s + p.incidents, 0)
 
   return (
@@ -243,11 +278,12 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
           label={t('Success rate')}
           value={formatUptimePct(successRate)}
           hint={
-            incidentCount > 0
-              ? t('{{count}} incidents in the last 24 hours', {
-                  count: incidentCount,
+            totals.requestCount > 0
+              ? t('{{failed}} failed of {{total}} requests in the last hour', {
+                  failed: totals.failedCount,
+                  total: totals.requestCount,
                 })
-              : t('No incidents in the last 24 hours')
+              : t('No requests in the last hour')
           }
           valueClassName={getSuccessRateTextClass(successRate)}
         />
@@ -313,7 +349,7 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
       <section>
         <SectionHeader
           icon={Timer}
-          title={t('Latency trend (last 24h)')}
+          title={t('Latency trend (last hour)')}
           description={t('Average TTFT')}
         />
         <LatencyTrendChart series={latencySeries} />
@@ -322,16 +358,16 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
       <section>
         <SectionHeader
           icon={HeartPulse}
-          title={t('Availability (last 24h)')}
+          title={t('Availability (last hour)')}
           description={
             incidentCount > 0
               ? t(
-                  'Request success rate; {{incidents}} incident buckets in the last 24 hours',
+                  'Request success rate; {{incidents}} incident buckets in the last hour',
                   {
                     incidents: incidentCount,
                   }
                 )
-              : t('Request success rate sampled over the last 24 hours')
+              : t('Request success rate sampled over the last hour')
           }
           accent={
             incidentCount > 0 ? (

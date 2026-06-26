@@ -30,6 +30,8 @@ type BucketPoint struct {
 	AvgLatencyMs int64   `json:"avg_latency_ms"`
 	SuccessRate  float64 `json:"success_rate"`
 	AvgTps       float64 `json:"avg_tps"`
+	RequestCount int64   `json:"request_count"`
+	SuccessCount int64   `json:"success_count"`
 }
 
 type GroupResult struct {
@@ -38,6 +40,8 @@ type GroupResult struct {
 	AvgLatencyMs int64         `json:"avg_latency_ms"`
 	SuccessRate  float64       `json:"success_rate"`
 	AvgTps       float64       `json:"avg_tps"`
+	RequestCount int64         `json:"request_count"`
+	SuccessCount int64         `json:"success_count"`
 	Availability string        `json:"availability"`
 	Series       []BucketPoint `json:"series"`
 }
@@ -55,7 +59,8 @@ type ModelSummary struct {
 	AvgTps             float64   `json:"avg_tps"`
 	Availability       string    `json:"availability"`
 	RecentSuccessRates []float64 `json:"recent_success_rates,omitempty"`
-	RequestCount       int64     `json:"-"`
+	RequestCount       int64     `json:"request_count"`
+	SuccessCount       int64     `json:"success_count"`
 }
 
 type SummaryAllResult struct {

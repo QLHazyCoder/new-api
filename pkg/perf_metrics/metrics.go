@@ -204,6 +204,7 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 			Availability:       availability(total),
 			RecentSuccessRates: recentSuccessRates(modelBuckets[name], 3),
 			RequestCount:       total.requestCount,
+			SuccessCount:       total.successCount,
 		})
 	}
 	sort.Slice(models, func(i, j int) bool {
@@ -350,6 +351,8 @@ func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResu
 			AvgLatencyMs: avg(total.totalLatencyMs, total.requestCount),
 			SuccessRate:  successRate(total),
 			AvgTps:       avgTps(total),
+			RequestCount: total.requestCount,
+			SuccessCount: total.successCount,
 			Availability: availability(total),
 			Series:       series,
 		})
@@ -369,6 +372,8 @@ func bucketPoint(ts int64, value counters) BucketPoint {
 		AvgLatencyMs: avg(value.totalLatencyMs, value.requestCount),
 		SuccessRate:  successRate(value),
 		AvgTps:       avgTps(value),
+		RequestCount: value.requestCount,
+		SuccessCount: value.successCount,
 	}
 }
 

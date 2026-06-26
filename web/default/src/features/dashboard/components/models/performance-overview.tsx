@@ -25,6 +25,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
 import { usePerformanceMetricsVisibility } from '@/features/performance-metrics/hooks/use-performance-metrics-visibility'
 import {
+  sumPerformanceCounters,
+  weightedSuccessRate,
+} from '@/features/performance-metrics/lib/aggregate'
+import {
   getPerformanceAvailability,
   type PerformanceAvailability,
   performanceAvailabilityDotClassName,
@@ -69,6 +73,7 @@ function simpleAverage(
 }
 
 function buildPerformanceSummary(rows: PerfModelSummary[]): PerformanceSummary {
+  const totals = sumPerformanceCounters(rows)
   const availableCount = rows.filter(
     (row) => getPerformanceAvailability(row) === 'available'
   ).length
@@ -83,7 +88,7 @@ function buildPerformanceSummary(rows: PerfModelSummary[]): PerformanceSummary {
         : 'unknown'
 
   return {
-    totalRequests: rows.length,
+    totalRequests: totals.requestCount,
     avgLatencyMs: Math.round(
       simpleAverage(
         rows,
@@ -96,7 +101,7 @@ function buildPerformanceSummary(rows: PerfModelSummary[]): PerformanceSummary {
       'avg_tps',
       (value) => Number.isFinite(value) && value > 0
     ),
-    successRate: simpleAverage(rows, 'success_rate', Number.isFinite),
+    successRate: weightedSuccessRate(rows),
     availability,
   }
 }

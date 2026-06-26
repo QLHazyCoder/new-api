@@ -22,6 +22,8 @@ export type PerformanceSeriesPoint = {
   avg_latency_ms: number
   success_rate: number
   avg_tps: number
+  request_count?: number
+  success_count?: number
 }
 
 export type PerformanceGroup = {
@@ -30,6 +32,8 @@ export type PerformanceGroup = {
   avg_latency_ms: number
   success_rate: number
   avg_tps: number
+  request_count?: number
+  success_count?: number
   availability?: 'available' | 'unavailable' | 'unknown'
   series: PerformanceSeriesPoint[]
 }
@@ -52,6 +56,7 @@ export type PerfModelSummary = {
   availability?: 'available' | 'unavailable' | 'unknown'
   recent_success_rates?: number[]
   request_count?: number
+  success_count?: number
 }
 
 export type PerfSummaryAllData = {

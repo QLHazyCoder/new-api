@@ -51,6 +51,7 @@ import { GroupBadge } from '@/components/group-badge'
 import { PublicLayout } from '@/components/layout'
 import { getPerfMetrics } from '@/features/performance-metrics/api'
 import { usePerformanceMetricsVisibility } from '@/features/performance-metrics/hooks/use-performance-metrics-visibility'
+import { weightedSuccessRate } from '@/features/performance-metrics/lib/aggregate'
 import {
   formatLatency,
   formatThroughput,
@@ -77,6 +78,8 @@ import type {
 import { DynamicPricingBreakdown } from './dynamic-pricing-breakdown'
 import { ModelDetailsApi } from './model-details-api'
 import { ModelDetailsPerformance } from './model-details-performance'
+
+const DETAILS_PERFORMANCE_WINDOW_HOURS = 1
 
 // ----------------------------------------------------------------------------
 // Local UI helpers
@@ -178,8 +181,14 @@ function OverviewSummaryGrid(props: { model: PricingModel }) {
   const { t } = useTranslation()
   const perfMetricsVisible = usePerformanceMetricsVisibility()
   const metricsQuery = useQuery({
-    queryKey: ['perf-metrics', props.model.model_name, perfMetricsVisible],
-    queryFn: () => getPerfMetrics(props.model.model_name, 24),
+    queryKey: [
+      'perf-metrics',
+      props.model.model_name,
+      DETAILS_PERFORMANCE_WINDOW_HOURS,
+      perfMetricsVisible,
+    ],
+    queryFn: () =>
+      getPerfMetrics(props.model.model_name, DETAILS_PERFORMANCE_WINDOW_HOURS),
     enabled: perfMetricsVisible,
     staleTime: 60 * 1000,
   })
@@ -189,13 +198,7 @@ function OverviewSummaryGrid(props: { model: PricingModel }) {
   }
 
   const groups = metricsQuery.data?.data.groups ?? []
-  const successRates = groups
-    .map((group) => group.success_rate)
-    .filter((rate) => Number.isFinite(rate))
-  const successRate =
-    successRates.length > 0
-      ? successRates.reduce((sum, rate) => sum + rate, 0) / successRates.length
-      : Number.NaN
+  const successRate = weightedSuccessRate(groups)
   const tpsValues = groups
     .map((group) => group.avg_tps)
     .filter((value) => value > 0)

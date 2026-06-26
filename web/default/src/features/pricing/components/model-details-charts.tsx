@@ -88,7 +88,7 @@ function stripUptimePointSuffix(value: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Latency trend chart (24h, multi-group point-line chart)
+// Latency trend chart (multi-group point-line chart)
 // ---------------------------------------------------------------------------
 
 export function LatencyTrendChart(props: {
@@ -186,7 +186,7 @@ export function LatencyTrendChart(props: {
 }
 
 // ---------------------------------------------------------------------------
-// Uptime trend chart (24h, point-line chart)
+// Uptime trend chart (point-line chart)
 // ---------------------------------------------------------------------------
 
 export function UptimeTrendChart(props: {
