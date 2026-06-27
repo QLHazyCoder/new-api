@@ -149,6 +149,14 @@ export async function getGroups(): Promise<ApiResponse<string[]>> {
   return res.data
 }
 
+/**
+ * Get groups available for assigning users in admin user management.
+ */
+export async function getUserManagementGroups(): Promise<ApiResponse<string[]>> {
+  const res = await api.get('/api/group/user-management')
+  return res.data
+}
+
 // ============================================================================
 // Admin Binding Management APIs
 // ============================================================================

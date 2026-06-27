@@ -62,7 +62,12 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
-import { createUser, updateUser, getUser, getGroups } from '../api'
+import {
+  createUser,
+  updateUser,
+  getUser,
+  getUserManagementGroups,
+} from '../api'
 import { BINDING_FIELDS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
   userFormSchema,
@@ -94,8 +99,8 @@ export function UsersMutateDrawer({
 
   // Fetch groups
   const { data: groupsData } = useQuery({
-    queryKey: ['groups'],
-    queryFn: getGroups,
+    queryKey: ['user-management-groups'],
+    queryFn: getUserManagementGroups,
     staleTime: 5 * 60 * 1000,
   })
 
