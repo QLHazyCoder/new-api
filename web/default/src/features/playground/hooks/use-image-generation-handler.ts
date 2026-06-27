@@ -25,6 +25,7 @@ import { ERROR_MESSAGES } from '../constants'
 import {
   buildImageEditFormData,
   buildImageGenerationPayload,
+  loadImageTasks,
   normalizePlaygroundImageConfig,
   normalizeImageGenerationCount,
   saveImageTasks,
@@ -101,6 +102,30 @@ function toReferencePreview(
   }
 }
 
+function prependStoredImageTasks(tasks: ImageTask[]): void {
+  const storedTaskIds = new Set(tasks.map((task) => task.id))
+  const storedTasks = loadImageTasks().filter(
+    (task) => !storedTaskIds.has(task.id)
+  )
+  saveImageTasks([...tasks, ...storedTasks])
+}
+
+function updateStoredImageTask(
+  taskId: string,
+  updater: (task: ImageTask) => ImageTask
+): void {
+  let didUpdate = false
+  const nextTasks = loadImageTasks().map((task) => {
+    if (task.id !== taskId) return task
+    didUpdate = true
+    return updater(task)
+  })
+
+  if (didUpdate) {
+    saveImageTasks(nextTasks)
+  }
+}
+
 export function useImageGenerationHandler({
   config,
   onTasksUpdate,
@@ -109,11 +134,12 @@ export function useImageGenerationHandler({
 
   const updateTask = useCallback(
     (taskId: string, updater: (task: ImageTask) => ImageTask) => {
+      updateStoredImageTask(taskId, updater)
+
       onTasksUpdate((prev) => {
         const nextTasks = prev.map((task) =>
           task.id === taskId ? updater(task) : task
         )
-        saveImageTasks(nextTasks)
         return nextTasks
       })
     },
@@ -171,6 +197,7 @@ export function useImageGenerationHandler({
         })
       )
 
+      prependStoredImageTasks(nextTasks)
       onTasksUpdate((prev) => [...nextTasks, ...prev])
 
       const results = await Promise.allSettled(
