@@ -16,28 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
-import { getUserModels, getUserGroups } from './api'
-import { PlaygroundChat } from './components/playground-chat'
+import { useEffect, useMemo, useState } from 'react'
+
+import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundImageInput } from './components/playground-image-input'
 import { PlaygroundImageTaskGrid } from './components/playground-image-task-grid'
-import { PlaygroundInput } from './components/playground-input'
+import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundModeToggle } from './components/playground-mode-toggle'
 import {
-  usePlaygroundState,
   useChatHandler,
   useImageGenerationHandler,
+  usePlaygroundConversation,
+  usePlaygroundOptions,
+  usePlaygroundState,
 } from './hooks'
 import {
-  createUserMessage,
-  createLoadingAssistantMessage,
   isSupportedPlaygroundImageModel,
   supportsImageEditingModel,
 } from './lib'
-import type { ImageTask, Message as MessageType, ModelOption } from './types'
+import type { ImageTask, ModelOption } from './types'
 
 function supportsImageGeneration(model: ModelOption): boolean {
   const endpoints =
@@ -49,15 +46,13 @@ function supportsImageGeneration(model: ModelOption): boolean {
 }
 
 export function Playground() {
-  const { t } = useTranslation()
-  const modelLoadErrorMessage = t('Failed to load playground models')
-  const groupLoadErrorMessage = t('Failed to load playground groups')
   const {
     mode,
     config,
     imageConfig,
     parameterEnabled,
     messages,
+    isLoadingMessages,
     imageTasks,
     models,
     groups,
@@ -68,6 +63,7 @@ export function Playground() {
     setGroups,
     updateConfig,
     updateImageConfig,
+    clearMessages,
   } = usePlaygroundState()
 
   const { sendChat, stopGeneration, isGenerating } = useChatHandler({
@@ -76,182 +72,61 @@ export function Playground() {
     onMessageUpdate: updateMessages,
   })
 
-  const imageModels = models.filter(supportsImageGeneration)
+  const {
+    editingMessageKey,
+    handleSendMessage,
+    handleRegenerateMessage,
+    handleEditMessage,
+    handleEditOpenChange,
+    applyEdit,
+    handleDeleteMessage,
+  } = usePlaygroundConversation({
+    messages,
+    updateMessages,
+    sendChat,
+  })
+
+  const { isLoadingModels } = usePlaygroundOptions({
+    currentGroup: config.group,
+    currentModel: config.model,
+    setGroups,
+    setModels,
+    updateConfig,
+  })
+
+  const imageModels = useMemo(
+    () => models.filter(supportsImageGeneration),
+    [models]
+  )
+  const [imagePrompt, setImagePrompt] = useState('')
 
   const { generateImage, retryTask } = useImageGenerationHandler({
     config: imageConfig,
     onTasksUpdate: updateImageTasks,
   })
 
-  // Edit dialog state
-  const [editingMessageKey, setEditingMessageKey] = useState<string | null>(
-    null
-  )
-  const [imagePrompt, setImagePrompt] = useState('')
-
-  // Load models
-  const { data: modelsData, isLoading: isLoadingModels } = useQuery({
-    queryKey: ['playground-models', modelLoadErrorMessage],
-    queryFn: async () => {
-      try {
-        return await getUserModels()
-      } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : modelLoadErrorMessage
-        )
-        return []
-      }
-    },
-  })
-
-  // Load groups
-  const { data: groupsData } = useQuery({
-    queryKey: ['playground-groups', groupLoadErrorMessage],
-    queryFn: async () => {
-      try {
-        return await getUserGroups()
-      } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : groupLoadErrorMessage
-        )
-        return []
-      }
-    },
-  })
-
-  // Update models when data changes
   useEffect(() => {
-    if (!modelsData) return
-
-    setModels(modelsData)
-
-    // Set default model if current model is not available
-    const isCurrentModelValid = modelsData.some((m) => m.value === config.model)
-    if (modelsData.length > 0 && !isCurrentModelValid) {
-      updateConfig('model', modelsData[0].value)
-    }
-
-    const nextImageModels = modelsData.filter(supportsImageGeneration)
-    const isCurrentImageModelValid = nextImageModels.some(
-      (m) => m.value === imageConfig.model
+    if (imageModels.length === 0) return
+    const hasCurrentImageModel = imageModels.some(
+      (model) => model.value === imageConfig.model
     )
-    if (nextImageModels.length > 0 && !isCurrentImageModelValid) {
-      updateImageConfig('model', nextImageModels[0].value)
+    if (!hasCurrentImageModel) {
+      updateImageConfig('model', imageModels[0].value)
     }
-  }, [
-    modelsData,
-    config.model,
-    imageConfig.model,
-    setModels,
-    updateConfig,
-    updateImageConfig,
-  ])
+  }, [imageModels, imageConfig.model, updateImageConfig])
 
-  // Update groups when data changes
   useEffect(() => {
-    if (!groupsData) return
-
-    setGroups(groupsData)
-
-    const hasCurrentGroup = groupsData.some((g) => g.value === config.group)
-    if (!hasCurrentGroup && groupsData.length > 0) {
-      const fallback =
-        groupsData.find((g) => g.value === 'default')?.value ??
-        groupsData[0].value
-      updateConfig('group', fallback)
-    }
-
-    const hasCurrentImageGroup = groupsData.some(
-      (g) => g.value === imageConfig.group
+    if (groups.length === 0) return
+    const hasCurrentImageGroup = groups.some(
+      (group) => group.value === imageConfig.group
     )
-    if (!hasCurrentImageGroup && groupsData.length > 0) {
+    if (!hasCurrentImageGroup) {
       const fallback =
-        groupsData.find((g) => g.value === 'default')?.value ??
-        groupsData[0].value
+        groups.find((group) => group.value === 'default')?.value ??
+        groups[0].value
       updateImageConfig('group', fallback)
     }
-  }, [
-    groupsData,
-    setGroups,
-    config.group,
-    imageConfig.group,
-    updateConfig,
-    updateImageConfig,
-  ])
-
-  const handleSendMessage = (text: string) => {
-    const userMessage = createUserMessage(text)
-    const assistantMessage = createLoadingAssistantMessage()
-
-    const newMessages = [...messages, userMessage, assistantMessage]
-    updateMessages(newMessages)
-
-    // Send chat request
-    sendChat(newMessages)
-  }
-
-  const handleCopyMessage = (message: MessageType) => {
-    // Copy is handled in MessageActions component
-    // eslint-disable-next-line no-console
-    console.log('Message copied:', message.key)
-  }
-
-  const handleRegenerateMessage = (message: MessageType) => {
-    // Find the message index and regenerate from there
-    const messageIndex = messages.findIndex((m) => m.key === message.key)
-    if (messageIndex === -1) return
-
-    // Remove messages after this one and regenerate
-    const messagesUpToHere = messages.slice(0, messageIndex)
-    const loadingMessage = createLoadingAssistantMessage()
-    const newMessages = [...messagesUpToHere, loadingMessage]
-
-    updateMessages(newMessages)
-    sendChat(newMessages)
-  }
-
-  const handleEditMessage = useCallback((message: MessageType) => {
-    setEditingMessageKey(message.key)
-  }, [])
-
-  const handleEditOpenChange = useCallback((open: boolean) => {
-    if (!open) setEditingMessageKey(null)
-  }, [])
-
-  // Apply edit and optionally re-submit from the edited user message
-  const applyEdit = useCallback(
-    (newContent: string, submit: boolean) => {
-      if (!editingMessageKey) return
-      const index = messages.findIndex((m) => m.key === editingMessageKey)
-      if (index === -1) return
-
-      const updated = messages.map((m) =>
-        m.key === editingMessageKey
-          ? { ...m, versions: [{ ...m.versions[0], content: newContent }] }
-          : m
-      )
-
-      setEditingMessageKey(null)
-
-      if (!submit || updated[index].from !== 'user') {
-        updateMessages(updated)
-        return
-      }
-
-      const toSubmit = [
-        ...updated.slice(0, index + 1),
-        createLoadingAssistantMessage(),
-      ]
-      updateMessages(toSubmit)
-      sendChat(toSubmit)
-    },
-    [editingMessageKey, messages, updateMessages, sendChat]
-  )
-
-  const handleDeleteMessage = (message: MessageType) => {
-    const newMessages = messages.filter((m) => m.key !== message.key)
-    updateMessages(newMessages)
-  }
+  }, [groups, imageConfig.group, updateImageConfig])
 
   const handleReusePrompt = (prompt: string) => {
     setMode('image')
@@ -266,22 +141,28 @@ export function Playground() {
     updateImageTasks((prev) => prev.filter((task) => task.id !== taskId))
   }
 
+  const handleClearMessages = () => {
+    handleEditOpenChange(false)
+    clearMessages()
+  }
+
   return (
-    <div className='relative flex size-full flex-col overflow-hidden'>
+    <div className='relative flex size-full min-h-0 flex-col overflow-hidden'>
       <div className='mx-auto flex w-full max-w-4xl items-center justify-between px-3 py-2'>
         <PlaygroundModeToggle value={mode} onChange={setMode} />
       </div>
 
       {/* Full-width scroll container: scrolling works even over side whitespace */}
-      <div className='flex flex-1 flex-col overflow-hidden'>
+      <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
         {mode === 'chat' ? (
           <PlaygroundChat
             messages={messages}
-            onCopyMessage={handleCopyMessage}
             onRegenerateMessage={handleRegenerateMessage}
             onEditMessage={handleEditMessage}
             onDeleteMessage={handleDeleteMessage}
+            onSelectPrompt={handleSendMessage}
             isGenerating={isGenerating}
+            isLoadingMessages={isLoadingMessages}
             editingKey={editingMessageKey}
             onCancelEdit={handleEditOpenChange}
             onSaveEdit={(newContent) => applyEdit(newContent, false)}
@@ -300,41 +181,41 @@ export function Playground() {
       </div>
 
       {/* Input area: center content and constrain to the same container width */}
-      <div className='border-border/60 bg-background/95 supports-[backdrop-filter]:bg-background/80 mx-auto w-full border-t px-3 py-3 shadow-[0_-8px_24px_-20px_rgb(0_0_0_/_0.35)] backdrop-blur'>
-        <div className='mx-auto w-full max-w-5xl'>
-          {mode === 'chat' ? (
-            <PlaygroundInput
-              disabled={isGenerating}
-              groups={groups}
-              groupValue={config.group}
-              isGenerating={isGenerating}
-              isModelLoading={isLoadingModels}
-              modelValue={config.model}
-              models={models}
-              onGroupChange={(value) => updateConfig('group', value)}
-              onModelChange={(value) => updateConfig('model', value)}
-              onStop={stopGeneration}
-              onSubmit={handleSendMessage}
-            />
-          ) : (
-            <PlaygroundImageInput
-              config={imageConfig}
-              disabled={imageModels.length === 0}
-              groups={groups}
-              isModelLoading={isLoadingModels}
-              models={imageModels}
-              prompt={imagePrompt}
-              supportsReferenceImages={supportsImageEditingModel(
-                imageConfig.model
-              )}
-              onConfigChange={updateImageConfig}
-              onPromptChange={setImagePrompt}
-              onSubmit={(prompt, referenceImages) =>
-                void generateImage(prompt, referenceImages)
-              }
-            />
-          )}
-        </div>
+      <div className='mx-auto w-full max-w-4xl'>
+        {mode === 'chat' ? (
+          <PlaygroundInput
+            disabled={isGenerating}
+            groups={groups}
+            groupValue={config.group}
+            isGenerating={isGenerating}
+            isModelLoading={isLoadingModels}
+            modelValue={config.model}
+            models={models}
+            onGroupChange={(value) => updateConfig('group', value)}
+            onClearMessages={handleClearMessages}
+            onModelChange={(value) => updateConfig('model', value)}
+            onStop={stopGeneration}
+            onSubmit={handleSendMessage}
+            hasMessages={messages.length > 0}
+          />
+        ) : (
+          <PlaygroundImageInput
+            config={imageConfig}
+            disabled={imageModels.length === 0}
+            groups={groups}
+            isModelLoading={isLoadingModels}
+            models={imageModels}
+            prompt={imagePrompt}
+            supportsReferenceImages={supportsImageEditingModel(
+              imageConfig.model
+            )}
+            onConfigChange={updateImageConfig}
+            onPromptChange={setImagePrompt}
+            onSubmit={(prompt, referenceImages) =>
+              void generateImage(prompt, referenceImages)
+            }
+          />
+        )}
       </div>
     </div>
   )

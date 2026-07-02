@@ -16,7 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { PermissionCatalog } from '@/lib/admin-permissions'
 import { api } from '@/lib/api'
+
 import type {
   User,
   GetUsersParams,
@@ -155,6 +157,18 @@ export async function getGroups(): Promise<ApiResponse<string[]>> {
 export async function getUserManagementGroups(): Promise<ApiResponse<string[]>> {
   const res = await api.get('/api/group/user-management')
   return res.data
+}
+
+/**
+ * Get the permission catalog (resources, actions, and role baselines).
+ * Source of truth lives in the backend authz package.
+ */
+export async function getPermissionCatalog(): Promise<PermissionCatalog> {
+  const res = await api.get('/api/authz/catalog')
+  return {
+    resources: res.data?.data?.resources ?? [],
+    roles: res.data?.data?.roles ?? [],
+  }
 }
 
 // ============================================================================
