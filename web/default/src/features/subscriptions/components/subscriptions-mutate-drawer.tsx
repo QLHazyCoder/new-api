@@ -491,6 +491,50 @@ export function SubscriptionsMutateDrawer({
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control}
+                  name='applicable_group'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Applicable Group')}</FormLabel>
+                      <Select
+                        items={[
+                          { value: '__none__', label: t('All Groups') },
+                          ...groupOptions.map((g) => ({ value: g, label: g })),
+                        ]}
+                        onValueChange={(v) =>
+                          field.onChange(v === '__none__' ? '' : v)
+                        }
+                        value={field.value || ''}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder={t('All Groups')} />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent alignItemWithTrigger={false}>
+                          <SelectGroup>
+                            <SelectItem value='__none__'>
+                              {t('All Groups')}
+                            </SelectItem>
+                            {groupOptions.map((g) => (
+                              <SelectItem key={g} value={g}>
+                                {g}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        {t(
+                          'Only requests using this group can consume this subscription quota. Leave empty for all groups.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               <FormField
@@ -585,12 +629,10 @@ export function SubscriptionsMutateDrawer({
                     <FormItem>
                       <FormLabel>{t('Duration Unit')}</FormLabel>
                       <Select
-                        items={[
-                          ...durationUnitOpts.map((o) => ({
+                        items={durationUnitOpts.map((o) => ({
                             value: o.value,
                             label: o.label,
-                          })),
-                        ]}
+                          }))}
                         onValueChange={field.onChange}
                         value={field.value}
                       >
@@ -675,12 +717,10 @@ export function SubscriptionsMutateDrawer({
                     <FormItem>
                       <FormLabel>{t('Reset Cycle')}</FormLabel>
                       <Select
-                        items={[
-                          ...resetPeriodOpts.map((o) => ({
+                        items={resetPeriodOpts.map((o) => ({
                             value: o.value,
                             label: o.label,
-                          })),
-                        ]}
+                          }))}
                         onValueChange={field.onChange}
                         value={field.value}
                       >

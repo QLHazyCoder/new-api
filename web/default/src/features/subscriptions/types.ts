@@ -41,6 +41,7 @@ export const subscriptionPlanSchema = z.object({
   total_amount: z.number(),
   upgrade_group: z.string().optional(),
   downgrade_group: z.string().optional(),
+  applicable_group: z.string().optional(),
   stripe_price_id: z.string().optional(),
   creem_product_id: z.string().optional(),
   waffo_pancake_product_id: z.string().optional(),
@@ -66,6 +67,7 @@ export const userSubscriptionSchema = z.object({
   end_time: z.number(),
   amount_total: z.number(),
   amount_used: z.number(),
+  applicable_group: z.string().optional(),
   next_reset_time: z.number().optional(),
 })
 
