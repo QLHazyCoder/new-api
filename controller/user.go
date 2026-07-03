@@ -589,9 +589,18 @@ func GetUserModels(c *gin.Context) {
 		return
 	}
 	groups := service.GetUserUsableGroups(user.Group)
+	withEndpointTypes := c.Query("with_endpoint_types") == "true"
 	group := c.Query("group")
 	if group != "" {
 		if _, ok := groups[group]; !ok {
+			if withEndpointTypes {
+				c.JSON(http.StatusOK, gin.H{
+					"success": true,
+					"message": "",
+					"data":    []dto.UserModelOption{},
+				})
+				return
+			}
 			c.JSON(http.StatusOK, gin.H{
 				"success": true,
 				"message": "",
@@ -600,10 +609,20 @@ func GetUserModels(c *gin.Context) {
 			return
 		}
 
+		models := model.GetGroupEnabledModels(group)
+		if withEndpointTypes {
+			model.GetPricing()
+			c.JSON(http.StatusOK, gin.H{
+				"success": true,
+				"message": "",
+				"data":    buildUserModelOptions(models),
+			})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"message": "",
-			"data":    model.GetGroupEnabledModels(group),
+			"data":    models,
 		})
 		return
 	}
@@ -616,7 +635,7 @@ func GetUserModels(c *gin.Context) {
 			}
 		}
 	}
-	if c.Query("with_endpoint_types") == "true" {
+	if withEndpointTypes {
 		model.GetPricing()
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,

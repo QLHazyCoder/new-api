@@ -19,14 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useMemo, useState } from 'react'
 
 import { PlaygroundChat } from './components/chat/playground-chat'
+import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundImageInput } from './components/playground-image-input'
 import { PlaygroundImageTaskGrid } from './components/playground-image-task-grid'
-import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundModeToggle } from './components/playground-mode-toggle'
 import {
   useChatHandler,
   useImageGenerationHandler,
   usePlaygroundConversation,
+  usePlaygroundImageModels,
   usePlaygroundOptions,
   usePlaygroundState,
 } from './hooks'
@@ -94,9 +95,13 @@ export function Playground() {
     updateConfig,
   })
 
+  const { imageModelOptions, isLoadingImageModels } = usePlaygroundImageModels(
+    imageConfig.group
+  )
+
   const imageModels = useMemo(
-    () => models.filter(supportsImageGeneration),
-    [models]
+    () => imageModelOptions.filter(supportsImageGeneration),
+    [imageModelOptions]
   )
   const [imagePrompt, setImagePrompt] = useState('')
 
@@ -203,7 +208,7 @@ export function Playground() {
             config={imageConfig}
             disabled={imageModels.length === 0}
             groups={groups}
-            isModelLoading={isLoadingModels}
+            isModelLoading={isLoadingImageModels}
             models={imageModels}
             prompt={imagePrompt}
             supportsReferenceImages={supportsImageEditingModel(
