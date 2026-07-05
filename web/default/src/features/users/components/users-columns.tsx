@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
 import { BadgeCell } from '@/components/data-table'
@@ -40,7 +40,7 @@ import {
   USER_ROLES,
   isUserDeleted,
 } from '../constants'
-import { type User } from '../types'
+import type { User } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 function getQuotaProgressColor(percentage: number): string {
@@ -362,6 +362,20 @@ export function useUsersColumns(): ColumnDef<User>[] {
       header: t('Last Login'),
       cell: ({ row }) => {
         const ts = row.getValue('last_login_at') as number | undefined
+        return (
+          <span className='text-muted-foreground text-sm'>
+            {ts ? formatTimestamp(ts) : '-'}
+          </span>
+        )
+      },
+      size: 180,
+      meta: { mobileHidden: true },
+    },
+    {
+      accessorKey: 'last_used_at',
+      header: t('Last Used'),
+      cell: ({ row }) => {
+        const ts = row.getValue('last_used_at') as number | undefined
         return (
           <span className='text-muted-foreground text-sm'>
             {ts ? formatTimestamp(ts) : '-'}

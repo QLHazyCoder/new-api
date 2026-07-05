@@ -53,6 +53,7 @@ type User struct {
 	StripeCustomer   string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 	CreatedAt        int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at"`
 	LastLoginAt      int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+	LastUsedAt       int64                      `json:"last_used_at" gorm:"-:all"`
 	AdminPermissions map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
 }
 
@@ -223,7 +224,48 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 		return nil, 0, err
 	}
 
+	fillUsersLastUsedAt(users)
+
 	return users, total, nil
+}
+
+func fillUsersLastUsedAt(users []*User) {
+	if len(users) == 0 || LOG_DB == nil {
+		return
+	}
+
+	userIds := make([]int, 0, len(users))
+	userById := make(map[int]*User, len(users))
+	for _, user := range users {
+		if user == nil || user.Id == 0 {
+			continue
+		}
+		userIds = append(userIds, user.Id)
+		userById[user.Id] = user
+	}
+	if len(userIds) == 0 {
+		return
+	}
+
+	var rows []struct {
+		UserId     int   `gorm:"column:user_id"`
+		LastUsedAt int64 `gorm:"column:last_used_at"`
+	}
+	err := LOG_DB.Model(&Log{}).
+		Select("user_id, MAX(created_at) AS last_used_at").
+		Where("user_id IN ? AND type = ?", userIds, LogTypeConsume).
+		Group("user_id").
+		Scan(&rows).Error
+	if err != nil {
+		common.SysLog("failed to fill user last_used_at: " + err.Error())
+		return
+	}
+
+	for _, row := range rows {
+		if user, ok := userById[row.UserId]; ok {
+			user.LastUsedAt = row.LastUsedAt
+		}
+	}
 }
 
 func SearchUsers(keyword string, group string, role *int, status *int, startIdx int, num int) ([]*User, int64, error) {
@@ -290,6 +332,8 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}
+
+	fillUsersLastUsedAt(users)
 
 	return users, total, nil
 }
