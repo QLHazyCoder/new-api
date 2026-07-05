@@ -48,6 +48,14 @@ function isDisabledUserRow(user: User) {
   return isUserDeleted(user) || user.status === USER_STATUS.DISABLED
 }
 
+function getDisabledUserRowClassName(user: User, isMobile: boolean) {
+  if (!isDisabledUserRow(user)) {
+    return undefined
+  }
+
+  return isMobile ? DISABLED_ROW_MOBILE : DISABLED_ROW_DESKTOP
+}
+
 export function UsersTable() {
   const { t } = useTranslation()
   const columns = useUsersColumns()
@@ -144,6 +152,7 @@ export function UsersTable() {
     globalFilterFn: (row, _columnId, filterValue) => {
       const searchValue = String(filterValue).toLowerCase()
       const fields = [
+        row.getValue('id'),
         row.getValue('username'),
         row.original.display_name,
         row.original.email,
@@ -176,7 +185,7 @@ export function UsersTable() {
       skeletonKeyPrefix='users-skeleton'
       applyHeaderSize
       toolbarProps={{
-        searchPlaceholder: t('Filter by username, name or email...'),
+        searchPlaceholder: t('Filter by ID, username, name or email...'),
         filters: [
           {
             columnId: 'status',
@@ -193,11 +202,7 @@ export function UsersTable() {
         ],
       }}
       getRowClassName={(row, { isMobile }) =>
-        isDisabledUserRow(row.original)
-          ? isMobile
-            ? DISABLED_ROW_MOBILE
-            : DISABLED_ROW_DESKTOP
-          : undefined
+        getDisabledUserRowClassName(row.original, isMobile)
       }
       bulkActions={<DataTableBulkActions table={table} />}
     />
