@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -28,7 +28,7 @@ import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
-import { DEFAULT_TOKEN_UNIT, QUOTA_TYPE_VALUES } from '../constants'
+import { DEFAULT_TOKEN_UNIT, FILTER_ALL, QUOTA_TYPE_VALUES } from '../constants'
 import {
   getDynamicDisplayGroupRatio,
   getDynamicPricingSummary,
@@ -36,11 +36,13 @@ import {
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
 import {
+  formatFixedPrice,
+  formatGroupPrice,
   formatPrice,
   formatRequestPrice,
   stripTrailingZeros,
 } from '../lib/price'
-import type { PricingModel, TokenUnit } from '../types'
+import type { PriceType, PricingModel, TokenUnit } from '../types'
 
 // ----------------------------------------------------------------------------
 // Pricing Table Columns
@@ -51,6 +53,7 @@ export interface PricingColumnsOptions {
   priceRate?: number
   usdExchangeRate?: number
   showRechargePrice?: boolean
+  groupFilter?: string
 }
 
 export function usePricingColumns(
@@ -62,9 +65,11 @@ export function usePricingColumns(
     priceRate = 1,
     usdExchangeRate = 1,
     showRechargePrice = false,
+    groupFilter = FILTER_ALL,
   } = options
 
   const tokenUnitLabel = tokenUnit === 'K' ? '1K' : '1M'
+  const selectedGroup = groupFilter !== FILTER_ALL ? groupFilter : undefined
 
   return [
     // Model column
@@ -124,7 +129,10 @@ export function usePricingColumns(
           showRechargePrice,
           priceRate,
           usdExchangeRate,
-          groupRatioMultiplier: getDynamicDisplayGroupRatio(model),
+          groupRatioMultiplier: getDynamicDisplayGroupRatio(
+            model,
+            selectedGroup
+          ),
         })
 
         if (dynamicSummary) {
@@ -179,26 +187,28 @@ export function usePricingColumns(
         const isTokenBased = isTokenBasedModel(model)
 
         if (isTokenBased) {
-          const inputPrice = stripTrailingZeros(
-            formatPrice(
-              model,
-              'input',
-              tokenUnit,
-              showRechargePrice,
-              priceRate,
-              usdExchangeRate
-            )
-          )
-          const outputPrice = stripTrailingZeros(
-            formatPrice(
-              model,
-              'output',
-              tokenUnit,
-              showRechargePrice,
-              priceRate,
-              usdExchangeRate
-            )
-          )
+          const formatTokenPrice = (type: PriceType) =>
+            selectedGroup
+              ? formatGroupPrice(
+                  model,
+                  selectedGroup,
+                  type,
+                  tokenUnit,
+                  showRechargePrice,
+                  priceRate,
+                  usdExchangeRate,
+                  model.group_ratio || {}
+                )
+              : formatPrice(
+                  model,
+                  type,
+                  tokenUnit,
+                  showRechargePrice,
+                  priceRate,
+                  usdExchangeRate
+                )
+          const inputPrice = stripTrailingZeros(formatTokenPrice('input'))
+          const outputPrice = stripTrailingZeros(formatTokenPrice('output'))
 
           return (
             <div className='max-w-full min-w-0'>
@@ -215,12 +225,21 @@ export function usePricingColumns(
         }
 
         const price = stripTrailingZeros(
-          formatRequestPrice(
-            model,
-            showRechargePrice,
-            priceRate,
-            usdExchangeRate
-          )
+          selectedGroup
+            ? formatFixedPrice(
+                model,
+                selectedGroup,
+                showRechargePrice,
+                priceRate,
+                usdExchangeRate,
+                model.group_ratio || {}
+              )
+            : formatRequestPrice(
+                model,
+                showRechargePrice,
+                priceRate,
+                usdExchangeRate
+              )
         )
 
         return (
@@ -247,7 +266,10 @@ export function usePricingColumns(
           showRechargePrice,
           priceRate,
           usdExchangeRate,
-          groupRatioMultiplier: getDynamicDisplayGroupRatio(model),
+          groupRatioMultiplier: getDynamicDisplayGroupRatio(
+            model,
+            selectedGroup
+          ),
         })
 
         if (dynamicSummary) {
@@ -285,14 +307,25 @@ export function usePricingColumns(
         }
 
         const cachedPrice = stripTrailingZeros(
-          formatPrice(
-            model,
-            'cache',
-            tokenUnit,
-            showRechargePrice,
-            priceRate,
-            usdExchangeRate
-          )
+          selectedGroup
+            ? formatGroupPrice(
+                model,
+                selectedGroup,
+                'cache',
+                tokenUnit,
+                showRechargePrice,
+                priceRate,
+                usdExchangeRate,
+                model.group_ratio || {}
+              )
+            : formatPrice(
+                model,
+                'cache',
+                tokenUnit,
+                showRechargePrice,
+                priceRate,
+                usdExchangeRate
+              )
         )
 
         return (
