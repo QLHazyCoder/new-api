@@ -27,15 +27,16 @@ import ru from './locales/ru.json'
 import vi from './locales/vi.json'
 import zhCN from './locales/zh.json'
 import zhTW from './locales/zh-TW.json'
+import { normalizeInterfaceLanguage } from './languages'
 
 export const resources = {
   en,
-  zhCN,
+  'zh-CN': zhCN,
   fr,
   ru,
   ja,
   vi,
-  zhTW
+  'zh-TW': zhTW,
 } as const
 
 i18n
@@ -44,8 +45,8 @@ i18n
   .init({
     resources,
     fallbackLng: 'en',
-    supportedLngs: ['en', 'zhCN', 'fr', 'ru', 'ja', 'vi','zhTW'],
-    load: 'currentOnly', // Convert zh-CN -> zh
+    supportedLngs: ['en', 'zh-CN', 'fr', 'ru', 'ja', 'vi', 'zh-TW'],
+    load: 'currentOnly',
     nsSeparator: false, // Allow literal colons in keys (e.g., URLs, labels)
     debug: import.meta.env.DEV,
     interpolation: {
@@ -54,6 +55,7 @@ i18n
     detection: {
       order: ['localStorage', 'navigator'],
       caches: ['localStorage'],
+      convertDetectedLanguage: normalizeInterfaceLanguage,
     },
   })
 

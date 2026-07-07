@@ -35,8 +35,8 @@ import { cn } from '@/lib/utils'
 
 const calendarLocales = {
   en: enUS,
-  zhCN,
-  zhTW: zhCN,
+  'zh-CN': zhCN,
+  'zh-TW': zhCN,
   fr,
   ru,
   ja,

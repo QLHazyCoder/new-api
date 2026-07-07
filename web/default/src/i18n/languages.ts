@@ -18,43 +18,46 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 export const INTERFACE_LANGUAGE_OPTIONS = [
-  { code: 'zhCN', label: '简体中文' },
+  { code: 'zh-CN', label: '简体中文' },
   { code: 'en', label: 'English' },
   { code: 'fr', label: 'Français' },
   { code: 'ru', label: 'Русский' },
   { code: 'ja', label: '日本語' },
   { code: 'vi', label: 'Tiếng Việt' },
-  { code: 'zhTW', label: '繁體中文' }
+  { code: 'zh-TW', label: '繁體中文' },
 ] as const
 
 export type InterfaceLanguageCode =
   (typeof INTERFACE_LANGUAGE_OPTIONS)[number]['code']
 
-const INTL_LOCALE_BY_INTERFACE_LANGUAGE: Record<string, string> = {
-  zhCN: 'zh-CN',
-  zhTW: 'zh-TW',
-}
-
-export function normalizeInterfaceLanguage(value?: string | null): string {
-  if (!value) return 'en'
-
-  let normalized = value.trim().replaceAll('_', '-').toLowerCase()
+function normalizeChineseLocale(value: string): 'zh-CN' | 'zh-TW' | undefined {
+  const normalized = value.trim().replaceAll('_', '-').toLowerCase()
   if (
     normalized === 'zh-tw' ||
     normalized === 'zh-hk' ||
     normalized === 'zh-mo' ||
     normalized === 'zhtw'
   ) {
-    normalized = 'zhTW'
+    return 'zh-TW'
   }
   if (
+    normalized === 'zh' ||
     normalized === 'zh-cn' ||
     normalized === 'zh-hans' ||
     normalized === 'zhcn'
   ) {
-    normalized = 'zhCN'
+    return 'zh-CN'
   }
+  return undefined
+}
 
+export function normalizeInterfaceLanguage(value?: string | null): string {
+  if (!value) return 'en'
+
+  const chineseLocale = normalizeChineseLocale(value)
+  if (chineseLocale) return chineseLocale
+
+  const normalized = value.trim().replaceAll('_', '-').toLowerCase()
   return INTERFACE_LANGUAGE_OPTIONS.some((lang) => lang.code === normalized)
     ? normalized
     : 'en'
@@ -77,15 +80,10 @@ export function toIntlLocale(
   }
 
   const locale = value.trim().replaceAll('_', '-')
-  const normalized = normalizeInterfaceLanguage(locale)
-  const mappedLocale = INTL_LOCALE_BY_INTERFACE_LANGUAGE[normalized]
-
-  if (mappedLocale) {
-    return mappedLocale
-  }
+  const normalized = normalizeChineseLocale(locale) ?? locale
 
   try {
-    return Intl.getCanonicalLocales(locale)[0] ?? undefined
+    return Intl.getCanonicalLocales(normalized)[0] ?? undefined
   } catch {
     return undefined
   }
