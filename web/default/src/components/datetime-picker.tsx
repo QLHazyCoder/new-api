@@ -29,12 +29,14 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { normalizeInterfaceLanguage } from '@/i18n/languages'
 import dayjs from '@/lib/dayjs'
 import { cn } from '@/lib/utils'
 
 const calendarLocales = {
   en: enUS,
-  zh: zhCN,
+  zhCN,
+  zhTW: zhCN,
   fr,
   ru,
   ja,
@@ -58,8 +60,9 @@ export function DateTimePicker({
 }: DateTimePickerProps) {
   const { t, i18n } = useTranslation()
   const placeholderText = placeholder ?? t('Select date')
+  const language = normalizeInterfaceLanguage(i18n.language)
   const calendarLocale =
-    calendarLocales[i18n.language as keyof typeof calendarLocales] ?? enUS
+    calendarLocales[language as keyof typeof calendarLocales] ?? enUS
   const currentYear = new Date().getFullYear()
   const [open, setOpen] = React.useState(false)
   const [date, setDate] = React.useState<Date | undefined>(value)

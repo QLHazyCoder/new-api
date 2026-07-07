@@ -30,19 +30,63 @@ export const INTERFACE_LANGUAGE_OPTIONS = [
 export type InterfaceLanguageCode =
   (typeof INTERFACE_LANGUAGE_OPTIONS)[number]['code']
 
+const INTL_LOCALE_BY_INTERFACE_LANGUAGE: Record<string, string> = {
+  zhCN: 'zh-CN',
+  zhTW: 'zh-TW',
+}
+
 export function normalizeInterfaceLanguage(value?: string | null): string {
   if (!value) return 'en'
 
-  var normalized = value.trim().replace(/_/g, '-').toLowerCase()
-  if (value === 'zh-TW' || value === 'zh-HK' || value === 'zh-MO' || value === 'zhTW') {
+  let normalized = value.trim().replaceAll('_', '-').toLowerCase()
+  if (
+    normalized === 'zh-tw' ||
+    normalized === 'zh-hk' ||
+    normalized === 'zh-mo' ||
+    normalized === 'zhtw'
+  ) {
     normalized = 'zhTW'
   }
-  if (value === 'zh-CN' || value === 'zh-Hans' || value === "zhCN") {
+  if (
+    normalized === 'zh-cn' ||
+    normalized === 'zh-hans' ||
+    normalized === 'zhcn'
+  ) {
     normalized = 'zhCN'
   }
 
-  console.log('Normalized interface language: %s -> %s', value, normalized)
   return INTERFACE_LANGUAGE_OPTIONS.some((lang) => lang.code === normalized)
     ? normalized
     : 'en'
+}
+
+export function toIntlLocale(
+  value?: Intl.LocalesArgument | null
+): Intl.LocalesArgument | undefined {
+  if (!value) return undefined
+
+  if (Array.isArray(value)) {
+    const locales = value
+      .map((locale) => toIntlLocale(locale))
+      .filter((locale): locale is string | Intl.Locale => Boolean(locale))
+    return locales.length > 0 ? locales : undefined
+  }
+
+  if (typeof value !== 'string') {
+    return value
+  }
+
+  const locale = value.trim().replaceAll('_', '-')
+  const normalized = normalizeInterfaceLanguage(locale)
+  const mappedLocale = INTL_LOCALE_BY_INTERFACE_LANGUAGE[normalized]
+
+  if (mappedLocale) {
+    return mappedLocale
+  }
+
+  try {
+    return Intl.getCanonicalLocales(locale)[0] ?? undefined
+  } catch {
+    return undefined
+  }
 }

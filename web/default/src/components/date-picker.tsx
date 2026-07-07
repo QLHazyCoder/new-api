@@ -27,11 +27,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { normalizeInterfaceLanguage } from '@/i18n/languages'
 import dayjs from '@/lib/dayjs'
 
 const calendarLocales = {
   en: enUS,
-  zh: zhCN,
+  zhCN,
+  zhTW: zhCN,
   fr,
   ru,
   ja,
@@ -51,8 +53,9 @@ export function DatePicker({
 }: DatePickerProps) {
   const { t, i18n } = useTranslation()
   const placeholderText = placeholder ?? t('Pick a date')
+  const language = normalizeInterfaceLanguage(i18n.language)
   const calendarLocale =
-    calendarLocales[i18n.language as keyof typeof calendarLocales] ?? enUS
+    calendarLocales[language as keyof typeof calendarLocales] ?? enUS
   return (
     <Popover>
       <PopoverTrigger

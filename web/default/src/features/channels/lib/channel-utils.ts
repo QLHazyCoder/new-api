@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { formatCurrencyFromUSD, formatQuotaWithCurrency } from '@/lib/currency'
 import { formatTimestampToDate } from '@/lib/format'
+import { toIntlLocale } from '@/i18n/languages'
 
 import {
   CHANNEL_STATUS_CONFIG,
@@ -419,7 +420,8 @@ export function formatRelativeTime(
   try {
     const diffSec = timestamp - Date.now() / 1000
     const absSec = Math.abs(diffSec)
-    const rtf = new Intl.RelativeTimeFormat(locale, {
+    const intlLocale = toIntlLocale(locale)
+    const rtf = new Intl.RelativeTimeFormat(intlLocale, {
       numeric: 'always',
       style: 'narrow',
     })
@@ -453,7 +455,7 @@ export function formatRelativeTime(
     }
 
     const formatted = rtf.format(value, unit)
-    const primaryLocale = Array.isArray(locale) ? locale[0] : locale
+    const primaryLocale = Array.isArray(intlLocale) ? intlLocale[0] : intlLocale
     const language = primaryLocale?.toString()
     if (language?.startsWith('zh')) {
       return formatted.replaceAll(/(\d)([\u4e00-\u9fff])/g, '$1 $2')
