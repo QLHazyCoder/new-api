@@ -114,7 +114,7 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 
 	return DB.Transaction(func(tx *gorm.DB) error {
 		topUp := &TopUp{}
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
+		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
 			return ErrTopUpNotFound
 		}
 		if expectedPaymentProvider != "" && topUp.PaymentProvider != expectedPaymentProvider {
@@ -132,11 +132,11 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 func getTopUpQuotaToAdd(topUp *TopUp) int {
 	switch topUp.PaymentProvider {
 	case PaymentProviderStripe:
-		return int(decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+		return common.QuotaFromDecimal(decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
 	case PaymentProviderCreem:
-		return int(topUp.Amount)
+		return common.QuotaFromDecimal(decimal.NewFromInt(topUp.Amount))
 	default:
-		return int(decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+		return common.QuotaFromDecimal(decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
 	}
 }
 
@@ -147,11 +147,9 @@ func calculateTopUpInviteReward(quotaToAdd int) int {
 	if common.TopUpInviteRewardPercent <= 0 {
 		return 0
 	}
-	reward := decimal.NewFromInt(int64(quotaToAdd)).
+	return common.QuotaFromDecimal(decimal.NewFromInt(int64(quotaToAdd)).
 		Mul(decimal.NewFromFloat(common.TopUpInviteRewardPercent)).
-		Div(decimal.NewFromInt(100)).
-		IntPart()
-	return int(reward)
+		Div(decimal.NewFromInt(100)))
 }
 
 func grantTopUpInviteRewardTx(tx *gorm.DB, inviterId int, topUp *TopUp, quotaToAdd int) (reward int, rewardUserId int, err error) {
@@ -188,7 +186,7 @@ func CompleteTopUp(opts CompleteTopUpOptions) (*TopUpCompletionResult, error) {
 	completion := &TopUpCompletionResult{}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		topUp := &TopUp{}
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", opts.TradeNo).First(topUp).Error; err != nil {
+		if err := lockForUpdate(tx).Where(refCol+" = ?", opts.TradeNo).First(topUp).Error; err != nil {
 			return ErrTopUpNotFound
 		}
 
