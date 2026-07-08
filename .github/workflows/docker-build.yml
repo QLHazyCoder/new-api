@@ -212,8 +212,6 @@ jobs:
     permissions:
       packages: write
       contents: read
-
-    permissions:
       id-token: write
 
     steps:
@@ -272,12 +270,21 @@ jobs:
             ${DOCKERHUB_IMAGE}:latest-arm64
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Sign manifests with cosign
+        shell: bash
         run: |
-          cosign sign --yes calciumion/new-api:${TAG}
-          cosign sign --yes calciumion/new-api:latest
+          cosign sign --yes "${GHCR_IMAGE}:${IMAGE_VERSION}"
+          if [ "${PUBLISH_LATEST}" = "true" ]; then
+            cosign sign --yes "${GHCR_IMAGE}:latest"
+          fi
+          if [ "${DOCKERHUB_ENABLED}" = "true" ]; then
+            cosign sign --yes "${DOCKERHUB_IMAGE}:${IMAGE_VERSION}"
+            if [ "${PUBLISH_LATEST}" = "true" ]; then
+              cosign sign --yes "${DOCKERHUB_IMAGE}:latest"
+            fi
+          fi
 
       - name: Manifest summary
         shell: bash
