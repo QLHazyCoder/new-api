@@ -27,7 +27,7 @@ import ru from './locales/ru.json'
 import vi from './locales/vi.json'
 import zhCN from './locales/zh.json'
 import zhTW from './locales/zh-TW.json'
-import { normalizeInterfaceLanguage } from './languages'
+import { convertDetectedLanguage } from './languages'
 
 export const resources = {
   en,
@@ -55,7 +55,9 @@ i18n
     detection: {
       order: ['localStorage', 'navigator'],
       caches: ['localStorage'],
-      convertDetectedLanguage: normalizeInterfaceLanguage,
+      // Browsers may report non-exact codes such as zh-Hant or fr-FR; map them
+      // onto the standard interface language codes used by resources.
+      convertDetectedLanguage,
     },
   })
 

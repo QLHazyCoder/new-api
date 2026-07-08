@@ -36,7 +36,8 @@ function normalizeChineseLocale(value: string): 'zh-CN' | 'zh-TW' | undefined {
     normalized === 'zh-tw' ||
     normalized === 'zh-hk' ||
     normalized === 'zh-mo' ||
-    normalized === 'zhtw'
+    normalized === 'zhtw' ||
+    normalized.startsWith('zh-hant')
   ) {
     return 'zh-TW'
   }
@@ -44,7 +45,8 @@ function normalizeChineseLocale(value: string): 'zh-CN' | 'zh-TW' | undefined {
     normalized === 'zh' ||
     normalized === 'zh-cn' ||
     normalized === 'zh-hans' ||
-    normalized === 'zhcn'
+    normalized === 'zhcn' ||
+    normalized.startsWith('zh-hans')
   ) {
     return 'zh-CN'
   }
@@ -58,9 +60,20 @@ export function normalizeInterfaceLanguage(value?: string | null): string {
   if (chineseLocale) return chineseLocale
 
   const normalized = value.trim().replaceAll('_', '-').toLowerCase()
-  return INTERFACE_LANGUAGE_OPTIONS.some((lang) => lang.code === normalized)
-    ? normalized
-    : 'en'
+  const exact = INTERFACE_LANGUAGE_OPTIONS.find(
+    (lang) => lang.code.toLowerCase() === normalized
+  )
+  if (exact) return exact.code
+
+  const baseLanguage = normalized.split('-')[0]
+  const base = INTERFACE_LANGUAGE_OPTIONS.find(
+    (lang) => lang.code.toLowerCase() === baseLanguage
+  )
+  return base?.code ?? 'en'
+}
+
+export function convertDetectedLanguage(value: string): string {
+  return normalizeInterfaceLanguage(value)
 }
 
 export function toIntlLocale(

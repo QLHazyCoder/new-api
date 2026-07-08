@@ -213,6 +213,9 @@ jobs:
       packages: write
       contents: read
 
+    permissions:
+      id-token: write
+
     steps:
       - name: Set image version
         shell: bash
@@ -267,6 +270,14 @@ jobs:
             -t ${DOCKERHUB_IMAGE}:latest \
             ${DOCKERHUB_IMAGE}:latest-amd64 \
             ${DOCKERHUB_IMAGE}:latest-arm64
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign manifests with cosign
+        run: |
+          cosign sign --yes calciumion/new-api:${TAG}
+          cosign sign --yes calciumion/new-api:latest
 
       - name: Manifest summary
         shell: bash
