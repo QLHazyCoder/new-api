@@ -1,4 +1,5 @@
 import path from 'path'
+import { existsSync } from 'fs'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import { defineConfig, loadEnv } from '@rsbuild/core'
@@ -10,7 +11,10 @@ const semiUiDir = path.resolve(
   path.dirname(require.resolve('@douyinfe/semi-ui')),
   '../..',
 )
-const semiDateFnsDir = path.resolve(semiUiDir, 'node_modules/date-fns')
+const semiNestedDateFnsDir = path.resolve(semiUiDir, 'node_modules/date-fns')
+const dateFnsDir = existsSync(semiNestedDateFnsDir)
+  ? semiNestedDateFnsDir
+  : path.dirname(require.resolve('date-fns/package.json'))
 
 export default defineConfig(({ envMode }) => {
   const env = loadEnv({ mode: envMode, prefixes: ['VITE_'] })
@@ -48,7 +52,7 @@ export default defineConfig(({ envMode }) => {
           semiUiDir,
           'dist/css/semi.css',
         ),
-        'date-fns': semiDateFnsDir,
+        'date-fns': dateFnsDir,
       },
     },
     html: {
