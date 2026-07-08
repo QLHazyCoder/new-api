@@ -29,6 +29,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
   SelectContent,
@@ -277,10 +278,12 @@ export function SubscriptionPlansCard({
         description={t('Subscribe to a plan for model access')}
         icon={<Crown className='h-4 w-4' />}
         disableHoverEffect
-        contentClassName='space-y-4 sm:space-y-5'
+        className='xl:flex xl:h-[calc(100dvh-8.5rem)] xl:max-h-[calc(100dvh-8.5rem)] xl:flex-col'
+        headerClassName='xl:shrink-0'
+        contentClassName='flex flex-col gap-4 sm:gap-5 xl:min-h-0 xl:flex-1'
       >
         {/* My subscriptions & billing preference */}
-        <div className='rounded-xl border p-3 sm:p-4'>
+        <div className='shrink-0 rounded-xl border p-3 sm:p-4'>
           <div className='flex flex-wrap items-center justify-between gap-2.5 sm:gap-3'>
             <div className='flex min-w-0 flex-wrap items-center gap-2'>
               <span className='text-sm font-medium'>
@@ -408,127 +411,134 @@ export function SubscriptionPlansCard({
           {hasAny && (
             <>
               <Separator className='my-3' />
-              <div className='max-h-64 space-y-3 overflow-y-auto pr-1'>
-                {allSubscriptions.map((sub) => {
-                  const subscription = sub.subscription
-                  const totalAmount = Number(subscription?.amount_total || 0)
-                  const usedAmount = Number(subscription?.amount_used || 0)
-                  const remainAmount =
-                    totalAmount > 0 ? Math.max(0, totalAmount - usedAmount) : 0
-                  const planTitle =
-                    planTitleMap.get(subscription?.plan_id) || ''
-                  const remainDays = getRemainingDays(sub)
-                  const usagePercent = getUsagePercent(sub)
-                  const now = Date.now() / 1000
-                  const isExpired = (subscription?.end_time || 0) < now
-                  const isCancelled = subscription?.status === 'cancelled'
-                  const isActive =
-                    subscription?.status === 'active' && !isExpired
-                  const subscriptionId = subscription?.id
-                  const subscriptionTitle = planTitle
-                    ? `${planTitle} · ${t('Subscription')} #${subscriptionId}`
-                    : `${t('Subscription')} #${subscriptionId}`
-                  const nextResetTime = subscription?.next_reset_time ?? 0
+              <ScrollArea className='max-h-32 pr-3'>
+                <div className='space-y-3'>
+                  {allSubscriptions.map((sub) => {
+                    const subscription = sub.subscription
+                    const totalAmount = Number(subscription?.amount_total || 0)
+                    const usedAmount = Number(subscription?.amount_used || 0)
+                    const remainAmount =
+                      totalAmount > 0
+                        ? Math.max(0, totalAmount - usedAmount)
+                        : 0
+                    const planTitle =
+                      planTitleMap.get(subscription?.plan_id) || ''
+                    const remainDays = getRemainingDays(sub)
+                    const usagePercent = getUsagePercent(sub)
+                    const now = Date.now() / 1000
+                    const isExpired = (subscription?.end_time || 0) < now
+                    const isCancelled = subscription?.status === 'cancelled'
+                    const isActive =
+                      subscription?.status === 'active' && !isExpired
+                    const subscriptionId = subscription?.id
+                    const subscriptionTitle = planTitle
+                      ? `${planTitle} · ${t('Subscription')} #${subscriptionId}`
+                      : `${t('Subscription')} #${subscriptionId}`
+                    const nextResetTime = subscription?.next_reset_time ?? 0
 
-                  let statusBadge = (
-                    <StatusBadge
-                      label={t('Expired')}
-                      variant='neutral'
-                      copyable={false}
-                    />
-                  )
-                  if (isActive) {
-                    statusBadge = (
+                    let statusBadge = (
                       <StatusBadge
-                        label={t('Active')}
-                        variant='success'
-                        copyable={false}
-                      />
-                    )
-                  } else if (isCancelled) {
-                    statusBadge = (
-                      <StatusBadge
-                        label={t('Cancelled')}
+                        label={t('Expired')}
                         variant='neutral'
                         copyable={false}
                       />
                     )
-                  }
+                    if (isActive) {
+                      statusBadge = (
+                        <StatusBadge
+                          label={t('Active')}
+                          variant='success'
+                          copyable={false}
+                        />
+                      )
+                    } else if (isCancelled) {
+                      statusBadge = (
+                        <StatusBadge
+                          label={t('Cancelled')}
+                          variant='neutral'
+                          copyable={false}
+                        />
+                      )
+                    }
 
-                  let endTimeLabel = t('Expired at')
-                  if (isActive) {
-                    endTimeLabel = t('Until')
-                  } else if (isCancelled) {
-                    endTimeLabel = t('Cancelled at')
-                  }
+                    let endTimeLabel = t('Expired at')
+                    if (isActive) {
+                      endTimeLabel = t('Until')
+                    } else if (isCancelled) {
+                      endTimeLabel = t('Cancelled at')
+                    }
 
-                  return (
-                    <div
-                      key={
-                        subscriptionId ??
-                        `${subscription?.plan_id}-${subscription?.start_time}`
-                      }
-                      className='bg-background rounded-md border p-3 text-xs'
-                    >
-                      <div className='flex items-center justify-between'>
-                        <div className='flex items-center gap-2'>
-                          <span className='font-medium'>
-                            {subscriptionTitle}
-                          </span>
-                          {statusBadge}
+                    return (
+                      <div
+                        key={
+                          subscriptionId ??
+                          `${subscription?.plan_id}-${subscription?.start_time}`
+                        }
+                        className='bg-background rounded-md border p-3 text-xs'
+                      >
+                        <div className='flex items-center justify-between'>
+                          <div className='flex items-center gap-2'>
+                            <span className='font-medium'>
+                              {subscriptionTitle}
+                            </span>
+                            {statusBadge}
+                          </div>
+                          {isActive && (
+                            <span className='text-muted-foreground'>
+                              {t('{{count}} days remaining', {
+                                count: remainDays,
+                              })}
+                            </span>
+                          )}
                         </div>
-                        {isActive && (
-                          <span className='text-muted-foreground'>
-                            {t('{{count}} days remaining', {
-                              count: remainDays,
-                            })}
-                          </span>
+                        <div className='text-muted-foreground mt-1.5'>
+                          {endTimeLabel}{' '}
+                          {new Date(
+                            (subscription?.end_time || 0) * 1000
+                          ).toLocaleString()}
+                        </div>
+                        {isActive && nextResetTime > 0 && (
+                          <div className='text-muted-foreground mt-1'>
+                            {t('Next reset')}:{' '}
+                            {new Date(nextResetTime * 1000).toLocaleString()}
+                          </div>
                         )}
-                      </div>
-                      <div className='text-muted-foreground mt-1.5'>
-                        {endTimeLabel}{' '}
-                        {new Date(
-                          (subscription?.end_time || 0) * 1000
-                        ).toLocaleString()}
-                      </div>
-                      {isActive && nextResetTime > 0 && (
                         <div className='text-muted-foreground mt-1'>
-                          {t('Next reset')}:{' '}
-                          {new Date(nextResetTime * 1000).toLocaleString()}
+                          {t('Total Quota')}:{' '}
+                          {totalAmount > 0 ? (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={<span className='cursor-help' />}
+                              >
+                                {formatQuota(usedAmount)}/
+                                {formatQuota(totalAmount)} · {t('Remaining')}{' '}
+                                {formatQuota(remainAmount)}
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {t('Raw Quota')}: {usedAmount}/{totalAmount} ·{' '}
+                                {t('Remaining')} {remainAmount}
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            t('Unlimited')
+                          )}
+                          {totalAmount > 0 && (
+                            <span className='ml-2'>
+                              {t('Used')} {usagePercent}%
+                            </span>
+                          )}
                         </div>
-                      )}
-                      <div className='text-muted-foreground mt-1'>
-                        {t('Total Quota')}:{' '}
-                        {totalAmount > 0 ? (
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={<span className='cursor-help' />}
-                            >
-                              {formatQuota(usedAmount)}/
-                              {formatQuota(totalAmount)} · {t('Remaining')}{' '}
-                              {formatQuota(remainAmount)}
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {t('Raw Quota')}: {usedAmount}/{totalAmount} ·{' '}
-                              {t('Remaining')} {remainAmount}
-                            </TooltipContent>
-                          </Tooltip>
-                        ) : (
-                          t('Unlimited')
-                        )}
-                        {totalAmount > 0 && (
-                          <span className='ml-2'>
-                            {t('Used')} {usagePercent}%
-                          </span>
+                        {totalAmount > 0 && isActive && (
+                          <Progress
+                            value={usagePercent}
+                            className='mt-2 h-1.5'
+                          />
                         )}
                       </div>
-                      {totalAmount > 0 && isActive && (
-                        <Progress value={usagePercent} className='mt-2 h-1.5' />
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
+                    )
+                  })}
+                </div>
+              </ScrollArea>
             </>
           )}
 
@@ -541,127 +551,133 @@ export function SubscriptionPlansCard({
 
         {/* Available plans grid */}
         {plans.length > 0 ? (
-          <div className='grid grid-cols-1 gap-3 2xl:grid-cols-2 2xl:gap-4'>
-            {plans.map((p, index) => {
-              const plan = p?.plan
-              if (!plan) return null
-              const totalAmount = Number(plan.total_amount || 0)
-              const price = Number(plan.price_amount || 0).toFixed(2)
-              const isPopular = index === 0 && plans.length > 1
-              const limit = Number(plan.max_purchase_per_user || 0)
-              const count = planPurchaseCountMap.get(plan.id) || 0
-              const reached = limit > 0 && count >= limit
-              const planTitle = plan.title || t('Subscription Plans')
-              const planSubtitle = plan.subtitle?.trim()
+          <ScrollArea className='min-h-0 xl:flex-1 xl:pr-3'>
+            <div className='grid grid-cols-1 gap-3 pb-1 2xl:grid-cols-2 2xl:gap-4'>
+              {plans.map((p, index) => {
+                const plan = p?.plan
+                if (!plan) return null
+                const totalAmount = Number(plan.total_amount || 0)
+                const price = Number(plan.price_amount || 0).toFixed(2)
+                const isPopular = index === 0 && plans.length > 1
+                const limit = Number(plan.max_purchase_per_user || 0)
+                const count = planPurchaseCountMap.get(plan.id) || 0
+                const reached = limit > 0 && count >= limit
+                const planTitle = plan.title || t('Subscription Plans')
+                const planSubtitle = plan.subtitle?.trim()
 
-              const benefits = [
-                `${t('Validity Period')}: ${formatDuration(plan, t)}`,
-                formatResetPeriod(plan, t) !== t('No Reset')
-                  ? `${t('Quota Reset')}: ${formatResetPeriod(plan, t)}`
-                  : null,
-                totalAmount > 0
-                  ? `${t('Total Quota')}: ${formatQuota(totalAmount)}`
-                  : `${t('Total Quota')}: ${t('Unlimited')}`,
-                limit > 0 ? `${t('Purchase Limit')}: ${limit}` : null,
-                plan.upgrade_group
-                  ? `${t('Upgrade Group')}: ${plan.upgrade_group}`
-                  : null,
-              ].filter(Boolean) as string[]
+                const benefits = [
+                  `${t('Validity Period')}: ${formatDuration(plan, t)}`,
+                  formatResetPeriod(plan, t) !== t('No Reset')
+                    ? `${t('Quota Reset')}: ${formatResetPeriod(plan, t)}`
+                    : null,
+                  totalAmount > 0
+                    ? `${t('Total Quota')}: ${formatQuota(totalAmount)}`
+                    : `${t('Total Quota')}: ${t('Unlimited')}`,
+                  limit > 0 ? `${t('Purchase Limit')}: ${limit}` : null,
+                  plan.upgrade_group
+                    ? `${t('Upgrade Group')}: ${plan.upgrade_group}`
+                    : null,
+                ].filter(Boolean) as string[]
 
-              return (
-                <Card
-                  key={plan.id}
-                  data-card-hover='false'
-                  className={cn(isPopular && 'border-primary/70 shadow-sm')}
-                >
-                  <CardContent className='flex h-full flex-col p-3.5 sm:p-4'>
-                    <div className='mb-2 flex items-start justify-between gap-3'>
-                      <div className='min-w-0'>
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={<h4 className='truncate font-semibold' />}
-                          >
-                            {planTitle}
-                          </TooltipTrigger>
-                          <TooltipContent className='max-w-xs break-words'>
-                            {planTitle}
-                          </TooltipContent>
-                        </Tooltip>
-                        {planSubtitle && (
+                return (
+                  <Card
+                    key={plan.id}
+                    data-card-hover='false'
+                    className={cn(isPopular && 'border-primary/70 shadow-sm')}
+                  >
+                    <CardContent className='flex h-full flex-col p-3.5 sm:p-4'>
+                      <div className='mb-2 flex items-start justify-between gap-3'>
+                        <div className='min-w-0'>
                           <Tooltip>
                             <TooltipTrigger
-                              render={
-                                <p className='text-muted-foreground truncate text-xs' />
-                              }
+                              render={<h4 className='truncate font-semibold' />}
                             >
-                              {planSubtitle}
+                              {planTitle}
                             </TooltipTrigger>
                             <TooltipContent className='max-w-xs break-words'>
-                              {planSubtitle}
+                              {planTitle}
                             </TooltipContent>
                           </Tooltip>
+                          {planSubtitle && (
+                            <Tooltip>
+                              <TooltipTrigger
+                                render={
+                                  <p className='text-muted-foreground truncate text-xs' />
+                                }
+                              >
+                                {planSubtitle}
+                              </TooltipTrigger>
+                              <TooltipContent className='max-w-xs break-words'>
+                                {planSubtitle}
+                              </TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+                        {isPopular && (
+                          <StatusBadge
+                            variant='info'
+                            copyable={false}
+                            className='shrink-0'
+                          >
+                            <Sparkles className='h-3 w-3' />
+                            {t('Recommended')}
+                          </StatusBadge>
                         )}
                       </div>
-                      {isPopular && (
-                        <StatusBadge
-                          variant='info'
-                          copyable={false}
-                          className='shrink-0'
+
+                      <div className='py-2'>
+                        <span className='text-primary text-2xl font-bold'>
+                          ${price}
+                        </span>
+                      </div>
+
+                      <div className='flex-1 space-y-1.5 pb-3'>
+                        {benefits.map((label) => (
+                          <div
+                            key={label}
+                            className='text-muted-foreground flex items-center gap-2 text-xs'
+                          >
+                            <Check className='text-primary h-3 w-3 shrink-0' />
+                            <span>{label}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <Separator className='mb-3' />
+
+                      {reached ? (
+                        <Tooltip>
+                          <TooltipTrigger render={<div />}>
+                            <Button
+                              variant='outline'
+                              className='w-full'
+                              disabled
+                            >
+                              {t('Limit Reached')}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {t('Purchase limit reached')} ({count}/{limit})
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <Button
+                          variant='outline'
+                          className='w-full'
+                          onClick={() => {
+                            setSelectedPlan(p)
+                            setPurchaseOpen(true)
+                          }}
                         >
-                          <Sparkles className='h-3 w-3' />
-                          {t('Recommended')}
-                        </StatusBadge>
+                          {t('Subscribe Now')}
+                        </Button>
                       )}
-                    </div>
-
-                    <div className='py-2'>
-                      <span className='text-primary text-2xl font-bold'>
-                        ${price}
-                      </span>
-                    </div>
-
-                    <div className='flex-1 space-y-1.5 pb-3'>
-                      {benefits.map((label) => (
-                        <div
-                          key={label}
-                          className='text-muted-foreground flex items-center gap-2 text-xs'
-                        >
-                          <Check className='text-primary h-3 w-3 shrink-0' />
-                          <span>{label}</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <Separator className='mb-3' />
-
-                    {reached ? (
-                      <Tooltip>
-                        <TooltipTrigger render={<div />}>
-                          <Button variant='outline' className='w-full' disabled>
-                            {t('Limit Reached')}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          {t('Purchase limit reached')} ({count}/{limit})
-                        </TooltipContent>
-                      </Tooltip>
-                    ) : (
-                      <Button
-                        variant='outline'
-                        className='w-full'
-                        onClick={() => {
-                          setSelectedPlan(p)
-                          setPurchaseOpen(true)
-                        }}
-                      >
-                        {t('Subscribe Now')}
-                      </Button>
-                    )}
-                  </CardContent>
-                </Card>
-              )
-            })}
-          </div>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          </ScrollArea>
         ) : (
           <p className='text-muted-foreground py-4 text-center text-sm'>
             {t('No plans available')}
