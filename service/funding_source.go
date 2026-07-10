@@ -1,9 +1,12 @@
 package service
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
 // ---------------------------------------------------------------------------
@@ -116,6 +119,164 @@ func (s *SubscriptionFunding) Refund() error {
 	return refundWithRetry(func() error {
 		return model.RefundSubscriptionPreConsume(s.requestId)
 	})
+}
+
+// ---------------------------------------------------------------------------
+// MixedFunding — subscription_first uses subscription quota first, then wallet
+// ---------------------------------------------------------------------------
+
+type MixedFunding struct {
+	subscription *SubscriptionFunding
+	wallet       *WalletFunding
+
+	subscriptionAmount int
+	walletAmount       int
+}
+
+func (m *MixedFunding) Source() string { return BillingSourceMixed }
+
+func (m *MixedFunding) PreConsume(amount int) error {
+	if amount <= 0 {
+		return nil
+	}
+	if m.subscription == nil || m.wallet == nil {
+		return fmt.Errorf("mixed funding source is incomplete")
+	}
+
+	res, err := model.PreConsumeUserSubscriptionPartial(
+		m.subscription.requestId,
+		m.subscription.userId,
+		m.subscription.modelName,
+		0,
+		int64(amount),
+		m.subscription.usingGroup,
+	)
+	if err != nil {
+		return err
+	}
+	if res == nil || res.SubscriptionPreConsumeResult == nil || res.PreConsumed <= 0 {
+		return fmt.Errorf("subscription quota insufficient, need=%d", amount)
+	}
+	m.subscription.subscriptionId = res.UserSubscriptionId
+	m.subscription.preConsumed = res.PreConsumed
+	m.subscription.AmountTotal = res.AmountTotal
+	m.subscription.AmountUsedAfter = res.AmountUsedAfter
+	if planInfo, err := model.GetSubscriptionPlanInfoByUserSubscriptionId(res.UserSubscriptionId); err == nil && planInfo != nil {
+		m.subscription.PlanId = planInfo.PlanId
+		m.subscription.PlanTitle = planInfo.PlanTitle
+	}
+
+	m.subscriptionAmount = int(res.PreConsumed)
+	m.walletAmount = amount - m.subscriptionAmount
+	if m.walletAmount < 0 {
+		m.walletAmount = 0
+	}
+	if m.walletAmount > 0 {
+		userQuota, err := model.GetUserQuota(m.wallet.userId, false)
+		if err != nil {
+			_ = m.subscription.Refund()
+			return err
+		}
+		if userQuota < m.walletAmount {
+			_ = m.subscription.Refund()
+			return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(m.walletAmount))
+		}
+		if err := m.wallet.PreConsume(m.walletAmount); err != nil {
+			if m.subscription != nil && m.subscription.preConsumed > 0 {
+				_ = m.subscription.Refund()
+			}
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *MixedFunding) Settle(delta int) error {
+	if delta == 0 {
+		return nil
+	}
+	if delta > 0 {
+		return m.settlePositive(delta)
+	}
+	return m.settleNegative(-delta)
+}
+
+func (m *MixedFunding) settlePositive(delta int) error {
+	if delta <= 0 {
+		return nil
+	}
+	if err := m.wallet.Settle(delta); err != nil {
+		return err
+	}
+	m.walletAmount += delta
+	m.wallet.consumed += delta
+	return nil
+}
+
+func (m *MixedFunding) settleNegative(refund int) error {
+	if refund <= 0 {
+		return nil
+	}
+	walletRefund := min(refund, m.walletAmount)
+	if walletRefund > 0 {
+		if err := m.wallet.Settle(-walletRefund); err != nil {
+			return err
+		}
+		m.walletAmount -= walletRefund
+		m.wallet.consumed -= walletRefund
+		if m.wallet.consumed < 0 {
+			m.wallet.consumed = 0
+		}
+		refund -= walletRefund
+	}
+	if refund > 0 {
+		if err := m.subscription.Settle(-refund); err != nil {
+			return err
+		}
+		m.subscriptionAmount -= refund
+		if m.subscriptionAmount < 0 {
+			m.subscriptionAmount = 0
+		}
+	}
+	return nil
+}
+
+func (m *MixedFunding) Refund() error {
+	if m.wallet != nil && m.wallet.consumed > 0 {
+		if err := m.wallet.Refund(); err != nil {
+			return err
+		}
+	}
+	if m.subscription != nil && m.subscription.preConsumed > 0 {
+		return m.subscription.Refund()
+	}
+	return nil
+}
+
+func (m *MixedFunding) Allocations() []relaycommon.BillingAllocation {
+	if m == nil {
+		return nil
+	}
+	allocations := make([]relaycommon.BillingAllocation, 0, 2)
+	if m.subscription != nil && m.subscriptionAmount > 0 {
+		usedAfter := m.subscription.AmountUsedAfter - m.subscription.preConsumed + int64(m.subscriptionAmount)
+		allocations = append(allocations, relaycommon.BillingAllocation{
+			Source:                             BillingSourceSubscription,
+			Quota:                              m.subscriptionAmount,
+			SubscriptionId:                     m.subscription.subscriptionId,
+			SubscriptionPlanId:                 m.subscription.PlanId,
+			SubscriptionPlanTitle:              m.subscription.PlanTitle,
+			SubscriptionAmountTotal:            m.subscription.AmountTotal,
+			SubscriptionAmountUsedAfterConsume: usedAfter,
+		})
+	}
+	if m.walletAmount > 0 {
+		allocations = append(allocations, relaycommon.BillingAllocation{
+			Source: BillingSourceWallet,
+			Quota:  m.walletAmount,
+		})
+	}
+	return allocations
 }
 
 // refundWithRetry 尝试多次执行退款操作以提高成功率，只能用于基于事务的退款函数！！！！！！

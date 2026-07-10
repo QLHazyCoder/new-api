@@ -50,6 +50,10 @@ func initCol() {
 	}
 }
 
+func InitColumnNamesForTest() {
+	initCol()
+}
+
 var DB *gorm.DB
 
 var LOG_DB *gorm.DB

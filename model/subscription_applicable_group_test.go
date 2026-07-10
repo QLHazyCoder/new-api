@@ -39,6 +39,22 @@ func seedUserSubscriptionForApplicableGroupTest(t *testing.T, id int, userId int
 	require.NoError(t, DB.Create(sub).Error)
 }
 
+func seedUserSubscriptionWithUsedForApplicableGroupTest(t *testing.T, id int, userId int, planId int, applicableGroup string, amountTotal int64, amountUsed int64) {
+	t.Helper()
+	sub := &UserSubscription{
+		Id:              id,
+		UserId:          userId,
+		PlanId:          planId,
+		AmountTotal:     amountTotal,
+		AmountUsed:      amountUsed,
+		Status:          "active",
+		StartTime:       time.Now().Add(-time.Hour).Unix(),
+		EndTime:         time.Now().Add(24 * time.Hour).Unix(),
+		ApplicableGroup: applicableGroup,
+	}
+	require.NoError(t, DB.Create(sub).Error)
+}
+
 func getUserSubscriptionAmountUsedForApplicableGroupTest(t *testing.T, id int) int64 {
 	t.Helper()
 	var sub UserSubscription
@@ -95,6 +111,49 @@ func TestPreConsumeUserSubscriptionApplicableGroup_SelectsMatchingSubscription(t
 	require.Equal(t, 205, res.UserSubscriptionId)
 	require.Equal(t, int64(0), getUserSubscriptionAmountUsedForApplicableGroupTest(t, 204))
 	require.Equal(t, int64(100), getUserSubscriptionAmountUsedForApplicableGroupTest(t, 205))
+}
+
+func TestPreConsumeUserSubscriptionPartialConsumesRemainingQuota(t *testing.T) {
+	truncateTables(t)
+	seedSubscriptionPlanForApplicableGroupTest(t, 108, "GPT-Pro-正价")
+	seedUserSubscriptionWithUsedForApplicableGroupTest(t, 208, 4, 108, "GPT-Pro-正价", 1000, 950)
+
+	res, err := PreConsumeUserSubscriptionPartial("req-partial", 4, "gpt-test", 0, 100, "GPT-Pro-正价")
+
+	require.NoError(t, err)
+	require.Equal(t, 208, res.UserSubscriptionId)
+	require.Equal(t, int64(100), res.RequestedAmount)
+	require.Equal(t, int64(50), res.PreConsumed)
+	require.Equal(t, int64(50), res.RemainingAmount)
+	require.Equal(t, int64(1000), getUserSubscriptionAmountUsedForApplicableGroupTest(t, 208))
+}
+
+func TestPreConsumeUserSubscriptionPartialIdempotent(t *testing.T) {
+	truncateTables(t)
+	seedSubscriptionPlanForApplicableGroupTest(t, 109, "GPT-Pro-正价")
+	seedUserSubscriptionWithUsedForApplicableGroupTest(t, 209, 5, 109, "GPT-Pro-正价", 1000, 950)
+
+	first, err := PreConsumeUserSubscriptionPartial("req-partial-idempotent", 5, "gpt-test", 0, 100, "GPT-Pro-正价")
+	require.NoError(t, err)
+	second, err := PreConsumeUserSubscriptionPartial("req-partial-idempotent", 5, "gpt-test", 0, 100, "GPT-Pro-正价")
+
+	require.NoError(t, err)
+	require.Equal(t, first.UserSubscriptionId, second.UserSubscriptionId)
+	require.Equal(t, first.PreConsumed, second.PreConsumed)
+	require.Equal(t, first.RemainingAmount, second.RemainingAmount)
+	require.Equal(t, int64(1000), getUserSubscriptionAmountUsedForApplicableGroupTest(t, 209))
+}
+
+func TestPreConsumeUserSubscriptionStillRequiresFullQuota(t *testing.T) {
+	truncateTables(t)
+	seedSubscriptionPlanForApplicableGroupTest(t, 110, "GPT-Pro-正价")
+	seedUserSubscriptionWithUsedForApplicableGroupTest(t, 210, 6, 110, "GPT-Pro-正价", 1000, 950)
+
+	_, err := PreConsumeUserSubscription("req-strict-full", 6, "gpt-test", 0, 100, "GPT-Pro-正价")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "subscription quota insufficient")
+	require.Equal(t, int64(950), getUserSubscriptionAmountUsedForApplicableGroupTest(t, 210))
 }
 
 func TestUserActiveSubscriptionsAllowWalletOverflow_OnlyApplicableStrictSubscriptionBlocks(t *testing.T) {

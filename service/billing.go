@@ -12,6 +12,7 @@ import (
 const (
 	BillingSourceWallet       = "wallet"
 	BillingSourceSubscription = "subscription"
+	BillingSourceMixed        = "mixed"
 )
 
 // PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。
@@ -62,6 +63,11 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		if actualQuota != 0 {
 			if relayInfo.BillingSource == BillingSourceSubscription {
 				checkAndSendSubscriptionQuotaNotify(relayInfo)
+			} else if relayInfo.BillingSource == BillingSourceMixed {
+				walletConsumed := relayBillingAllocationQuota(relayInfo.BillingAllocations, BillingSourceWallet)
+				if walletConsumed > 0 {
+					checkAndSendQuotaNotify(relayInfo, 0, walletConsumed)
+				}
 			} else {
 				checkAndSendQuotaNotify(relayInfo, actualQuota-preConsumed, preConsumed)
 			}
@@ -75,4 +81,14 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
 	}
 	return nil
+}
+
+func relayBillingAllocationQuota(allocations []relaycommon.BillingAllocation, source string) int {
+	var total int
+	for _, allocation := range allocations {
+		if allocation.Source == source && allocation.Quota > 0 {
+			total += allocation.Quota
+		}
+	}
+	return total
 }

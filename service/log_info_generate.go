@@ -155,14 +155,18 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 	if relayInfo == nil || other == nil {
 		return
 	}
-	// billing_source: "wallet" or "subscription"
+	// billing_source: "wallet", "subscription" or "mixed"
 	if relayInfo.BillingSource != "" {
 		other["billing_source"] = relayInfo.BillingSource
 	}
 	if relayInfo.UserSetting.BillingPreference != "" {
 		other["billing_preference"] = relayInfo.UserSetting.BillingPreference
 	}
-	if relayInfo.BillingSource == "subscription" {
+	if relayInfo.BillingSource == BillingSourceMixed {
+		appendRelayBillingAllocationInfo(relayInfo.BillingAllocations, other)
+		return
+	}
+	if relayInfo.BillingSource == BillingSourceSubscription {
 		if relayInfo.SubscriptionId != 0 {
 			other["subscription_id"] = relayInfo.SubscriptionId
 		}
@@ -202,6 +206,52 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 		}
 		// Wallet quota is not deducted when billed from subscription.
 		other["wallet_quota_deducted"] = 0
+	}
+}
+
+func appendRelayBillingAllocationInfo(allocations []relaycommon.BillingAllocation, other map[string]interface{}) {
+	if len(allocations) == 0 || other == nil {
+		return
+	}
+	other["billing_allocations"] = allocations
+	var walletDeducted int
+	var subscriptionConsumed int64
+	for _, allocation := range allocations {
+		if allocation.Quota <= 0 {
+			continue
+		}
+		switch allocation.Source {
+		case BillingSourceWallet:
+			walletDeducted += allocation.Quota
+		case BillingSourceSubscription:
+			subscriptionConsumed += int64(allocation.Quota)
+			if allocation.SubscriptionId > 0 {
+				other["subscription_id"] = allocation.SubscriptionId
+			}
+			if allocation.SubscriptionPlanId > 0 {
+				other["subscription_plan_id"] = allocation.SubscriptionPlanId
+			}
+			if allocation.SubscriptionPlanTitle != "" {
+				other["subscription_plan_title"] = allocation.SubscriptionPlanTitle
+			}
+			if allocation.SubscriptionAmountTotal > 0 {
+				used := allocation.SubscriptionAmountUsedAfterConsume
+				if used < 0 {
+					used = 0
+				}
+				remain := allocation.SubscriptionAmountTotal - used
+				if remain < 0 {
+					remain = 0
+				}
+				other["subscription_total"] = allocation.SubscriptionAmountTotal
+				other["subscription_used"] = used
+				other["subscription_remain"] = remain
+			}
+		}
+	}
+	other["wallet_quota_deducted"] = walletDeducted
+	if subscriptionConsumed > 0 {
+		other["subscription_consumed"] = subscriptionConsumed
 	}
 }
 

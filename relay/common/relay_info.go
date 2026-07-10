@@ -132,6 +132,9 @@ type RelayInfo struct {
 	// BillingSource indicates whether this request is billed from wallet quota or subscription.
 	// "" or "wallet" => wallet; "subscription" => subscription
 	BillingSource string
+	// BillingAllocations records split funding details when one request consumes
+	// from multiple sources, for example subscription quota plus wallet overflow.
+	BillingAllocations []BillingAllocation
 	// SubscriptionId is the user_subscriptions.id used when BillingSource == "subscription"
 	SubscriptionId int
 	// SubscriptionPreConsumed is the amount pre-consumed on subscription item (quota units or 1)
@@ -191,6 +194,16 @@ type RelayInfo struct {
 	*ResponsesUsageInfo
 	*ChannelMeta
 	*TaskRelayInfo
+}
+
+type BillingAllocation struct {
+	Source                             string `json:"source"`
+	Quota                              int    `json:"quota"`
+	SubscriptionId                     int    `json:"subscription_id,omitempty"`
+	SubscriptionPlanId                 int    `json:"subscription_plan_id,omitempty"`
+	SubscriptionPlanTitle              string `json:"subscription_plan_title,omitempty"`
+	SubscriptionAmountTotal            int64  `json:"subscription_amount_total,omitempty"`
+	SubscriptionAmountUsedAfterConsume int64  `json:"subscription_amount_used_after_consume,omitempty"`
 }
 
 func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
