@@ -43,7 +43,7 @@ func TestOaiResponsesHandlerMapsCacheCreationTokens(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Cleanup(func() { gin.SetMode(oldMode) })
 
-	body := `{"id":"resp_1","model":"gpt-test","status":"completed","usage":{"input_tokens":100,"output_tokens":7,"total_tokens":107,"input_tokens_details":{"cached_tokens":32,"cached_creation_tokens":16,"text_tokens":52,"audio_tokens":1,"image_tokens":2}}}`
+	body := `{"id":"resp_1","model":"gpt-test","status":"completed","usage":{"input_tokens":100,"output_tokens":7,"total_tokens":107,"input_tokens_details":{"cached_tokens":32,"cache_write_tokens":16,"text_tokens":52,"audio_tokens":1,"image_tokens":2}}}`
 
 	c, _, resp, _ := newResponsesChatTestContext(t, body, false)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
@@ -71,7 +71,7 @@ func TestOaiResponsesStreamHandlerMapsCacheCreationTokens(t *testing.T) {
 	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
 
 	body := strings.Join([]string{
-		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":200,"output_tokens":11,"total_tokens":211,"input_tokens_details":{"cached_tokens":64,"cached_creation_tokens":24,"text_tokens":112,"audio_tokens":3,"image_tokens":4}}}}`,
+		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":200,"output_tokens":11,"total_tokens":211,"input_tokens_details":{"cached_tokens":64,"cache_write_tokens":24,"text_tokens":112,"audio_tokens":3,"image_tokens":4}}}}`,
 		`data: [DONE]`,
 		``,
 	}, "\n")
@@ -106,7 +106,7 @@ func TestOaiResponsesToChatStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
 		`data: {"type":"response.output_text.delta","delta":"hello"}`,
 		`data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup"}}`,
 		`data: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"q\":\"x\"}"}`,
-		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5,"input_tokens_details":{"cached_tokens":1,"cached_creation_tokens":2}}}}`,
+		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5,"input_tokens_details":{"cached_tokens":1,"cache_write_tokens":2}}}}`,
 		`data: [DONE]`,
 		``,
 	}, "\n")

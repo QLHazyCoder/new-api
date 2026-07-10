@@ -55,7 +55,7 @@ func applyInputTokenDetailsToPromptUsage(usage *dto.Usage, details *dto.InputTok
 		return
 	}
 	usage.PromptTokensDetails.CachedTokens = details.CachedTokens
-	usage.PromptTokensDetails.CachedCreationTokens = details.CachedCreationTokens
+	usage.PromptTokensDetails.CachedCreationTokens = details.GetCacheWriteTokens()
 	usage.PromptTokensDetails.TextTokens = details.TextTokens
 	usage.PromptTokensDetails.AudioTokens = details.AudioTokens
 	usage.PromptTokensDetails.ImageTokens = details.ImageTokens

@@ -73,11 +73,11 @@ func TestResponsesResponseToChatCompletionsPreservesTextAndToolCalls(t *testing.
 			OutputTokens: 4,
 			TotalTokens:  7,
 			InputTokensDetails: &dto.InputTokenDetails{
-				CachedTokens:         1,
-				CachedCreationTokens: 2,
-				TextTokens:           3,
-				AudioTokens:          4,
-				ImageTokens:          5,
+				CachedTokens:     1,
+				CacheWriteTokens: 2,
+				TextTokens:       3,
+				AudioTokens:      4,
+				ImageTokens:      5,
 			},
 		},
 	}
