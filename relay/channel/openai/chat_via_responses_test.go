@@ -38,6 +38,60 @@ func newResponsesChatTestContext(t *testing.T, body string, isStream bool) (*gin
 	return c, recorder, resp, info
 }
 
+func TestOaiResponsesHandlerMapsCacheCreationTokens(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	body := `{"id":"resp_1","model":"gpt-test","status":"completed","usage":{"input_tokens":100,"output_tokens":7,"total_tokens":107,"input_tokens_details":{"cached_tokens":32,"cached_creation_tokens":16,"text_tokens":52,"audio_tokens":1,"image_tokens":2}}}`
+
+	c, _, resp, _ := newResponsesChatTestContext(t, body, false)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	usage, err := OaiResponsesHandler(c, nil, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 100, usage.PromptTokens)
+	require.Equal(t, 7, usage.CompletionTokens)
+	require.Equal(t, 107, usage.TotalTokens)
+	require.Equal(t, 32, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 16, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 52, usage.PromptTokensDetails.TextTokens)
+	require.Equal(t, 1, usage.PromptTokensDetails.AudioTokens)
+	require.Equal(t, 2, usage.PromptTokensDetails.ImageTokens)
+}
+
+func TestOaiResponsesStreamHandlerMapsCacheCreationTokens(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := strings.Join([]string{
+		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":200,"output_tokens":11,"total_tokens":211,"input_tokens_details":{"cached_tokens":64,"cached_creation_tokens":24,"text_tokens":112,"audio_tokens":3,"image_tokens":4}}}}`,
+		`data: [DONE]`,
+		``,
+	}, "\n")
+
+	c, _, resp, info := newResponsesChatTestContext(t, body, true)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	usage, err := OaiResponsesStreamHandler(c, info, resp)
+	require.Nil(t, err)
+	require.NotNil(t, usage)
+	require.Equal(t, 200, usage.PromptTokens)
+	require.Equal(t, 11, usage.CompletionTokens)
+	require.Equal(t, 211, usage.TotalTokens)
+	require.Equal(t, 64, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 24, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 112, usage.PromptTokensDetails.TextTokens)
+	require.Equal(t, 3, usage.PromptTokensDetails.AudioTokens)
+	require.Equal(t, 4, usage.PromptTokensDetails.ImageTokens)
+}
+
 func TestOaiResponsesToChatStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
 	oldMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
@@ -52,7 +106,7 @@ func TestOaiResponsesToChatStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
 		`data: {"type":"response.output_text.delta","delta":"hello"}`,
 		`data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"lookup"}}`,
 		`data: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"q\":\"x\"}"}`,
-		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}`,
+		`data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5,"input_tokens_details":{"cached_tokens":1,"cached_creation_tokens":2}}}}`,
 		`data: [DONE]`,
 		``,
 	}, "\n")
@@ -65,6 +119,8 @@ func TestOaiResponsesToChatStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
 	require.Equal(t, 2, usage.PromptTokens)
 	require.Equal(t, 3, usage.CompletionTokens)
 	require.Equal(t, 5, usage.TotalTokens)
+	require.Equal(t, 1, usage.PromptTokensDetails.CachedTokens)
+	require.Equal(t, 2, usage.PromptTokensDetails.CachedCreationTokens)
 
 	got := recorder.Body.String()
 	require.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))

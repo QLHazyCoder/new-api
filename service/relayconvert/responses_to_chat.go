@@ -150,6 +150,8 @@ func UsageFromResponsesUsage(src *dto.Usage) *dto.Usage {
 	}
 	if src.InputTokensDetails != nil {
 		usage.PromptTokensDetails.CachedTokens = src.InputTokensDetails.CachedTokens
+		usage.PromptTokensDetails.CachedCreationTokens = src.InputTokensDetails.CachedCreationTokens
+		usage.PromptTokensDetails.TextTokens = src.InputTokensDetails.TextTokens
 		usage.PromptTokensDetails.ImageTokens = src.InputTokensDetails.ImageTokens
 		usage.PromptTokensDetails.AudioTokens = src.InputTokensDetails.AudioTokens
 	}

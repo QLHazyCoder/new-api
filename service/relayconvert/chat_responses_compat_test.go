@@ -68,7 +68,18 @@ func TestResponsesResponseToChatCompletionsPreservesTextAndToolCalls(t *testing.
 				Arguments: []byte(`{"q":"x"}`),
 			},
 		},
-		Usage: &dto.Usage{InputTokens: 3, OutputTokens: 4, TotalTokens: 7},
+		Usage: &dto.Usage{
+			InputTokens:  3,
+			OutputTokens: 4,
+			TotalTokens:  7,
+			InputTokensDetails: &dto.InputTokenDetails{
+				CachedTokens:         1,
+				CachedCreationTokens: 2,
+				TextTokens:           3,
+				AudioTokens:          4,
+				ImageTokens:          5,
+			},
+		},
 	}
 
 	chat, usage, err := ResponsesResponseToChatCompletionsResponse(resp, "chatcmpl_1")
@@ -84,6 +95,11 @@ func TestResponsesResponseToChatCompletionsPreservesTextAndToolCalls(t *testing.
 	assert.Equal(t, "lookup", toolCalls[0].Function.Name)
 	assert.Equal(t, `{"q":"x"}`, toolCalls[0].Function.Arguments)
 	assert.Equal(t, 7, usage.TotalTokens)
+	assert.Equal(t, 1, usage.PromptTokensDetails.CachedTokens)
+	assert.Equal(t, 2, usage.PromptTokensDetails.CachedCreationTokens)
+	assert.Equal(t, 3, usage.PromptTokensDetails.TextTokens)
+	assert.Equal(t, 4, usage.PromptTokensDetails.AudioTokens)
+	assert.Equal(t, 5, usage.PromptTokensDetails.ImageTokens)
 }
 
 func TestResponsesResponseToChatCompletionsPreservesReasoningSummary(t *testing.T) {
