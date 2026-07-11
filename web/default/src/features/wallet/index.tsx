@@ -403,10 +403,10 @@ export function Wallet(props: WalletProps) {
 
   return (
     <>
-      <SectionPageLayout fixedContent>
+      <SectionPageLayout>
         <SectionPageLayout.Title>{t('Wallet')}</SectionPageLayout.Title>
         <SectionPageLayout.Content>
-          <div className='mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col gap-4 overflow-auto sm:gap-5 xl:overflow-hidden'>
+          <div className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-5 xl:h-full xl:min-h-0 xl:overflow-hidden'>
             <div className='shrink-0'>
               <WalletStatsCard user={user} loading={userLoading} />
             </div>
@@ -414,8 +414,8 @@ export function Wallet(props: WalletProps) {
             <div
               className={
                 showSubscriptionPanel
-                  ? 'grid min-h-0 gap-4 xl:flex-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] xl:grid-rows-[minmax(0,1fr)] xl:items-stretch xl:overflow-hidden'
-                  : 'grid min-h-0 gap-4 xl:flex-1 xl:grid-rows-[minmax(0,1fr)] xl:overflow-hidden'
+                  ? 'grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] xl:grid-rows-[minmax(0,1fr)] xl:items-stretch xl:overflow-hidden'
+                  : 'grid gap-4 xl:min-h-0 xl:flex-1 xl:grid-rows-[minmax(0,1fr)] xl:overflow-hidden'
               }
             >
               <div
