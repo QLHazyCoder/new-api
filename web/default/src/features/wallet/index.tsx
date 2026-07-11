@@ -19,10 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { getSelf } from '@/lib/api'
+
 import { SectionPageLayout } from '@/components/layout'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { getSelf } from '@/lib/api'
 
 import { AffiliateRewardsCard } from './components/affiliate-rewards-card'
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
@@ -55,15 +56,15 @@ import {
   readPaymentReturnMarker,
 } from './lib'
 import type {
+  PaymentReturnScope,
+  PaymentReturnState,
+} from './lib/payment-return'
+import type {
   UserWalletData,
   PaymentMethod,
   PresetAmount,
   CreemProduct,
 } from './types'
-import type {
-  PaymentReturnScope,
-  PaymentReturnState,
-} from './lib/payment-return'
 
 interface WalletProps {
   initialShowHistory?: boolean
@@ -165,7 +166,10 @@ export function Wallet(props: WalletProps) {
   }, [props.initialShowHistory])
 
   const syncPaymentReturnState = useCallback(
-    async (source: 'return' | 'storage' | 'focus', state?: PaymentReturnState | null) => {
+    async (
+      source: 'return' | 'storage' | 'focus',
+      state?: PaymentReturnState | null
+    ) => {
       if (syncInFlightRef.current) return
 
       const marker = readPaymentReturnMarker()
@@ -201,7 +205,9 @@ export function Wallet(props: WalletProps) {
     if (paymentReturnHandledRef.current) return
 
     const hasReturnSignal =
-      props.initialShowHistory || props.paymentReturn?.pay || props.paymentReturn?.scope
+      props.initialShowHistory ||
+      props.paymentReturn?.pay ||
+      props.paymentReturn?.scope
     if (!hasReturnSignal) return
 
     paymentReturnHandledRef.current = true
@@ -397,20 +403,25 @@ export function Wallet(props: WalletProps) {
 
   return (
     <>
-      <SectionPageLayout>
+      <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>{t('Wallet')}</SectionPageLayout.Title>
         <SectionPageLayout.Content>
-          <div className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-5'>
-            <WalletStatsCard user={user} loading={userLoading} />
+          <div className='mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col gap-4 overflow-auto sm:gap-5 xl:overflow-hidden'>
+            <div className='shrink-0'>
+              <WalletStatsCard user={user} loading={userLoading} />
+            </div>
 
             <div
               className={
                 showSubscriptionPanel
-                  ? 'grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] xl:items-start'
-                  : 'grid gap-4'
+                  ? 'grid min-h-0 gap-4 xl:flex-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] xl:grid-rows-[minmax(0,1fr)] xl:items-stretch xl:overflow-hidden'
+                  : 'grid min-h-0 gap-4 xl:flex-1 xl:grid-rows-[minmax(0,1fr)] xl:overflow-hidden'
               }
             >
-              <div id='wallet-add-funds' className='scroll-mt-4'>
+              <div
+                id='wallet-add-funds'
+                className='scroll-mt-4 xl:min-h-0 xl:overflow-auto xl:pr-1'
+              >
                 <RechargeFormCard
                   topupInfo={topupInfo}
                   presetAmounts={presetAmounts}
@@ -453,18 +464,20 @@ export function Wallet(props: WalletProps) {
               />
             </div>
 
-            <AffiliateRewardsCard
-              user={user}
-              affiliateLink={affiliateLink}
-              onTransfer={() => setTransferDialogOpen(true)}
-              complianceConfirmed={
-                topupInfo?.payment_compliance_confirmed !== false
-              }
-              topupInviteRewardPercent={
-                topupInfo?.topup_invite_reward_percent ?? 0
-              }
-              loading={affiliateLoading}
-            />
+            <div className='shrink-0'>
+              <AffiliateRewardsCard
+                user={user}
+                affiliateLink={affiliateLink}
+                onTransfer={() => setTransferDialogOpen(true)}
+                complianceConfirmed={
+                  topupInfo?.payment_compliance_confirmed !== false
+                }
+                topupInviteRewardPercent={
+                  topupInfo?.topup_invite_reward_percent ?? 0
+                }
+                loading={affiliateLoading}
+              />
+            </div>
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>

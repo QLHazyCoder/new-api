@@ -251,11 +251,14 @@ export function SubscriptionPlansCard({
 
   if (loading) {
     return (
-      <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
-        <CardHeader className='border-b p-3 !pb-3 sm:p-5 sm:!pb-5'>
+      <Card
+        data-card-hover='false'
+        className='gap-0 overflow-hidden py-0 xl:flex xl:h-full xl:min-h-0 xl:flex-col'
+      >
+        <CardHeader className='border-b p-3 !pb-3 sm:p-5 sm:!pb-5 xl:shrink-0'>
           <Skeleton className='h-6 w-32' />
         </CardHeader>
-        <CardContent className='space-y-4 p-3 sm:p-5'>
+        <CardContent className='space-y-4 p-3 sm:p-5 xl:min-h-0 xl:flex-1 xl:overflow-hidden'>
           <Skeleton className='h-20 w-full' />
           <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3'>
             {PLAN_SKELETON_KEYS.map((key) => (
@@ -278,9 +281,9 @@ export function SubscriptionPlansCard({
         description={t('Subscribe to a plan for model access')}
         icon={<Crown className='h-4 w-4' />}
         disableHoverEffect
-        className='xl:flex xl:h-[calc(100dvh-8.5rem)] xl:max-h-[calc(100dvh-8.5rem)] xl:flex-col'
+        className='xl:flex xl:h-full xl:min-h-0 xl:flex-col'
         headerClassName='xl:shrink-0'
-        contentClassName='flex flex-col gap-4 sm:gap-5 xl:min-h-0 xl:flex-1'
+        contentClassName='flex flex-col gap-4 sm:gap-5 xl:min-h-0 xl:flex-1 xl:overflow-hidden'
       >
         {/* My subscriptions & billing preference */}
         <div className='shrink-0 rounded-xl border p-3 sm:p-4'>
@@ -411,7 +414,7 @@ export function SubscriptionPlansCard({
           {hasAny && (
             <>
               <Separator className='my-3' />
-              <ScrollArea className='max-h-32 pr-3'>
+              <ScrollArea className='h-28 pr-3'>
                 <div className='space-y-3'>
                   {allSubscriptions.map((sub) => {
                     const subscription = sub.subscription
@@ -477,14 +480,14 @@ export function SubscriptionPlansCard({
                         className='bg-background rounded-md border p-3 text-xs'
                       >
                         <div className='flex items-center justify-between'>
-                          <div className='flex items-center gap-2'>
-                            <span className='font-medium'>
+                          <div className='flex min-w-0 items-center gap-2'>
+                            <span className='truncate font-medium'>
                               {subscriptionTitle}
                             </span>
                             {statusBadge}
                           </div>
                           {isActive && (
-                            <span className='text-muted-foreground'>
+                            <span className='text-muted-foreground shrink-0'>
                               {t('{{count}} days remaining', {
                                 count: remainDays,
                               })}
