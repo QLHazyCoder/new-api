@@ -327,8 +327,7 @@ export function PlaygroundImageInput({
           <PromptInputFooter className='flex-col items-stretch gap-2 p-2.5 sm:flex-row sm:items-center sm:justify-between'>
             <PromptInputTools className='flex-wrap gap-2'>
               <ModelGroupSelector
-                className='gap-2'
-                triggerClassName={controlClassName}
+                className={controlClassName}
                 selectedModel={config.model}
                 models={models}
                 onModelChange={(value) => onConfigChange('model', value)}

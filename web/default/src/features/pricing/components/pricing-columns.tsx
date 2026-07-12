@@ -28,7 +28,7 @@ import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
-import { DEFAULT_TOKEN_UNIT, FILTER_ALL, QUOTA_TYPE_VALUES } from '../constants'
+import { DEFAULT_TOKEN_UNIT } from '../constants'
 import {
   getDynamicDisplayGroupRatio,
   getDynamicPricingSummary,
@@ -36,13 +36,12 @@ import {
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
 import {
-  formatFixedPrice,
-  formatGroupPrice,
   formatPrice,
   formatRequestPrice,
   stripTrailingZeros,
 } from '../lib/price'
-import type { PriceType, PricingModel, TokenUnit } from '../types'
+import type { PricingModel, TokenUnit } from '../types'
+import { ModelBillingModeBadge } from './model-billing-mode-badge'
 
 // ----------------------------------------------------------------------------
 // Pricing Table Columns
@@ -53,7 +52,7 @@ export interface PricingColumnsOptions {
   priceRate?: number
   usdExchangeRate?: number
   showRechargePrice?: boolean
-  groupFilter?: string
+  selectedGroup?: string
 }
 
 export function usePricingColumns(
@@ -65,11 +64,10 @@ export function usePricingColumns(
     priceRate = 1,
     usdExchangeRate = 1,
     showRechargePrice = false,
-    groupFilter = FILTER_ALL,
+    selectedGroup,
   } = options
 
   const tokenUnitLabel = tokenUnit === 'K' ? '1K' : '1M'
-  const selectedGroup = groupFilter !== FILTER_ALL ? groupFilter : undefined
 
   return [
     // Model column
@@ -100,18 +98,10 @@ export function usePricingColumns(
     {
       accessorKey: 'quota_type',
       header: t('Type'),
-      cell: ({ row }) => {
-        const isTokenBased = row.original.quota_type === QUOTA_TYPE_VALUES.TOKEN
-        return (
-          <StatusBadge
-            label={isTokenBased ? t('Token') : t('Request')}
-            variant={isTokenBased ? 'info' : 'neutral'}
-            copyable={false}
-            className='-ml-1.5'
-          />
-        )
-      },
-      size: 80,
+      cell: ({ row }) => (
+        <ModelBillingModeBadge model={row.original} className='-ml-1.5' />
+      ),
+      size: 110,
       enableSorting: false,
     },
 
@@ -187,28 +177,28 @@ export function usePricingColumns(
         const isTokenBased = isTokenBasedModel(model)
 
         if (isTokenBased) {
-          const formatTokenPrice = (type: PriceType) =>
-            selectedGroup
-              ? formatGroupPrice(
-                  model,
-                  selectedGroup,
-                  type,
-                  tokenUnit,
-                  showRechargePrice,
-                  priceRate,
-                  usdExchangeRate,
-                  model.group_ratio || {}
-                )
-              : formatPrice(
-                  model,
-                  type,
-                  tokenUnit,
-                  showRechargePrice,
-                  priceRate,
-                  usdExchangeRate
-                )
-          const inputPrice = stripTrailingZeros(formatTokenPrice('input'))
-          const outputPrice = stripTrailingZeros(formatTokenPrice('output'))
+          const inputPrice = stripTrailingZeros(
+            formatPrice(
+              model,
+              'input',
+              tokenUnit,
+              showRechargePrice,
+              priceRate,
+              usdExchangeRate,
+              selectedGroup
+            )
+          )
+          const outputPrice = stripTrailingZeros(
+            formatPrice(
+              model,
+              'output',
+              tokenUnit,
+              showRechargePrice,
+              priceRate,
+              usdExchangeRate,
+              selectedGroup
+            )
+          )
 
           return (
             <div className='max-w-full min-w-0'>
@@ -225,21 +215,13 @@ export function usePricingColumns(
         }
 
         const price = stripTrailingZeros(
-          selectedGroup
-            ? formatFixedPrice(
-                model,
-                selectedGroup,
-                showRechargePrice,
-                priceRate,
-                usdExchangeRate,
-                model.group_ratio || {}
-              )
-            : formatRequestPrice(
-                model,
-                showRechargePrice,
-                priceRate,
-                usdExchangeRate
-              )
+          formatRequestPrice(
+            model,
+            showRechargePrice,
+            priceRate,
+            usdExchangeRate,
+            selectedGroup
+          )
         )
 
         return (
@@ -307,25 +289,15 @@ export function usePricingColumns(
         }
 
         const cachedPrice = stripTrailingZeros(
-          selectedGroup
-            ? formatGroupPrice(
-                model,
-                selectedGroup,
-                'cache',
-                tokenUnit,
-                showRechargePrice,
-                priceRate,
-                usdExchangeRate,
-                model.group_ratio || {}
-              )
-            : formatPrice(
-                model,
-                'cache',
-                tokenUnit,
-                showRechargePrice,
-                priceRate,
-                usdExchangeRate
-              )
+          formatPrice(
+            model,
+            'cache',
+            tokenUnit,
+            showRechargePrice,
+            priceRate,
+            usdExchangeRate,
+            selectedGroup
+          )
         )
 
         return (

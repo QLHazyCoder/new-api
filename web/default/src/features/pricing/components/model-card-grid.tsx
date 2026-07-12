@@ -23,7 +23,6 @@ import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
-import { usePerformanceMetricsVisibility } from '@/features/performance-metrics/hooks/use-performance-metrics-visibility'
 
 import { DEFAULT_PRICING_PAGE_SIZE, DEFAULT_TOKEN_UNIT } from '../constants'
 import type { PricingModel, TokenUnit } from '../types'
@@ -37,7 +36,7 @@ export interface ModelCardGridProps {
   usdExchangeRate?: number
   tokenUnit?: TokenUnit
   showRechargePrice?: boolean
-  groupFilter?: string
+  selectedGroup?: string
 }
 
 export function ModelCardGrid(props: ModelCardGridProps) {
@@ -45,14 +44,12 @@ export function ModelCardGrid(props: ModelCardGridProps) {
   const [page, setPage] = useState(1)
   const pageSize = DEFAULT_PRICING_PAGE_SIZE
   const tokenUnit = props.tokenUnit ?? DEFAULT_TOKEN_UNIT
-  const perfMetricsVisible = usePerformanceMetricsVisibility()
   const totalPages = Math.max(1, Math.ceil(props.models.length / pageSize))
   const currentPage = Math.min(page, totalPages)
 
   const perfQuery = useQuery({
-    queryKey: ['perf-metrics-summary', 24, perfMetricsVisible],
+    queryKey: ['perf-metrics-summary', 24],
     queryFn: () => getPerfMetricsSummary(24),
-    enabled: perfMetricsVisible,
     staleTime: 60 * 1000,
     retry: false,
   })
@@ -63,13 +60,12 @@ export function ModelCardGrid(props: ModelCardGridProps) {
   }, [currentPage, pageSize, props.models])
 
   const perfMap = useMemo(() => {
-    if (!perfMetricsVisible) return new Map<string, ModelPerfBadgeData>()
     const map = new Map<string, ModelPerfBadgeData>()
     for (const model of perfQuery.data?.data?.models ?? []) {
       map.set(model.model_name, model)
     }
     return map
-  }, [perfMetricsVisible, perfQuery.data])
+  }, [perfQuery.data])
 
   if (props.models.length === 0) {
     return null
@@ -86,7 +82,7 @@ export function ModelCardGrid(props: ModelCardGridProps) {
             priceRate={props.priceRate}
             usdExchangeRate={props.usdExchangeRate}
             showRechargePrice={props.showRechargePrice}
-            groupFilter={props.groupFilter}
+            selectedGroup={props.selectedGroup}
             perf={perfMap.get(model.model_name || '')}
             onClick={() => props.onModelClick(model.model_name || '')}
           />

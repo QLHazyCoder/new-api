@@ -64,6 +64,7 @@ export function Playground() {
     setGroups,
     updateConfig,
     updateImageConfig,
+    updateParameterEnabled,
     clearMessages,
   } = usePlaygroundState()
 
@@ -189,6 +190,7 @@ export function Playground() {
       <div className='mx-auto w-full max-w-4xl'>
         {mode === 'chat' ? (
           <PlaygroundInput
+            config={config}
             disabled={isGenerating}
             groups={groups}
             groupValue={config.group}
@@ -197,10 +199,13 @@ export function Playground() {
             modelValue={config.model}
             models={models}
             onGroupChange={(value) => updateConfig('group', value)}
+            onConfigChange={updateConfig}
             onClearMessages={handleClearMessages}
             onModelChange={(value) => updateConfig('model', value)}
+            onParameterEnabledChange={updateParameterEnabled}
             onStop={stopGeneration}
             onSubmit={handleSendMessage}
+            parameterEnabled={parameterEnabled}
             hasMessages={messages.length > 0}
           />
         ) : (

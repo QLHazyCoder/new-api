@@ -50,17 +50,6 @@ func applyUsagePostProcessing(info *relaycommon.RelayInfo, usage *dto.Usage, res
 	}
 }
 
-func applyInputTokenDetailsToPromptUsage(usage *dto.Usage, details *dto.InputTokenDetails) {
-	if usage == nil || details == nil {
-		return
-	}
-	usage.PromptTokensDetails.CachedTokens = details.CachedTokens
-	usage.PromptTokensDetails.CachedCreationTokens = details.GetCacheWriteTokens()
-	usage.PromptTokensDetails.TextTokens = details.TextTokens
-	usage.PromptTokensDetails.AudioTokens = details.AudioTokens
-	usage.PromptTokensDetails.ImageTokens = details.ImageTokens
-}
-
 func extractCachedTokensFromBody(body []byte) (int, bool) {
 	if len(body) == 0 {
 		return 0, false

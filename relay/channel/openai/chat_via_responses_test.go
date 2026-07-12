@@ -55,10 +55,8 @@ func TestOaiResponsesHandlerMapsCacheCreationTokens(t *testing.T) {
 	require.Equal(t, 7, usage.CompletionTokens)
 	require.Equal(t, 107, usage.TotalTokens)
 	require.Equal(t, 32, usage.PromptTokensDetails.CachedTokens)
-	require.Equal(t, 16, usage.PromptTokensDetails.CachedCreationTokens)
-	require.Equal(t, 52, usage.PromptTokensDetails.TextTokens)
-	require.Equal(t, 1, usage.PromptTokensDetails.AudioTokens)
-	require.Equal(t, 2, usage.PromptTokensDetails.ImageTokens)
+	require.Equal(t, 16, usage.PromptTokensDetails.CacheWriteTokens)
+	require.Equal(t, 16, usage.PromptTokensDetails.CacheCreationTokensTotal())
 }
 
 func TestOaiResponsesStreamHandlerMapsCacheCreationTokens(t *testing.T) {
@@ -86,10 +84,8 @@ func TestOaiResponsesStreamHandlerMapsCacheCreationTokens(t *testing.T) {
 	require.Equal(t, 11, usage.CompletionTokens)
 	require.Equal(t, 211, usage.TotalTokens)
 	require.Equal(t, 64, usage.PromptTokensDetails.CachedTokens)
-	require.Equal(t, 24, usage.PromptTokensDetails.CachedCreationTokens)
-	require.Equal(t, 112, usage.PromptTokensDetails.TextTokens)
-	require.Equal(t, 3, usage.PromptTokensDetails.AudioTokens)
-	require.Equal(t, 4, usage.PromptTokensDetails.ImageTokens)
+	require.Equal(t, 24, usage.PromptTokensDetails.CacheWriteTokens)
+	require.Equal(t, 24, usage.PromptTokensDetails.CacheCreationTokensTotal())
 }
 
 func TestOaiResponsesToChatStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
@@ -120,7 +116,8 @@ func TestOaiResponsesToChatStreamHandlerConvertsSSEOrderAndUsage(t *testing.T) {
 	require.Equal(t, 3, usage.CompletionTokens)
 	require.Equal(t, 5, usage.TotalTokens)
 	require.Equal(t, 1, usage.PromptTokensDetails.CachedTokens)
-	require.Equal(t, 2, usage.PromptTokensDetails.CachedCreationTokens)
+	require.Equal(t, 2, usage.PromptTokensDetails.CacheWriteTokens)
+	require.Equal(t, 2, usage.PromptTokensDetails.CacheCreationTokensTotal())
 
 	got := recorder.Body.String()
 	require.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))

@@ -86,7 +86,7 @@ func Distribute() func(c *gin.Context) {
 				return
 			}
 			if !isChannelUsableForEndpoint(channel, relayEndpointType(c.Request.URL.Path), modelRequest.Model) ||
-				!channelSupportsRequestPath(channel, c.Request.URL.Path) {
+				!channelSupportsRequestPath(channel, c.Request.URL.Path, modelRequest.Model) {
 				abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup), "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 				return
 			}
@@ -136,7 +136,7 @@ func Distribute() func(c *gin.Context) {
 					preferred, err := model.CacheGetChannel(preferredChannelID)
 					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
 						isChannelUsableForEndpoint(preferred, endpointType, modelRequest.Model) &&
-						channelSupportsRequestPath(preferred, c.Request.URL.Path) {
+						channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
 						if usingGroup == "auto" {
 							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 							autoGroups := service.GetUserAutoGroup(userGroup)
@@ -228,7 +228,7 @@ func applyPlaygroundGroupOverride(c *gin.Context, usingGroup string) (string, er
 // channelSupportsRequestPath reports whether a channel can serve the request path.
 // Only Advanced Custom (type 58) channels are path-checked; all other channel types
 // always pass. A type-58 channel is usable only when one of its routes matches.
-func channelSupportsRequestPath(channel *model.Channel, requestPath string) bool {
+func channelSupportsRequestPath(channel *model.Channel, requestPath string, requestModel string) bool {
 	if channel == nil {
 		return false
 	}
@@ -236,7 +236,7 @@ func channelSupportsRequestPath(channel *model.Channel, requestPath string) bool
 		return true
 	}
 	config := channel.GetOtherSettings().AdvancedCustom
-	return config != nil && config.SupportsPath(requestPath)
+	return config != nil && config.SupportsPathForModel(requestPath, requestModel)
 }
 
 // getModelFromRequest 从请求中读取模型信息

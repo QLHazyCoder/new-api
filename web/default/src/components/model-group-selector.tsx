@@ -1,3 +1,4 @@
+import { ChevronsUpDown, Check, CpuIcon, LayersIcon } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -16,8 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import React, { useState, useMemo, useCallback } from 'react'
-import { ChevronsUpDown, Check, CpuIcon, LayersIcon } from 'lucide-react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -43,6 +43,11 @@ import {
 } from '@/components/ui/popover'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { cn } from '@/lib/utils'
+
+import {
+  modelGroupSelectorLayoutClasses,
+  scrollSelectedOptionIntoView,
+} from './model-group-selector-layout'
 
 interface ModelOption {
   label: string
@@ -544,7 +549,6 @@ export interface ModelGroupSelectorProps {
   onGroupChange: (value: string) => void
   // Common props
   className?: string
-  triggerClassName?: string
   disabled?: boolean
 }
 
@@ -560,13 +564,15 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
   groups,
   onGroupChange,
   className,
-  triggerClassName,
   disabled = false,
 }) => {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const isMobile = useIsMobile()
+  const groupScrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const selectedGroupOptionRef = useRef<HTMLButtonElement | null>(null)
+  const selectedModelOptionRef = useRef<HTMLDivElement | null>(null)
 
   const currentModel = useMemo(
     () => models.find((model) => model.value === selectedModel),
@@ -612,6 +618,28 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
     [onGroupChange]
   )
 
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    let secondFrameId = 0
+    const firstFrameId = window.requestAnimationFrame(() => {
+      secondFrameId = window.requestAnimationFrame(() => {
+        scrollSelectedOptionIntoView(
+          selectedGroupOptionRef.current,
+          groupScrollContainerRef.current
+        )
+        scrollSelectedOptionIntoView(selectedModelOptionRef.current)
+      })
+    })
+
+    return () => {
+      window.cancelAnimationFrame(firstFrameId)
+      window.cancelAnimationFrame(secondFrameId)
+    }
+  }, [open, selectedGroup, selectedModel])
+
   const renderTrigger = () => (
     <Button
       aria-expanded={open}
@@ -619,8 +647,7 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
         'h-8 max-w-[15rem] justify-start gap-2 border px-2.5 font-medium shadow-none',
         'bg-background/80 hover:bg-accent/70 text-foreground',
         'focus:!ring-0 focus:!outline-none',
-        className,
-        triggerClassName
+        className
       )}
       disabled={disabled}
       role='combobox'
@@ -639,11 +666,22 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
   )
 
   const renderGroupList = () => (
-    <div className='min-w-0 space-y-2'>
+    <div
+      className={cn(
+        'min-w-0 space-y-2',
+        !isMobile && modelGroupSelectorLayoutClasses.groupColumn
+      )}
+    >
       <div className='text-muted-foreground px-1 text-[11px] leading-4 font-medium'>
         {t('Model Group')}
       </div>
-      <div className='grid gap-1'>
+      <div
+        className={cn(
+          'grid gap-1',
+          !isMobile && modelGroupSelectorLayoutClasses.groupScroll
+        )}
+        ref={groupScrollContainerRef}
+      >
         {groups.map((group) => {
           const isSelected = selectedGroup === group.value
 
@@ -658,6 +696,7 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
               disabled={disabled}
               key={group.value}
               onClick={() => handleGroupChange(group.value)}
+              ref={isSelected ? selectedGroupOptionRef : undefined}
               type='button'
             >
               <span className='min-w-0 truncate font-medium'>
@@ -678,7 +717,10 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
 
   const renderModelList = () => (
     <Command
-      className='min-w-0 rounded-lg border-0 bg-transparent p-1'
+      className={cn(
+        'min-w-0 rounded-lg border-0 bg-transparent p-1',
+        !isMobile && modelGroupSelectorLayoutClasses.modelCommand
+      )}
       filter={() => 1}
       shouldFilter={false}
     >
@@ -688,7 +730,11 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
         placeholder={t('Search models...')}
         value={searchQuery}
       />
-      <CommandList className={isMobile ? 'max-h-[45vh]' : 'max-h-[20rem]'}>
+      <CommandList
+        className={
+          isMobile ? 'max-h-[45vh]' : modelGroupSelectorLayoutClasses.modelList
+        }
+      >
         {filteredModels.length === 0 ? (
           <div className='text-muted-foreground px-3 py-8 text-center text-[12px] leading-5'>
             {t('No model found.')}
@@ -697,12 +743,29 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
           <CommandGroup className='p-1'>
             {filteredModels.map((model) => (
               <CommandItem
-                className='mb-0.5 flex items-center justify-between rounded-md px-2 py-1.5 text-[12px] leading-4 transition-colors'
+                className={cn(
+                  modelGroupSelectorLayoutClasses.modelItem,
+                  selectedModel === model.value
+                    ? modelGroupSelectorLayoutClasses.selectedModelItem
+                    : modelGroupSelectorLayoutClasses.unselectedModelItem
+                )}
                 key={model.value}
                 onSelect={handleModelChange}
+                ref={
+                  selectedModel === model.value
+                    ? selectedModelOptionRef
+                    : undefined
+                }
                 value={model.value}
               >
-                <span className='min-w-0 truncate font-medium'>
+                <span
+                  className={cn(
+                    'min-w-0 truncate',
+                    selectedModel === model.value
+                      ? modelGroupSelectorLayoutClasses.selectedModelText
+                      : modelGroupSelectorLayoutClasses.unselectedModelText
+                  )}
+                >
                   {model.label}
                 </span>
                 <Check
@@ -720,9 +783,20 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
   )
 
   const renderContent = () => (
-    <div className='grid gap-3 p-2 md:grid-cols-[9.5rem_minmax(0,1fr)]'>
+    <div
+      className={
+        isMobile
+          ? 'grid gap-3 p-2 md:grid-cols-[9.5rem_minmax(0,1fr)]'
+          : modelGroupSelectorLayoutClasses.desktopContent
+      }
+    >
       {renderGroupList()}
-      <div className='min-w-0 overflow-hidden rounded-lg border'>
+      <div
+        className={cn(
+          'min-w-0 overflow-hidden rounded-lg border',
+          !isMobile && modelGroupSelectorLayoutClasses.modelColumn
+        )}
+      >
         {renderModelList()}
       </div>
     </div>
@@ -745,7 +819,10 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
       <PopoverTrigger render={renderTrigger()} />
       <PopoverContent
         align='end'
-        className='bg-popover z-50 w-[34rem] max-w-[calc(100vw-2rem)] rounded-xl border p-0 shadow-lg'
+        className={cn(
+          'bg-popover z-50 w-[34rem] max-w-[calc(100vw-2rem)] rounded-xl border p-0 shadow-lg',
+          modelGroupSelectorLayoutClasses.desktopPanel
+        )}
         collisionPadding={8}
         side='top'
         sideOffset={8}
