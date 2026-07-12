@@ -136,7 +136,11 @@ func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		order = clickHouseLogOrder("")
 	}
-	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
+	err = LOG_DB.Model(&Log{}).
+		Where("token_id = ? and type <> ?", tokenId, LogTypeError).
+		Order(order).
+		Limit(common.MaxRecentItems).
+		Find(&logs).Error
 	formatUserLogs(logs, 0)
 	return logs, err
 }
@@ -560,7 +564,9 @@ const logSearchCountLimit = 10000
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
-		tx = LOG_DB.Where("logs.user_id = ?", userId)
+		tx = LOG_DB.Where("logs.user_id = ? and logs.type <> ?", userId, LogTypeError)
+	} else if logType == LogTypeError {
+		return []*Log{}, 0, nil
 	} else {
 		tx = LOG_DB.Where("logs.user_id = ? and logs.type = ?", userId, logType)
 	}
