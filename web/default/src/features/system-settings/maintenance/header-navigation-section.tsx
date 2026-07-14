@@ -200,10 +200,10 @@ export function HeaderNavigationSection({
       requireAuthKey: 'rankingsRequireAuth',
       requireAuthDependsOn: 'rankingsEnabled',
       title: t('Rankings'),
-      description: t('Public rankings page based on live usage data.'),
-      requireAuthTitle: t('Require login to view rankings'),
+      description: t('Administrator rankings page based on live usage data.'),
+      requireAuthTitle: t('Require login for rankings API'),
       requireAuthDescription: t(
-        'Visitors must authenticate before accessing the rankings page.'
+        'Direct rankings API requests must be authenticated.'
       ),
     },
   ]

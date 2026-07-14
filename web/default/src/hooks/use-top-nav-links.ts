@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { canViewRankings } from '@/features/rankings/access'
 import { useStatus } from '@/hooks/use-status'
 import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
 import { useAuthStore } from '@/stores/auth-store'
@@ -59,6 +60,7 @@ export function useTopNavLinks(): TopNavLink[] {
   const docsLink: string | undefined = status?.docs_link as string | undefined
 
   const isAuthed = !!auth?.user
+  const showRankings = canViewRankings(auth?.user?.role)
 
   const links: TopNavLink[] = []
 
@@ -81,9 +83,13 @@ export function useTopNavLinks(): TopNavLink[] {
 
   // Rankings
   const rankings = modules?.rankings
-  if (rankings && typeof rankings === 'object' && rankings.enabled) {
-    const requiresAuth = rankings.requireAuth && !isAuthed
-    links.push({ title: t('Rankings'), href: '/rankings', requiresAuth })
+  if (
+    rankings &&
+    typeof rankings === 'object' &&
+    rankings.enabled &&
+    showRankings
+  ) {
+    links.push({ title: t('Rankings'), href: '/rankings' })
   }
 
   // Docs (supports external links)

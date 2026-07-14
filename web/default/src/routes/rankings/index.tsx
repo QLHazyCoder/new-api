@@ -20,6 +20,7 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 import z from 'zod'
 
 import { Rankings } from '@/features/rankings'
+import { canViewRankings } from '@/features/rankings/access'
 import { getFreshModuleAccess } from '@/lib/nav-modules'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -37,14 +38,15 @@ export const Route = createFileRoute('/rankings/')({
     if (!access.enabled) {
       throw redirect({ to: '/' })
     }
-    if (access.requireAuth) {
-      const { auth } = useAuthStore.getState()
-      if (!auth.user) {
-        throw redirect({
-          to: '/sign-in',
-          search: { redirect: location.href },
-        })
-      }
+    const { auth } = useAuthStore.getState()
+    if (!auth.user) {
+      throw redirect({
+        to: '/sign-in',
+        search: { redirect: location.href },
+      })
+    }
+    if (!canViewRankings(auth.user.role)) {
+      throw redirect({ to: '/403' })
     }
   },
   component: Rankings,
