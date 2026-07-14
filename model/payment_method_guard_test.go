@@ -149,6 +149,18 @@ func TestCompleteTopUp_GrantsInviteRewardOnce(t *testing.T) {
 	affQuota, affHistory := getUserAffiliateQuotaForPaymentGuardTest(t, 401)
 	assert.Equal(t, expectedReward, affQuota)
 	assert.Equal(t, expectedReward, affHistory)
+	events := findAffiliateRewardEventsForTest(t)
+	require.Len(t, events, 1)
+	assert.Equal(t, 401, events[0].InviterId)
+	assert.Equal(t, 402, events[0].InviteeId)
+	assert.Equal(t, AffiliateRewardEventTypeTopUp, events[0].EventType)
+	assert.Equal(t, "invite-reward-once", events[0].SourceId)
+	assert.Equal(t, int64(expectedQuota), events[0].BaseQuota)
+	assert.Equal(t, "10", events[0].RewardPercent)
+	assert.Equal(t, int64(expectedReward), events[0].RewardQuota)
+	assert.Equal(t, int64(expectedReward), events[0].AffQuotaDelta)
+	require.NotNil(t, events[0].IdempotencyKey)
+	assert.Equal(t, affiliateRewardIdempotencyKeyForTest("topup", "invite-reward-once"), *events[0].IdempotencyKey)
 
 	result, err = CompleteTopUp(CompleteTopUpOptions{
 		TradeNo:                 "invite-reward-once",
@@ -161,6 +173,7 @@ func TestCompleteTopUp_GrantsInviteRewardOnce(t *testing.T) {
 	affQuota, affHistory = getUserAffiliateQuotaForPaymentGuardTest(t, 401)
 	assert.Equal(t, expectedReward, affQuota)
 	assert.Equal(t, expectedReward, affHistory)
+	assert.Len(t, findAffiliateRewardEventsForTest(t), 1)
 }
 
 func TestCompleteTopUp_DoesNotGrantInviteRewardWhenPercentZero(t *testing.T) {

@@ -140,23 +140,25 @@ func getTopUpQuotaToAdd(topUp *TopUp) int {
 	}
 }
 
-func calculateTopUpInviteReward(quotaToAdd int) int {
+func calculateTopUpInviteReward(quotaToAdd int) (int, string) {
 	if quotaToAdd <= 0 || !operation_setting.IsPaymentComplianceConfirmed() {
-		return 0
+		return 0, ""
 	}
 	if common.TopUpInviteRewardPercent <= 0 {
-		return 0
+		return 0, ""
 	}
-	return common.QuotaFromDecimal(decimal.NewFromInt(int64(quotaToAdd)).
-		Mul(decimal.NewFromFloat(common.TopUpInviteRewardPercent)).
+	percent := decimal.NewFromFloat(common.TopUpInviteRewardPercent)
+	reward := common.QuotaFromDecimal(decimal.NewFromInt(int64(quotaToAdd)).
+		Mul(percent).
 		Div(decimal.NewFromInt(100)))
+	return reward, percent.String()
 }
 
 func grantTopUpInviteRewardTx(tx *gorm.DB, inviterId int, topUp *TopUp, quotaToAdd int) (reward int, rewardUserId int, err error) {
 	if inviterId <= 0 || inviterId == topUp.UserId {
 		return 0, 0, nil
 	}
-	reward = calculateTopUpInviteReward(quotaToAdd)
+	reward, rewardPercent := calculateTopUpInviteReward(quotaToAdd)
 	if reward <= 0 {
 		return 0, 0, nil
 	}
@@ -169,6 +171,21 @@ func grantTopUpInviteRewardTx(tx *gorm.DB, inviterId int, topUp *TopUp, quotaToA
 	}
 	if result.RowsAffected == 0 {
 		return 0, 0, nil
+	}
+	idempotencyKey := affiliateRewardIdempotencyKey("topup", topUp.TradeNo)
+	if err := createAffiliateRewardEventTx(tx, &AffiliateRewardEvent{
+		InviterId:      inviterId,
+		InviteeId:      topUp.UserId,
+		EventType:      AffiliateRewardEventTypeTopUp,
+		SourceType:     AffiliateRewardSourceTypeTopUp,
+		SourceId:       topUp.TradeNo,
+		IdempotencyKey: &idempotencyKey,
+		BaseQuota:      int64(quotaToAdd),
+		RewardPercent:  rewardPercent,
+		RewardQuota:    int64(reward),
+		AffQuotaDelta:  int64(reward),
+	}); err != nil {
+		return 0, 0, err
 	}
 	return reward, inviterId, nil
 }

@@ -22,6 +22,10 @@ func TestLockForUpdateEmitsRowLock(t *testing.T) {
 		var rows []Redemption
 		return lockForUpdate(dummyDB).Where("id = ?", 1).Find(&rows).Statement.SQL.String()
 	}
+	buildPluckSQL := func() string {
+		var ids []int
+		return lockForUpdate(dummyDB).Model(&User{}).Where("inviter_id = ?", 1).Pluck("id", &ids).Statement.SQL.String()
+	}
 
 	t.Cleanup(func() {
 		common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
@@ -29,10 +33,13 @@ func TestLockForUpdateEmitsRowLock(t *testing.T) {
 
 	common.SetDatabaseTypes(common.DatabaseTypeMySQL, common.DatabaseTypeSQLite)
 	assert.Contains(t, buildSQL(), "FOR UPDATE")
+	assert.Contains(t, buildPluckSQL(), "FOR UPDATE")
 
 	common.SetDatabaseTypes(common.DatabaseTypePostgreSQL, common.DatabaseTypeSQLite)
 	assert.Contains(t, buildSQL(), "FOR UPDATE")
+	assert.Contains(t, buildPluckSQL(), "FOR UPDATE")
 
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	assert.NotContains(t, buildSQL(), "FOR UPDATE")
+	assert.NotContains(t, buildPluckSQL(), "FOR UPDATE")
 }

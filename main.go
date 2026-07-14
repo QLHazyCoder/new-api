@@ -108,6 +108,11 @@ func main() {
 
 	// 热更新配置
 	go model.SyncOptions(common.SyncFrequency)
+	if common.IsMasterNode {
+		// Keep the denormalized invitation counter convergent while old and new
+		// instances overlap during rolling or blue-green deployments.
+		go model.SyncAffiliateCounts(5 * time.Minute)
+	}
 
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
 	go authz.StartPolicySync(common.SyncFrequency)
