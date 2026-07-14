@@ -105,7 +105,7 @@ func HandleOAuth(c *gin.Context) {
 	}
 
 	// 7. Find or create user
-	user, err := findOrCreateOAuthUser(c, provider, oauthUser, session)
+	user, err := findOrCreateOAuthUser(c, providerName, provider, oauthUser, session)
 	if err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
@@ -203,7 +203,7 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 }
 
 // findOrCreateOAuthUser finds existing user or creates new user
-func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *oauth.OAuthUser, session sessions.Session) (*model.User, error) {
+func findOrCreateOAuthUser(c *gin.Context, providerName string, provider oauth.Provider, oauthUser *oauth.OAuthUser, session sessions.Session) (*model.User, error) {
 	user := &model.User{}
 
 	// Check if user already exists with new ID
@@ -274,6 +274,7 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	}
 	user.Role = common.RoleCommonUser
 	user.Status = common.UserStatusEnabled
+	user.Group = model.ResolveRegistrationGroup(model.OAuthRegistrationSource(providerName))
 
 	// Handle affiliate code
 	affCode := session.Get("aff")

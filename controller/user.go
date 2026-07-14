@@ -245,6 +245,7 @@ func Register(c *gin.Context) {
 		DisplayName: user.Username,
 		InviterId:   inviterId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
+		Group:       model.ResolveRegistrationGroup(model.RegistrationSourcePassword),
 	}
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
