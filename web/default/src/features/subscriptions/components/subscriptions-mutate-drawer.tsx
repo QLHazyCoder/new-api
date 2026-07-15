@@ -500,6 +500,53 @@ export function SubscriptionsMutateDrawer({
                     </FormItem>
                   )}
                 />
+
+                <FormField
+                  control={form.control}
+                  name='applicable_group'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Applicable Group')}</FormLabel>
+                      <Select
+                        items={[
+                          { value: '__none__', label: t('All Groups') },
+                          ...groupOptions.map((group) => ({
+                            value: group,
+                            label: group,
+                          })),
+                        ]}
+                        onValueChange={(value) =>
+                          field.onChange(value === '__none__' ? '' : value)
+                        }
+                        value={field.value || ''}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder={t('All Groups')} />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent alignItemWithTrigger={false}>
+                          <SelectGroup>
+                            <SelectItem value='__none__'>
+                              {t('All Groups')}
+                            </SelectItem>
+                            {groupOptions.map((group) => (
+                              <SelectItem key={group} value={group}>
+                                {group}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        {t(
+                          'Only requests using this group can consume this subscription quota. Leave empty for all groups.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               <FormField
