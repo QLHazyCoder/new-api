@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -41,7 +42,7 @@ func OAuthRegistrationSource(providerName string) string {
 func ResolveRegistrationGroup(source string) string {
 	policy, err := loadRegistrationGroupPolicy()
 	if err != nil {
-		common.SysLog("failed to load registration group policy: " + err.Error())
+		common.SysError("failed to load registration group policy: " + err.Error())
 		return defaultRegistrationGroup
 	}
 	if !policy.Enabled {
@@ -81,7 +82,10 @@ func loadRegistrationGroupPolicy() (RegistrationGroupPolicy, error) {
 	}
 
 	policy.DefaultGroup = strings.TrimSpace(policy.DefaultGroup)
-	policy.SourceOverrides = normalizeRegistrationSourceOverrides(policy.SourceOverrides)
+	policy.SourceOverrides, err = normalizeRegistrationSourceOverrides(policy.SourceOverrides)
+	if err != nil {
+		return RegistrationGroupPolicy{}, err
+	}
 	return policy, nil
 }
 
@@ -89,20 +93,23 @@ func normalizeRegistrationSource(source string) string {
 	return strings.ToLower(strings.TrimSpace(source))
 }
 
-func normalizeRegistrationSourceOverrides(overrides map[string]string) map[string]string {
+func normalizeRegistrationSourceOverrides(overrides map[string]string) (map[string]string, error) {
 	if len(overrides) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	normalized := make(map[string]string, len(overrides))
-	for source, group := range overrides {
-		source = normalizeRegistrationSource(source)
+	for rawSource, group := range overrides {
+		source := normalizeRegistrationSource(rawSource)
 		if source == "" {
 			continue
 		}
+		if _, exists := normalized[source]; exists {
+			return nil, fmt.Errorf("registration source overrides collide after normalization: %q", source)
+		}
 		normalized[source] = strings.TrimSpace(group)
 	}
-	return normalized
+	return normalized, nil
 }
 
 func isValidRegistrationGroup(group string) bool {

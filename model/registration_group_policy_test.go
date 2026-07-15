@@ -146,6 +146,19 @@ func TestResolveRegistrationGroup(t *testing.T) {
 			source: RegistrationSourcePassword,
 			want:   defaultRegistrationGroup,
 		},
+		{
+			name: "normalized source collision safely uses default",
+			policy: &RegistrationGroupPolicy{
+				Enabled:      true,
+				DefaultGroup: "friend",
+				SourceOverrides: map[string]string{
+					"OAuth:GitHub": "friend",
+					"oauth:github": "vip",
+				},
+			},
+			source: "oauth:github",
+			want:   defaultRegistrationGroup,
+		},
 	}
 
 	for _, tt := range tests {
