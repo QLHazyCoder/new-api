@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
+	channelconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/pkg/imagecapability"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -61,14 +64,94 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
-	if !strings.HasPrefix(info.UpstreamModelName, "imagen") {
-		return nil, errors.New("not supported model for image generation, only imagen models are supported")
+	if info.RelayMode == constant.RelayModeImagesEdits {
+		return nil, errors.New("Gemini image editing is not supported by the images edits endpoint")
 	}
 
-	// convert size to aspect ratio but allow user to specify aspect ratio
-	aspectRatio := "1:1" // default aspect ratio
-	size := strings.TrimSpace(request.Size)
-	if size != "" {
+	upstreamModel, aliasResolution := imagecapability.NormalizeGeminiImageModel(info.UpstreamModelName)
+	if aliasResolution == "" {
+		_, aliasResolution = imagecapability.NormalizeGeminiImageModel(info.OriginModelName)
+	}
+	capability, ok := imagecapability.Resolve(channelconstant.ChannelTypeGemini, upstreamModel)
+	if !ok {
+		return nil, fmt.Errorf("model %s does not support Gemini image generation", info.UpstreamModelName)
+	}
+	info.UpstreamModelName = upstreamModel
+
+	if capability.Provider == imagecapability.ProviderImagen {
+		return convertImagenRequest(request, capability)
+	}
+	return convertNativeGeminiImageRequest(request, capability, aliasResolution)
+}
+
+func convertImagenRequest(request dto.ImageRequest, capability imagecapability.Capability) (dto.GeminiImageRequest, error) {
+	aspectRatio, err := requestedAspectRatio(request, capability)
+	if err != nil {
+		return dto.GeminiImageRequest{}, err
+	}
+	resolution, err := requestedImageResolution(request, capability, true)
+	if err != nil {
+		return dto.GeminiImageRequest{}, err
+	}
+
+	return dto.GeminiImageRequest{
+		Instances: []dto.GeminiImageInstance{
+			{
+				Prompt: request.Prompt,
+			},
+		},
+		Parameters: dto.GeminiImageParameters{
+			SampleCount:      int(lo.FromPtrOr(request.N, uint(1))),
+			AspectRatio:      aspectRatio,
+			PersonGeneration: "allow_adult",
+			ImageSize:        resolution,
+		},
+	}, nil
+}
+
+func convertNativeGeminiImageRequest(request dto.ImageRequest, capability imagecapability.Capability, aliasResolution string) (*dto.GeminiChatRequest, error) {
+	if lo.FromPtrOr(request.N, uint(1)) > 1 {
+		return nil, errors.New("Gemini native image generation supports n=1 per request")
+	}
+	aspectRatio, err := requestedAspectRatio(request, capability)
+	if err != nil {
+		return nil, err
+	}
+	if request.Resolution == "" {
+		request.Resolution = aliasResolution
+	}
+	resolution, err := requestedImageResolution(request, capability, false)
+	if err != nil {
+		return nil, err
+	}
+	imageConfig, err := common.Marshal(map[string]string{
+		"aspectRatio": aspectRatio,
+		"imageSize":   resolution,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Gemini image config: %w", err)
+	}
+
+	return &dto.GeminiChatRequest{
+		Contents: []dto.GeminiChatContent{
+			{
+				Role: "user",
+				Parts: []dto.GeminiPart{
+					{Text: request.Prompt},
+				},
+			},
+		},
+		GenerationConfig: dto.GeminiChatGenerationConfig{
+			ResponseModalities: []string{"TEXT", "IMAGE"},
+			ImageConfig:        imageConfig,
+		},
+	}, nil
+}
+
+func requestedAspectRatio(request dto.ImageRequest, capability imagecapability.Capability) (string, error) {
+	aspectRatio := strings.TrimSpace(request.AspectRatio)
+	if aspectRatio == "" {
+		size := strings.TrimSpace(request.Size)
 		if strings.Contains(size, ":") {
 			aspectRatio = size
 		} else {
@@ -86,44 +169,41 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 			}
 		}
 	}
-
-	// build gemini imagen request
-	geminiRequest := dto.GeminiImageRequest{
-		Instances: []dto.GeminiImageInstance{
-			{
-				Prompt: request.Prompt,
-			},
-		},
-		Parameters: dto.GeminiImageParameters{
-			SampleCount:      int(lo.FromPtrOr(request.N, uint(1))),
-			AspectRatio:      aspectRatio,
-			PersonGeneration: "allow_adult", // default allow adult
-		},
+	if aspectRatio == "" {
+		aspectRatio = capability.DefaultAspectRatio
 	}
+	if !containsImageOption(capability.AspectRatios, aspectRatio) {
+		return "", fmt.Errorf("aspect_ratio %s is not supported by this image model", aspectRatio)
+	}
+	return aspectRatio, nil
+}
 
-	// Set imageSize when quality parameter is specified
-	// Map quality parameter to imageSize (only supported by Standard and Ultra models)
-	// quality values: auto, high, medium, low (for gpt-image-1), hd, standard (for dall-e-3)
-	// imageSize values: 1K (default), 2K
-	// https://ai.google.dev/gemini-api/docs/imagen
-	// https://platform.openai.com/docs/api-reference/images/create
-	if request.Quality != "" {
-		imageSize := "1K" // default
-		switch request.Quality {
-		case "hd", "high":
-			imageSize = "2K"
-		case "2K":
-			imageSize = "2K"
-		case "standard", "medium", "low", "auto", "1K":
-			imageSize = "1K"
-		default:
-			// unknown quality value, default to 1K
-			imageSize = "1K"
+func requestedImageResolution(request dto.ImageRequest, capability imagecapability.Capability, legacyQuality bool) (string, error) {
+	resolution := strings.ToUpper(strings.TrimSpace(request.Resolution))
+	if resolution == "" && legacyQuality {
+		switch strings.ToLower(strings.TrimSpace(request.Quality)) {
+		case "hd", "high", "2k":
+			resolution = "2K"
+		case "standard", "medium", "low", "auto", "1k":
+			resolution = "1K"
 		}
-		geminiRequest.Parameters.ImageSize = imageSize
 	}
+	if resolution == "" {
+		resolution = capability.DefaultResolution
+	}
+	if !containsImageOption(capability.Resolutions, resolution) {
+		return "", fmt.Errorf("resolution %s is not supported by this image model", resolution)
+	}
+	return resolution, nil
+}
 
-	return geminiRequest, nil
+func containsImageOption(options []string, value string) bool {
+	for _, option := range options {
+		if strings.EqualFold(option, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
@@ -274,8 +354,11 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 		}
 	}
 
-	if strings.HasPrefix(info.UpstreamModelName, "imagen") {
-		return GeminiImageHandler(c, info, resp)
+	if info.RelayMode == constant.RelayModeImagesGenerations || info.RelayMode == constant.RelayModeImagesEdits {
+		if strings.HasPrefix(info.UpstreamModelName, "imagen") {
+			return GeminiImageHandler(c, info, resp)
+		}
+		return GeminiNativeImageHandler(c, info, resp)
 	}
 
 	// check if the model is an embedding model

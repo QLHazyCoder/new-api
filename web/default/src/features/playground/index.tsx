@@ -27,24 +27,17 @@ import {
   useChatHandler,
   useImageGenerationHandler,
   usePlaygroundConversation,
-  usePlaygroundImageModels,
+  usePlaygroundImageOptions,
   usePlaygroundOptions,
   usePlaygroundState,
 } from './hooks'
 import {
-  isSupportedPlaygroundImageModel,
-  supportsImageEditingModel,
+  EMPTY_IMAGE_MODEL_CAPABILITIES,
+  imageConfigsEqual,
+  normalizePlaygroundImageConfig,
+  resolveImageModelSelection,
 } from './lib'
-import type { ImageTask, ModelOption } from './types'
-
-function supportsImageGeneration(model: ModelOption): boolean {
-  const endpoints =
-    model.supportedEndpointTypes || model.supported_endpoint_types
-  return (
-    isSupportedPlaygroundImageModel(model.value) &&
-    (endpoints?.includes('image-generation') ?? false)
-  )
-}
+import type { ImageTask } from './types'
 
 export function Playground() {
   const {
@@ -64,6 +57,7 @@ export function Playground() {
     setGroups,
     updateConfig,
     updateImageConfig,
+    replaceImageConfig,
     updateParameterEnabled,
     clearMessages,
   } = usePlaygroundState()
@@ -96,43 +90,71 @@ export function Playground() {
     updateConfig,
   })
 
-  const { imageModelOptions, isLoadingImageModels } = usePlaygroundImageModels(
-    imageConfig.group
+  const { imageGroups, isLoadingImageOptions } = usePlaygroundImageOptions()
+  const imageSelection = useMemo(
+    () =>
+      resolveImageModelSelection(
+        imageGroups,
+        imageConfig.group,
+        imageConfig.model
+      ),
+    [imageConfig.group, imageConfig.model, imageGroups]
   )
-
-  const imageModels = useMemo(
-    () => imageModelOptions.filter(supportsImageGeneration),
-    [imageModelOptions]
-  )
+  const effectiveImageConfig = useMemo(() => {
+    if (!imageSelection) return imageConfig
+    return normalizePlaygroundImageConfig(
+      {
+        ...imageConfig,
+        group: imageSelection.group.value,
+        model: imageSelection.model.value,
+      },
+      imageSelection.model.capabilities
+    )
+  }, [imageConfig, imageSelection])
+  const imageModels = imageSelection?.group.models ?? []
+  const imageCapabilities =
+    imageSelection?.model.capabilities ?? EMPTY_IMAGE_MODEL_CAPABILITIES
   const [imagePrompt, setImagePrompt] = useState('')
 
   const { generateImage, retryTask } = useImageGenerationHandler({
-    config: imageConfig,
+    config: effectiveImageConfig,
+    groups: imageGroups,
     onTasksUpdate: updateImageTasks,
   })
 
   useEffect(() => {
-    if (imageModels.length === 0) return
-    const hasCurrentImageModel = imageModels.some(
-      (model) => model.value === imageConfig.model
-    )
-    if (!hasCurrentImageModel) {
-      updateImageConfig('model', imageModels[0].value)
+    if (!imageSelection) return
+    if (!imageConfigsEqual(imageConfig, effectiveImageConfig)) {
+      replaceImageConfig(effectiveImageConfig)
     }
-  }, [imageModels, imageConfig.model, updateImageConfig])
+  }, [effectiveImageConfig, imageConfig, imageSelection, replaceImageConfig])
 
-  useEffect(() => {
-    if (groups.length === 0) return
-    const hasCurrentImageGroup = groups.some(
-      (group) => group.value === imageConfig.group
+  const handleImageGroupChange = (value: string) => {
+    const group = imageGroups.find((option) => option.value === value)
+    if (!group) return
+    const model =
+      group.models.find(
+        (option) => option.value === effectiveImageConfig.model
+      ) ?? group.models[0]
+    if (!model) return
+    replaceImageConfig(
+      normalizePlaygroundImageConfig(
+        { ...effectiveImageConfig, group: group.value, model: model.value },
+        model.capabilities
+      )
     )
-    if (!hasCurrentImageGroup) {
-      const fallback =
-        groups.find((group) => group.value === 'default')?.value ??
-        groups[0].value
-      updateImageConfig('group', fallback)
-    }
-  }, [groups, imageConfig.group, updateImageConfig])
+  }
+
+  const handleImageModelChange = (value: string) => {
+    const model = imageModels.find((option) => option.value === value)
+    if (!model) return
+    replaceImageConfig(
+      normalizePlaygroundImageConfig(
+        { ...effectiveImageConfig, model: model.value },
+        model.capabilities
+      )
+    )
+  }
 
   const handleReusePrompt = (prompt: string) => {
     setMode('image')
@@ -210,16 +232,16 @@ export function Playground() {
           />
         ) : (
           <PlaygroundImageInput
-            config={imageConfig}
-            disabled={imageModels.length === 0}
-            groups={groups}
-            isModelLoading={isLoadingImageModels}
+            config={effectiveImageConfig}
+            capabilities={imageCapabilities}
+            disabled={!imageSelection}
+            groups={imageGroups}
+            isModelLoading={isLoadingImageOptions}
             models={imageModels}
             prompt={imagePrompt}
-            supportsReferenceImages={supportsImageEditingModel(
-              imageConfig.model
-            )}
             onConfigChange={updateImageConfig}
+            onGroupChange={handleImageGroupChange}
+            onModelChange={handleImageModelChange}
             onPromptChange={setImagePrompt}
             onSubmit={(prompt, referenceImages) =>
               void generateImage(prompt, referenceImages)

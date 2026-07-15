@@ -13,7 +13,7 @@ type ChatCompletionResponse struct {
 	SystemFingerprint string                         `json:"system_fingerprint"`
 }
 
-// quality, size or style are not supported by xAI API at the moment.
+// xAI uses aspect_ratio and resolution instead of OpenAI's size field.
 type ImageRequest struct {
 	Model          string `json:"model"`
 	Prompt         string `json:"prompt" binding:"required"`

@@ -16,11 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useRef, useState } from 'react'
 import { ImagePlusIcon, SendIcon, XIcon } from 'lucide-react'
 import { nanoid } from 'nanoid'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
+import {
+  PromptInput,
+  PromptInputButton,
+  PromptInputFooter,
+  PromptInputTextarea,
+  PromptInputTools,
+  type PromptInputMessage,
+} from '@/components/ai-elements/prompt-input'
+import { ModelGroupSelector } from '@/components/model-group-selector'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -36,38 +46,33 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+
 import {
-  PromptInput,
-  PromptInputButton,
-  PromptInputFooter,
-  PromptInputTextarea,
-  PromptInputTools,
-  type PromptInputMessage,
-} from '@/components/ai-elements/prompt-input'
-import { ModelGroupSelector } from '@/components/model-group-selector'
-import {
-  MAX_IMAGE_GENERATION_COUNT,
-  PLAYGROUND_IMAGE_OUTPUT_FORMAT_OPTIONS,
-  PLAYGROUND_IMAGE_QUALITY_OPTIONS,
-  PLAYGROUND_IMAGE_SIZE_OPTIONS,
   normalizePlaygroundImageConfig,
   normalizeImageGenerationCount,
 } from '../lib'
-import type { GroupOption, ImageGenerationConfig, ModelOption } from '../types'
-import type { ImageReferenceInput } from '../types'
+import type {
+  GroupOption,
+  ImageGenerationConfig,
+  ImageModelCapabilities,
+  ImageReferenceInput,
+  ModelOption,
+} from '../types'
 
 interface PlaygroundImageInputProps {
   config: ImageGenerationConfig
+  capabilities: ImageModelCapabilities
   disabled?: boolean
   groups: GroupOption[]
   isModelLoading?: boolean
   models: ModelOption[]
   prompt: string
-  supportsReferenceImages?: boolean
   onConfigChange: <K extends keyof ImageGenerationConfig>(
     key: K,
     value: ImageGenerationConfig[K]
   ) => void
+  onGroupChange: (value: string) => void
+  onModelChange: (value: string) => void
   onPromptChange: (value: string) => void
   onSubmit: (prompt: string, referenceImages: ImageReferenceInput[]) => void
 }
@@ -81,9 +86,16 @@ const controlClassName =
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () =>
-      reject(reader.error || new Error('Failed to read image file'))
+    reader.addEventListener(
+      'load',
+      () => resolve(String(reader.result || '')),
+      { once: true }
+    )
+    reader.addEventListener(
+      'error',
+      () => reject(reader.error || new Error('Failed to read image file')),
+      { once: true }
+    )
     reader.readAsDataURL(file)
   })
 }
@@ -131,13 +143,15 @@ function FieldSelect({
 
 export function PlaygroundImageInput({
   config,
+  capabilities,
   disabled,
   groups,
   isModelLoading = false,
   models,
   prompt,
-  supportsReferenceImages = false,
   onConfigChange,
+  onGroupChange,
+  onModelChange,
   onPromptChange,
   onSubmit,
 }: PlaygroundImageInputProps) {
@@ -152,19 +166,27 @@ export function PlaygroundImageInput({
 
   const hasPrompt = Boolean(prompt.trim())
   const hasImageModels = models.length > 0
-  const normalizedConfig = normalizePlaygroundImageConfig(config)
-  const countValue = normalizeImageGenerationCount(config.n)
+  const supportsReferenceImages = capabilities.supports_editing
+  const normalizedConfig = normalizePlaygroundImageConfig(config, capabilities)
+  const countValue = normalizeImageGenerationCount(
+    config.n,
+    capabilities.max_images
+  )
   const countOptions = Array.from(
-    { length: MAX_IMAGE_GENERATION_COUNT },
+    { length: Math.min(4, Math.max(1, capabilities.max_images)) },
     (_, index) => index + 1
   )
   const isConfigDisabled = Boolean(disabled)
-  const isModelSelectDisabled =
-    isConfigDisabled || isModelLoading || !hasImageModels
   const isGroupSelectDisabled = isConfigDisabled || groups.length === 0
   const isReferenceImageDisabled =
     isConfigDisabled || !hasImageModels || !supportsReferenceImages
   const isSubmitDisabled = Boolean(disabled) || !hasPrompt || !config.model
+
+  useEffect(() => {
+    if (supportsReferenceImages) return
+    setReferenceImages([])
+    setPreviewImage(null)
+  }, [supportsReferenceImages])
 
   const addReferenceFiles = async (files: File[]) => {
     if (files.length === 0) return
@@ -228,7 +250,7 @@ export function PlaygroundImageInput({
   }
 
   const handlePaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(event.clipboardData.files).filter((file) =>
+    const files = [...event.clipboardData.files].filter((file) =>
       file.type.startsWith('image/')
     )
     if (files.length === 0) return
@@ -264,7 +286,7 @@ export function PlaygroundImageInput({
           multiple
           type='file'
           onChange={(event) => {
-            void addReferenceFiles(Array.from(event.target.files || []))
+            void addReferenceFiles([...(event.target.files || [])])
             event.target.value = ''
           }}
         />
@@ -330,11 +352,13 @@ export function PlaygroundImageInput({
                 className={controlClassName}
                 selectedModel={config.model}
                 models={models}
-                onModelChange={(value) => onConfigChange('model', value)}
+                onModelChange={onModelChange}
                 selectedGroup={config.group}
                 groups={groups}
-                onGroupChange={(value) => onConfigChange('group', value)}
-                disabled={isModelSelectDisabled || isGroupSelectDisabled}
+                onGroupChange={onGroupChange}
+                disabled={
+                  isConfigDisabled || isModelLoading || isGroupSelectDisabled
+                }
               />
 
               <Tooltip>
@@ -359,38 +383,74 @@ export function PlaygroundImageInput({
                 <TooltipContent>{t('Attach reference image')}</TooltipContent>
               </Tooltip>
 
-              <FieldSelect
-                className={`${controlClassName} w-32`}
-                disabled={isConfigDisabled || !hasImageModels}
-                label={t('Size')}
-                value={normalizedConfig.size}
-                onChange={(value) => onConfigChange('size', value)}
-              >
-                {PLAYGROUND_IMAGE_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </FieldSelect>
+              {capabilities.sizes.length > 0 ? (
+                <FieldSelect
+                  className={`${controlClassName} w-32`}
+                  disabled={isConfigDisabled || !hasImageModels}
+                  label={t('Size')}
+                  value={normalizedConfig.size}
+                  onChange={(value) => onConfigChange('size', value)}
+                >
+                  {capabilities.sizes.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </FieldSelect>
+              ) : null}
 
-              <FieldSelect
-                className={`${controlClassName} w-24`}
-                disabled={isConfigDisabled || !hasImageModels}
-                label={t('Quality')}
-                value={normalizedConfig.quality}
-                onChange={(value) =>
-                  onConfigChange(
-                    'quality',
-                    value as ImageGenerationConfig['quality']
-                  )
-                }
-              >
-                {PLAYGROUND_IMAGE_QUALITY_OPTIONS.map((quality) => (
-                  <option key={quality} value={quality}>
-                    {quality}
-                  </option>
-                ))}
-              </FieldSelect>
+              {capabilities.aspect_ratios.length > 0 ? (
+                <FieldSelect
+                  className={`${controlClassName} w-24`}
+                  disabled={isConfigDisabled || !hasImageModels}
+                  label={t('Aspect ratio')}
+                  value={normalizedConfig.aspect_ratio}
+                  onChange={(value) => onConfigChange('aspect_ratio', value)}
+                >
+                  {capabilities.aspect_ratios.map((aspectRatio) => (
+                    <option key={aspectRatio} value={aspectRatio}>
+                      {aspectRatio}
+                    </option>
+                  ))}
+                </FieldSelect>
+              ) : null}
+
+              {capabilities.resolutions.length > 0 ? (
+                <FieldSelect
+                  className={`${controlClassName} w-20`}
+                  disabled={isConfigDisabled || !hasImageModels}
+                  label={t('Resolution')}
+                  value={normalizedConfig.resolution}
+                  onChange={(value) => onConfigChange('resolution', value)}
+                >
+                  {capabilities.resolutions.map((resolution) => (
+                    <option key={resolution} value={resolution}>
+                      {resolution}
+                    </option>
+                  ))}
+                </FieldSelect>
+              ) : null}
+
+              {capabilities.qualities.length > 0 ? (
+                <FieldSelect
+                  className={`${controlClassName} w-24`}
+                  disabled={isConfigDisabled || !hasImageModels}
+                  label={t('Quality')}
+                  value={normalizedConfig.quality}
+                  onChange={(value) =>
+                    onConfigChange(
+                      'quality',
+                      value as ImageGenerationConfig['quality']
+                    )
+                  }
+                >
+                  {capabilities.qualities.map((quality) => (
+                    <option key={quality} value={quality}>
+                      {quality}
+                    </option>
+                  ))}
+                </FieldSelect>
+              ) : null}
 
               <FieldSelect
                 className={`${controlClassName} w-16`}
@@ -401,7 +461,8 @@ export function PlaygroundImageInput({
                   onConfigChange(
                     'n',
                     normalizeImageGenerationCount(
-                      Number.parseInt(value, 10) || 1
+                      Number.parseInt(value, 10) || 1,
+                      capabilities.max_images
                     )
                   )
                 }
@@ -413,24 +474,26 @@ export function PlaygroundImageInput({
                 ))}
               </FieldSelect>
 
-              <FieldSelect
-                className={`${controlClassName} w-24`}
-                disabled={isConfigDisabled || !hasImageModels}
-                label={t('Output format')}
-                value={normalizedConfig.output_format || 'png'}
-                onChange={(value) =>
-                  onConfigChange(
-                    'output_format',
-                    value as ImageGenerationConfig['output_format']
-                  )
-                }
-              >
-                {PLAYGROUND_IMAGE_OUTPUT_FORMAT_OPTIONS.map((format) => (
-                  <option key={format} value={format}>
-                    {format}
-                  </option>
-                ))}
-              </FieldSelect>
+              {capabilities.output_formats.length > 0 ? (
+                <FieldSelect
+                  className={`${controlClassName} w-24`}
+                  disabled={isConfigDisabled || !hasImageModels}
+                  label={t('Output format')}
+                  value={normalizedConfig.output_format || 'png'}
+                  onChange={(value) =>
+                    onConfigChange(
+                      'output_format',
+                      value as ImageGenerationConfig['output_format']
+                    )
+                  }
+                >
+                  {capabilities.output_formats.map((format) => (
+                    <option key={format} value={format}>
+                      {format}
+                    </option>
+                  ))}
+                </FieldSelect>
+              ) : null}
             </PromptInputTools>
 
             <PromptInputButton

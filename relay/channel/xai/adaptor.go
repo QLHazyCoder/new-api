@@ -38,6 +38,9 @@ func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInf
 }
 
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
+	if info.RelayMode == constant.RelayModeImagesEdits {
+		return nil, errors.New("xAI image editing is not supported by the images edits endpoint")
+	}
 	return ConvertImageRequest(request), nil
 }
 
@@ -49,13 +52,24 @@ func ConvertImageRequest(request dto.ImageRequest) ImageRequest {
 		ResponseFormat: request.ResponseFormat,
 	}
 
-	size := strings.TrimSpace(request.Size)
-	if isXAIAspectRatio(size) {
-		xaiRequest.AspectRatio = size
-	} else if aspectRatio := xaiAspectRatioFromSize(size); aspectRatio != "" {
+	aspectRatio := strings.ToLower(strings.TrimSpace(request.AspectRatio))
+	resolution := strings.ToLower(strings.TrimSpace(request.Resolution))
+	size := strings.ToLower(strings.TrimSpace(request.Size))
+	if aspectRatio == "" {
+		if isXAIAspectRatio(size) {
+			aspectRatio = size
+		} else {
+			aspectRatio = xaiAspectRatioFromSize(size)
+		}
+	}
+	if resolution == "" && isXAIResolution(size) {
+		resolution = size
+	}
+	if isXAIAspectRatio(aspectRatio) {
 		xaiRequest.AspectRatio = aspectRatio
-	} else if isXAIResolution(size) {
-		xaiRequest.Resolution = size
+	}
+	if isXAIResolution(resolution) {
+		xaiRequest.Resolution = resolution
 	}
 
 	return xaiRequest

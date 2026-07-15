@@ -57,7 +57,7 @@ func (p *RetryParam) channelFilter() func(*model.Channel) bool {
 		}
 		switch p.EndpointType {
 		case constant.EndpointTypeImageGeneration:
-			return common.IsChannelImageGenerationModel(channel.Type, p.ModelName)
+			return common.IsChannelImageGenerationModel(channel.Type, p.ModelName, channel.GetModelMapping())
 		default:
 			return true
 		}

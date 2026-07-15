@@ -16,23 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback } from 'react'
 import { nanoid } from 'nanoid'
+import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { sendImageEdit, sendImageGeneration } from '../api'
 import { ERROR_MESSAGES } from '../constants'
 import {
   buildImageEditFormData,
   buildImageGenerationPayload,
+  findImageModelCapabilities,
   loadImageTasks,
   normalizePlaygroundImageConfig,
   normalizeImageGenerationCount,
   saveImageTasks,
-  supportsImageEditingModel,
 } from '../lib'
 import type {
   ImageGenerationConfig,
+  ImageGroupOption,
   ImageReferenceInput,
   ImageReferencePreview,
   ImageResult,
@@ -41,6 +43,7 @@ import type {
 
 interface UseImageGenerationHandlerOptions {
   config: ImageGenerationConfig
+  groups: ImageGroupOption[]
   onTasksUpdate: (
     updater: ImageTask[] | ((prev: ImageTask[]) => ImageTask[])
   ) => void
@@ -128,6 +131,7 @@ function updateStoredImageTask(
 
 export function useImageGenerationHandler({
   config,
+  groups,
   onTasksUpdate,
 }: UseImageGenerationHandlerOptions) {
   const { t } = useTranslation()
@@ -153,10 +157,20 @@ export function useImageGenerationHandler({
       overrideConfig?: ImageGenerationConfig
     ) => {
       const trimmedPrompt = prompt.trim()
+      const requestedConfig = overrideConfig ?? config
+      const capabilities = findImageModelCapabilities(groups, requestedConfig)
+      if (!capabilities) {
+        toast.error(t('Please select an image model'))
+        return
+      }
       const sourceConfig = normalizePlaygroundImageConfig(
-        overrideConfig ?? config
+        requestedConfig,
+        capabilities
       )
-      const requestedCount = normalizeImageGenerationCount(sourceConfig.n)
+      const requestedCount = normalizeImageGenerationCount(
+        sourceConfig.n,
+        capabilities.max_images
+      )
       const effectiveConfig = {
         ...sourceConfig,
         n: requestedCount,
@@ -173,7 +187,7 @@ export function useImageGenerationHandler({
       }
 
       const isEditMode = referenceImages.length > 0
-      if (isEditMode && !supportsImageEditingModel(effectiveConfig.model)) {
+      if (isEditMode && !capabilities.supports_editing) {
         toast.error(
           t('The selected image model does not support reference images')
         )
@@ -208,17 +222,21 @@ export function useImageGenerationHandler({
                   buildImageEditFormData(
                     trimmedPrompt,
                     task.config,
-                    referenceImages
+                    referenceImages,
+                    capabilities
                   )
                 )
               : await sendImageGeneration(
-                  buildImageGenerationPayload(trimmedPrompt, task.config)
+                  buildImageGenerationPayload(
+                    trimmedPrompt,
+                    task.config,
+                    capabilities
+                  )
                 )
-            const images = (response.data || []).filter(
+            const image = (response.data || []).find(
               (image): image is ImageResult =>
                 Boolean(image.url || image.b64_json)
             )
-            const image = images[0]
             if (!image) {
               throw new Error(t('API did not return image data'))
             }
@@ -270,7 +288,7 @@ export function useImageGenerationHandler({
         toast.error(parsed.message)
       }
     },
-    [config, onTasksUpdate, t, updateTask]
+    [config, groups, onTasksUpdate, t, updateTask]
   )
 
   const retryTask = useCallback(

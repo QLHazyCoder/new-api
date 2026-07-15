@@ -1,6 +1,10 @@
 package common
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/QuantumNous/new-api/pkg/imagecapability"
+)
 
 var (
 	// OpenAIResponseOnlyModels is a list of models that are only available for OpenAI responses.
@@ -8,15 +12,6 @@ var (
 		"o3-pro",
 		"o3-deep-research",
 		"o4-mini-deep-research",
-	}
-	ImageGenerationModels = []string{
-		"dall-e-3",
-		"dall-e-2",
-		"prefix:gpt-image-",
-		"chatgpt-image-latest",
-		"prefix:imagen-",
-		"flux-",
-		"flux.1-",
 	}
 	OpenAITextModels = []string{
 		"gpt-",
@@ -37,23 +32,20 @@ func IsOpenAIResponseOnlyModel(modelName string) bool {
 }
 
 func IsImageGenerationModel(modelName string) bool {
-	modelName = strings.ToLower(modelName)
-	for _, m := range ImageGenerationModels {
-		if matchesModelRule(modelName, m) {
-			return true
-		}
-	}
-	return false
+	_, ok := imagecapability.Resolve(0, modelName)
+	return ok
 }
 
-func IsChannelImageGenerationModel(channelType int, modelName string) bool {
-	modelName = strings.ToLower(modelName)
-	for _, m := range ImageGenerationModels {
-		if matchesModelRule(modelName, m) {
-			return true
+func IsChannelImageGenerationModel(channelType int, modelName string, modelMappings ...string) bool {
+	if len(modelMappings) > 0 {
+		mappedModel, _, err := ResolveModelMapping(modelName, modelMappings[0])
+		if err != nil {
+			return false
 		}
+		modelName = mappedModel
 	}
-	return false
+	_, ok := imagecapability.Resolve(channelType, modelName)
+	return ok
 }
 
 func IsOpenAITextModel(modelName string) bool {
@@ -64,11 +56,4 @@ func IsOpenAITextModel(modelName string) bool {
 		}
 	}
 	return false
-}
-
-func matchesModelRule(modelName string, rule string) bool {
-	if strings.HasPrefix(rule, "prefix:") {
-		return strings.HasPrefix(modelName, strings.TrimPrefix(rule, "prefix:"))
-	}
-	return strings.Contains(modelName, rule)
 }

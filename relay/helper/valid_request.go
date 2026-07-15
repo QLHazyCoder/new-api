@@ -194,6 +194,9 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			}
 			imageRequest.Quality = formData.Get("quality")
 			imageRequest.Size = formData.Get("size")
+			imageRequest.AspectRatio = formData.Get("aspect_ratio")
+			imageRequest.Resolution = formData.Get("resolution")
+			imageRequest.ResponseFormat = formData.Get("response_format")
 			if outputFormat := formData.Get("output_format"); outputFormat != "" {
 				imageRequest.OutputFormat, _ = common.Marshal(outputFormat)
 			}

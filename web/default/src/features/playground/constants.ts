@@ -41,6 +41,7 @@ export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
   IMAGE_GENERATIONS: '/pg/images/generations',
   IMAGE_EDITS: '/pg/images/edits',
+  USER_IMAGE_MODELS: '/api/user/image-models',
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',
 } as const
@@ -75,6 +76,8 @@ export const DEFAULT_IMAGE_CONFIG: ImageGenerationConfig = {
   model: 'gpt-image-2',
   group: DEFAULT_GROUP,
   size: '1024x1024',
+  aspect_ratio: '',
+  resolution: '',
   quality: 'auto',
   n: 1,
   response_format: 'b64_json',

@@ -1,5 +1,7 @@
 # Playground 生图能力开发方案
 
+> 状态说明（2026-07-15）：本文前半部分保留首次实现 Playground 生图时的历史分析。当前代码已经具备 GPT 生图、图片编辑和本地任务恢复能力。本次重构的现行设计与开发清单以文末“多厂商生图重构”章节为准；该章节覆盖并替代历史方案中“所有供应商共用一套参数”的结论。
+
 ## 背景与目标
 
 当前 Playground 页面只能调用聊天补全链路，无法以登录用户身份直接调用生图模型。用户即使在模型下拉中看到 `gpt-image-1`、`dall-e-3`、`imagen-*`、`flux-*` 等模型，现有前端仍会把请求发到 `/pg/chat/completions`，后端也会按 `RelayModeChatCompletions` 处理，最终走 `relay.TextHelper`，不是图片生成链路。
@@ -757,3 +759,89 @@ Playground 生图需要在 `Distribute()` 中提前读取 `model/group`，而 `R
 - 选择分组、输入 prompt 后生成图片。
 - 图片能显示、复制链接或下载。
 - 计费、日志、错误、i18n、构建和测试均通过。
+
+## 多厂商生图重构（2026-07-15）
+
+### 当前架构结论
+
+现有实现已经形成完整 GPT 图片调用链：`/pg/images/generations` 经登录态分发进入 `RelayFormatOpenAIImage`，由 `relay.ImageHelper` 完成模型映射、渠道适配、响应归一化、日志和计费。此次重构保留该入口及统一的 `dto.ImageResponse`，不改动用户鉴权和核心扣费路径。
+
+现存问题不是单个下拉框缺陷，而是能力来源分裂：
+
+- 前端只允许 `gpt-image-2`，并把不认识的模型强制归一化为该模型。
+- 图片页使用全部聊天分组，却只加载当前分组的模型；选中无图片模型分组后，组合选择器会被禁用。
+- `size` 同时承担像素尺寸、宽高比和分辨率三种语义，`quality` 还被 Imagen 适配器用来表达 `imageSize`。
+- 图片端点判断只按公开模型名，不考虑渠道类型和 `model_mapping` 后的真实上游模型。
+- Gemini `imagen-*` 已支持 `:predict`，但 Gemini 原生图片模型需要 `generateContent + responseModalities + imageConfig`，不能只增加模型白名单。
+
+### 目标架构
+
+统一入口保持为：
+
+```text
+Playground /pg/images/generations
+  -> group-aware image capability discovery
+  -> normal relay distribution and model mapping
+  -> provider image adaptor
+     -> OpenAI/GPT images
+     -> xAI images
+     -> Gemini Imagen predict
+     -> Gemini native generateContent
+  -> dto.ImageResponse
+  -> existing billing and logs
+```
+
+能力判断由 `pkg/imagecapability` 统一提供。能力键是“渠道类型 + 映射后模型”，同一分组和公开模型存在多个候选渠道时，对参数能力取保守交集，确保重试切换渠道后仍支持前端提交的参数。
+
+### 参数契约
+
+- GPT 使用 `size` 表示像素尺寸，并按能力公开 `quality`、`output_format`、编辑、审核和压缩选项。
+- xAI 使用独立的 `aspect_ratio` 与 `resolution`，不再把两者复用到单个 `size` 字段。
+- Imagen 使用 `aspectRatio` 与 `imageSize`，兼容旧请求的 `size/quality` 仅作为后端回退。
+- Gemini 原生图片使用 `generateContent` 的 `generationConfig.responseModalities` 与 `imageConfig`，响应从 `inlineData` 归一化。
+- 对外 `dto.ImageRequest` 保留旧字段，并新增可选 `aspect_ratio`、`resolution`，避免破坏现有 OpenAI 兼容客户端。
+- 首期多厂商扩展只开放已实现的操作。GPT 保留参考图编辑；xAI、Imagen、Gemini 原生暂时只开放生成。
+
+### 文件职责
+
+- `pkg/imagecapability/types.go`：供应商无关的图片能力结构和尺寸模式。
+- `pkg/imagecapability/registry.go`：GPT、xAI、Imagen、Gemini 原生和兼容图片模型规则。
+- `common/model_mapping.go`：渠道与能力发现共用的链式模型映射解析。
+- `dto/image_capability.go`：用户图片分组、模型及能力的 API DTO。
+- `model/ability.go`：按用户可用分组读取启用 ability、渠道类型和模型映射。
+- `service/image_capability.go`：构建分组级图片模型清单、auto 虚拟分组和候选渠道能力交集。
+- `controller/user.go`：提供登录用户专用图片模型能力接口。
+- `relay/channel/xai`：显式转换宽高比与分辨率并复用 OpenAI 图片响应。
+- `relay/channel/gemini`：区分 Imagen 与 Gemini 原生图片协议并统一响应。
+- `web/default/src/features/playground/hooks/use-playground-image-options.ts`：一次加载已过滤的图片分组及模型。
+- `web/default/src/features/playground/lib/image-generation-capabilities.ts`：按服务端能力归一化配置，不再判断模型名称。
+- `web/default/src/features/playground/components/playground-image-input.tsx`：按能力动态显示像素尺寸、宽高比、分辨率、质量和格式。
+
+### 分阶段开发清单
+
+| 阶段 | 任务 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| 1 | 能力注册表、统一模型映射、架构文档和单元测试 | 已完成 | registry、mapping、现有 relay helper 测试通过 |
+| 2 | 用户图片分组/模型能力接口和 auto 分组解析 | 已完成 | 无图片模型分组不返回；映射与候选渠道交集有测试 |
+| 3 | xAI、Imagen、Gemini 原生请求与响应适配 | 已完成 | 参数转换、inlineData、usage 和错误响应测试通过 |
+| 4 | 前端能力驱动控件、原子回退和选择器修复 | 已完成 | GPT 回归；Grok/Gemini 控件正确；空分组不可见 |
+| 5 | 全量审查、格式、乱码、测试和生产构建 | 已完成 | 全仓 Go/TS/build 与本次文件 lint/format/diff 检查通过 |
+| 6 | 提交并推送 `main` | 已完成 | 远端 `main` 包含最终提交 |
+
+### 阶段审查要求
+
+每阶段结束必须检查：实际路由与能力结果一致；旧 GPT 请求不变；候选渠道重试不暴露不支持参数；API 字段兼容；计费数量有边界；新增中文文档和 locale 均为 UTF-8；不存在替换字符、错误转义、调试输出、废弃硬编码或未使用文件。任何一项不通过，不进入下一阶段。
+
+### 范围边界
+
+本次不同时引入服务端异步任务系统。同步请求仍可能受到边缘代理超时影响，但异步任务涉及任务持久化、幂等、结算和状态查询，应在多厂商协议稳定后独立实施。能力 API 与统一响应结构会为后续异步化保留边界。
+
+### 本次阶段自检记录
+
+- 阶段 1：完成能力注册表和统一模型映射。发现并消除了旧 `ImageGenerationModels` 双规则源；registry、mapping、relay helper 测试通过。
+- 阶段 2：完成用户图片能力接口。验证无能力分组过滤、禁用渠道排除、auto 分组聚合、映射后能力判断和多候选渠道保守交集；model、service、controller、middleware 测试通过。
+- 阶段 3：完成 xAI、Imagen、Gemini 原生协议。补齐显式宽高比/分辨率、Gemini 分辨率别名、`inlineData`、MIME、usage 估算和图片编辑拒绝；供应商适配器测试通过。
+- 阶段 4：完成前端能力驱动重构。移除 `gpt-image-2` 白名单和全局参数列表，改为一次加载有效图片分组；原子回退、参数隔离、参考图清理和 payload 测试通过。
+- 阶段 5：全仓 `go test ./...` 通过；前端 `typecheck`、本次文件定向 lint、4 个行为测试和 production build 通过；`git diff --check`、gofmt、locale JSON、UTF-8 替换字符、冲突标记、许可证首行和敏感信息扫描无本次问题。
+- 阶段 6：最终暂存内容通过差异完整性检查，按本清单提交并推送至远端 `main`。
+- 已知仓库基线：全仓 lint、全仓 format/copyright check 和 `go vet` 仍会命中与本次无关的历史文件；本次涉及文件不在对应错误清单中。当前环境没有 Chromium/Playwright，未执行截图型浏览器验证，不影响编译、构建与纯逻辑交互测试结论。

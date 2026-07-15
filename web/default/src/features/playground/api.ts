@@ -24,6 +24,9 @@ import type {
   ChatCompletionResponse,
   ImageGenerationRequest,
   ImageGenerationResponse,
+  ImageGroupOption,
+  ImageModelCapabilities,
+  ImageModelOption,
   ModelOption,
   GroupOption,
 } from './types'
@@ -120,4 +123,72 @@ export async function getUserGroups(): Promise<GroupOption[]> {
     ratio: info.ratio,
     desc: info.desc,
   }))
+}
+
+function normalizeImageCapabilities(
+  capabilities: Partial<ImageModelCapabilities> | undefined
+): ImageModelCapabilities {
+  return {
+    provider: capabilities?.provider || 'other',
+    size_mode: capabilities?.size_mode || 'none',
+    sizes: Array.isArray(capabilities?.sizes) ? capabilities.sizes : [],
+    aspect_ratios: Array.isArray(capabilities?.aspect_ratios)
+      ? capabilities.aspect_ratios
+      : [],
+    resolutions: Array.isArray(capabilities?.resolutions)
+      ? capabilities.resolutions
+      : [],
+    qualities: Array.isArray(capabilities?.qualities)
+      ? capabilities.qualities
+      : [],
+    output_formats: Array.isArray(capabilities?.output_formats)
+      ? capabilities.output_formats
+      : [],
+    default_size: capabilities?.default_size,
+    default_aspect_ratio: capabilities?.default_aspect_ratio,
+    default_resolution: capabilities?.default_resolution,
+    default_quality: capabilities?.default_quality,
+    default_output_format: capabilities?.default_output_format,
+    supports_editing: Boolean(capabilities?.supports_editing),
+    supports_moderation: Boolean(capabilities?.supports_moderation),
+    supports_output_compression: Boolean(
+      capabilities?.supports_output_compression
+    ),
+    max_images: Math.max(1, capabilities?.max_images || 1),
+  }
+}
+
+export async function getUserImageModelGroups(): Promise<ImageGroupOption[]> {
+  const res = await api.get(API_ENDPOINTS.USER_IMAGE_MODELS)
+  const { data } = res
+  if (!data.success || !Array.isArray(data.data)) {
+    return []
+  }
+
+  return data.data
+    .map((group: Partial<ImageGroupOption>): ImageGroupOption | null => {
+      if (typeof group.value !== 'string' || !Array.isArray(group.models)) {
+        return null
+      }
+      const models = group.models
+        .map((model: Partial<ImageModelOption>): ImageModelOption | null => {
+          if (typeof model.value !== 'string') return null
+          return {
+            label: model.label || model.value,
+            value: model.value,
+            capabilities: normalizeImageCapabilities(model.capabilities),
+          }
+        })
+        .filter(Boolean) as ImageModelOption[]
+      if (models.length === 0) return null
+
+      return {
+        label: group.label || group.value,
+        value: group.value,
+        ratio: group.ratio ?? 1,
+        desc: group.desc,
+        models,
+      }
+    })
+    .filter(Boolean) as ImageGroupOption[]
 }

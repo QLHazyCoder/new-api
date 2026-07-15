@@ -1,4 +1,3 @@
-import { ChevronsUpDown, Check, CpuIcon, LayersIcon } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -17,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { ChevronsUpDown, Check, CpuIcon, LayersIcon } from 'lucide-react'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -59,7 +59,7 @@ interface ModelOption {
 interface GroupOption {
   label: string
   value: string
-  ratio?: number
+  ratio?: number | string
   desc?: string
   description?: string
 }

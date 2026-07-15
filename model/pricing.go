@@ -116,12 +116,12 @@ func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
 
 func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCustomConfigs map[int]*dto.AdvancedCustomConfig) []constant.EndpointType {
 	if ability.ChannelType != constant.ChannelTypeAdvancedCustom {
-		return common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model)
+		return common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model, ability.ChannelModelMapping)
 	}
 	if config := advancedCustomConfigs[ability.ChannelId]; config != nil {
 		return config.SupportedEndpointTypesForModel(ability.Model)
 	}
-	return common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model)
+	return common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model, ability.ChannelModelMapping)
 }
 
 // loadPricingAdvancedCustomConfigs runs inside updatePricing while

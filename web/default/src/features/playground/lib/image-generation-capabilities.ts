@@ -16,79 +16,154 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ImageGenerationConfig } from '../types'
+import type {
+  ImageGenerationConfig,
+  ImageGroupOption,
+  ImageModelCapabilities,
+  ImageModelOption,
+} from '../types'
 
 export const MAX_IMAGE_GENERATION_COUNT = 4
-export const DEFAULT_PLAYGROUND_IMAGE_SIZE = '1024x1024'
-export const PLAYGROUND_IMAGE_SIZE_OPTIONS = [
-  'auto',
-  '1024x1024',
-  '1024x1536',
-  '1536x1024',
-  '1024x1792',
-  '1792x1024',
-  '2048x2048',
-  '2560x1440',
-  '1440x2560',
-  '3840x2160',
-  '2160x3840',
-] as const
-export const PLAYGROUND_IMAGE_QUALITY_OPTIONS = [
-  'auto',
-  'low',
-  'medium',
-  'high',
-] as const satisfies readonly ImageGenerationConfig['quality'][]
-export const PLAYGROUND_IMAGE_OUTPUT_FORMAT_OPTIONS = [
-  'png',
-  'jpeg',
-  'webp',
-] as const satisfies readonly NonNullable<
-  ImageGenerationConfig['output_format']
->[]
 
-export function isSupportedPlaygroundImageModel(model: string): boolean {
-  return model.trim().toLowerCase() === 'gpt-image-2'
+export const EMPTY_IMAGE_MODEL_CAPABILITIES: ImageModelCapabilities = {
+  provider: 'other',
+  size_mode: 'none',
+  sizes: [],
+  aspect_ratios: [],
+  resolutions: [],
+  qualities: [],
+  output_formats: [],
+  supports_editing: false,
+  supports_moderation: false,
+  supports_output_compression: false,
+  max_images: 1,
+}
+
+export interface ImageModelSelection {
+  group: ImageGroupOption
+  model: ImageModelOption
+}
+
+function normalizeOption(
+  value: string | undefined,
+  options: string[],
+  defaultValue?: string
+): string {
+  const selected = options.find(
+    (option) => option.toLowerCase() === value?.toLowerCase()
+  )
+  if (selected) return selected
+
+  const defaultOption = options.find(
+    (option) => option.toLowerCase() === defaultValue?.toLowerCase()
+  )
+  return defaultOption || options[0] || ''
 }
 
 export function normalizePlaygroundImageConfig(
-  config: ImageGenerationConfig
+  config: ImageGenerationConfig,
+  capabilities: ImageModelCapabilities
 ): ImageGenerationConfig {
-  const size = PLAYGROUND_IMAGE_SIZE_OPTIONS.includes(
-    config.size as (typeof PLAYGROUND_IMAGE_SIZE_OPTIONS)[number]
+  const size =
+    capabilities.size_mode === 'dimensions'
+      ? normalizeOption(
+          config.size,
+          capabilities.sizes,
+          capabilities.default_size
+        )
+      : ''
+  const aspectRatio =
+    capabilities.size_mode === 'aspect_ratio_resolution'
+      ? normalizeOption(
+          config.aspect_ratio,
+          capabilities.aspect_ratios,
+          capabilities.default_aspect_ratio
+        )
+      : ''
+  const resolution =
+    capabilities.size_mode === 'aspect_ratio_resolution'
+      ? normalizeOption(
+          config.resolution,
+          capabilities.resolutions,
+          capabilities.default_resolution
+        )
+      : ''
+  const quality = normalizeOption(
+    config.quality,
+    capabilities.qualities,
+    capabilities.default_quality
   )
-    ? config.size
-    : DEFAULT_PLAYGROUND_IMAGE_SIZE
-  const quality = PLAYGROUND_IMAGE_QUALITY_OPTIONS.includes(
-    config.quality as (typeof PLAYGROUND_IMAGE_QUALITY_OPTIONS)[number]
+  const outputFormat = normalizeOption(
+    config.output_format,
+    capabilities.output_formats,
+    capabilities.default_output_format
   )
-    ? config.quality
-    : 'auto'
-  const outputFormat = PLAYGROUND_IMAGE_OUTPUT_FORMAT_OPTIONS.includes(
-    config.output_format as NonNullable<ImageGenerationConfig['output_format']>
-  )
-    ? config.output_format
-    : 'png'
 
   return {
     ...config,
-    model: isSupportedPlaygroundImageModel(config.model)
-      ? config.model
-      : 'gpt-image-2',
     size,
-    quality,
+    aspect_ratio: aspectRatio,
+    resolution,
+    quality: (quality || 'auto') as ImageGenerationConfig['quality'],
+    n: normalizeImageGenerationCount(config.n, capabilities.max_images),
     response_format: 'b64_json',
-    output_format: outputFormat,
+    output_format:
+      (outputFormat as ImageGenerationConfig['output_format']) || undefined,
   }
 }
 
-export function normalizeImageGenerationCount(count: number): number {
-  return Math.min(
+export function normalizeImageGenerationCount(
+  count: number,
+  modelMaximum: number = MAX_IMAGE_GENERATION_COUNT
+): number {
+  const maximum = Math.min(
     MAX_IMAGE_GENERATION_COUNT,
-    Math.max(1, Number.isFinite(count) ? count : 1)
+    Math.max(1, modelMaximum)
   )
+  return Math.min(maximum, Math.max(1, Number.isFinite(count) ? count : 1))
 }
 
-export function supportsImageEditingModel(model: string): boolean {
-  return isSupportedPlaygroundImageModel(model)
+export function resolveImageModelSelection(
+  groups: ImageGroupOption[],
+  groupValue: string,
+  modelValue: string
+): ImageModelSelection | null {
+  if (groups.length === 0) return null
+  const group =
+    groups.find((option) => option.value === groupValue) ||
+    groups.find((option) => option.value === 'default') ||
+    groups[0]
+  const model =
+    group.models.find((option) => option.value === modelValue) ||
+    group.models[0]
+  if (!model) return null
+  return { group, model }
+}
+
+export function findImageModelCapabilities(
+  groups: ImageGroupOption[],
+  config: Pick<ImageGenerationConfig, 'group' | 'model'>
+): ImageModelCapabilities | null {
+  const group = groups.find((option) => option.value === config.group)
+  const model = group?.models.find((option) => option.value === config.model)
+  return model?.capabilities || null
+}
+
+export function imageConfigsEqual(
+  left: ImageGenerationConfig,
+  right: ImageGenerationConfig
+): boolean {
+  return (
+    left.model === right.model &&
+    left.group === right.group &&
+    left.size === right.size &&
+    left.aspect_ratio === right.aspect_ratio &&
+    left.resolution === right.resolution &&
+    left.quality === right.quality &&
+    left.n === right.n &&
+    left.response_format === right.response_format &&
+    left.output_format === right.output_format &&
+    left.output_compression === right.output_compression &&
+    left.moderation === right.moderation
+  )
 }

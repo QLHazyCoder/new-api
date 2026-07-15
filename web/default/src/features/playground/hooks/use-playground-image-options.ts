@@ -1,4 +1,3 @@
-import { useQuery } from '@tanstack/react-query'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -17,40 +16,33 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { getUserModels } from '../api'
+import { getUserImageModelGroups } from '../api'
 import { getOptionLoadErrorMessage } from '../lib'
 
-export function usePlaygroundImageModels(currentGroup: string) {
+export function usePlaygroundImageOptions() {
   const { t } = useTranslation()
-
-  const {
-    data: imageModelsData,
-    error: imageModelsError,
-    isError: isImageModelsError,
-    isLoading: isLoadingImageModels,
-  } = useQuery({
-    queryKey: ['playground-image-models', currentGroup],
-    queryFn: () => getUserModels(currentGroup),
-    enabled: currentGroup !== '',
+  const query = useQuery({
+    queryKey: ['playground-image-options'],
+    queryFn: getUserImageModelGroups,
   })
 
   useEffect(() => {
-    if (!isImageModelsError) return
-
+    if (!query.isError) return
     toast.error(
       getOptionLoadErrorMessage(
-        imageModelsError,
+        query.error,
         t('Failed to load playground models')
       )
     )
-  }, [isImageModelsError, imageModelsError, t])
+  }, [query.error, query.isError, t])
 
   return {
-    imageModelOptions: imageModelsData ?? [],
-    isLoadingImageModels,
+    imageGroups: query.data ?? [],
+    isLoadingImageOptions: query.isLoading,
   }
 }

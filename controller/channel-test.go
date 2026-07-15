@@ -46,7 +46,7 @@ func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointTyp
 	if normalized != "" {
 		return normalized
 	}
-	if channel != nil && common.IsChannelImageGenerationModel(channel.Type, modelName) {
+	if channel != nil && common.IsChannelImageGenerationModel(channel.Type, modelName, channel.GetModelMapping()) {
 		return string(constant.EndpointTypeImageGeneration)
 	}
 	if strings.HasSuffix(modelName, ratio_setting.CompactModelSuffix) {
@@ -789,7 +789,7 @@ func buildTestRequest(model string, endpointType string, channel *model.Channel,
 		}
 	}
 
-	if channel != nil && common.IsChannelImageGenerationModel(channel.Type, model) {
+	if channel != nil && common.IsChannelImageGenerationModel(channel.Type, model, channel.GetModelMapping()) {
 		return &dto.ImageRequest{
 			Model:  model,
 			Prompt: "a cute cat",

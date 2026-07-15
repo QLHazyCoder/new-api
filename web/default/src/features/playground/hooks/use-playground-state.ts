@@ -183,6 +183,11 @@ export function usePlaygroundState() {
     []
   )
 
+  const replaceImageConfig = useCallback((value: ImageGenerationConfig) => {
+    setImageConfig(value)
+    saveImageConfig(value)
+  }, [])
+
   // Update parameter enabled with automatic save
   const updateParameterEnabled = useCallback(
     (key: keyof ParameterEnabled, value: boolean) => {
@@ -210,8 +215,7 @@ export function usePlaygroundState() {
   const updateImageTasks = useCallback(
     (updater: ImageTask[] | ((prev: ImageTask[]) => ImageTask[])) => {
       setImageTasks((prev) => {
-        const newTasks =
-          typeof updater === 'function' ? updater(prev) : updater
+        const newTasks = typeof updater === 'function' ? updater(prev) : updater
         saveImageTasks(newTasks)
         return newTasks
       })
@@ -254,6 +258,7 @@ export function usePlaygroundState() {
     setMode,
     updateConfig,
     updateImageConfig,
+    replaceImageConfig,
     updateParameterEnabled,
     updateMessages,
     updateImageTasks,

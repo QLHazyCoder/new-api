@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
 import {
   AlertCircleIcon,
   CopyIcon,
@@ -27,8 +26,10 @@ import {
   Trash2Icon,
   XIcon,
 } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import {
@@ -45,6 +46,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+
 import { getImageSource, isImageResultRenderable } from '../lib'
 import type { ImageReferencePreview, ImageResult, ImageTask } from '../types'
 
@@ -181,6 +183,40 @@ function TaskCard({
   const canCopyLink = Boolean(firstImage?.url)
   const canDownload = Boolean(firstSource)
   const isEditTask = task.mode === 'edit'
+  const imageSettingsLabel =
+    task.config.size ||
+    [task.config.aspect_ratio, task.config.resolution]
+      .filter(Boolean)
+      .join(' / ') ||
+    'auto'
+  let imageContent: ReactNode
+  if (task.status === 'running') {
+    imageContent = <Skeleton className='aspect-square w-full rounded-md' />
+  } else if (task.status === 'error' || task.status === 'interrupted') {
+    imageContent = (
+      <div
+        className={`${imageResultClassName} border-border bg-muted/40 flex-col border border-dashed px-4 py-5 text-center`}
+      >
+        <AlertCircleIcon className='text-muted-foreground mb-2 size-7 shrink-0' />
+        <p className='text-muted-foreground line-clamp-4 max-w-full text-xs leading-5 break-words'>
+          {task.error || t('Generation was interrupted')}
+        </p>
+      </div>
+    )
+  } else if (!firstImage) {
+    imageContent = <EmptyImageSlot />
+  } else {
+    imageContent = (
+      <ImagePreview image={firstImage} task={task} onOpen={onPreviewImage} />
+    )
+  }
+
+  let statusLabel = task.errorCode || t('Error')
+  if (task.status === 'running') {
+    statusLabel = t('Generating')
+  } else if (task.status === 'done') {
+    statusLabel = isEditTask ? t('Edited image') : t('Generated image')
+  }
   const handleCopyLink = () => {
     if (!firstImage?.url) return
     void copyText(firstImage.url, t('Image link copied'))
@@ -191,7 +227,7 @@ function TaskCard({
     if (firstSource.startsWith('data:')) {
       downloadDataUrl(
         firstSource,
-        `${task.id}.${task.config.output_format || 'png'}`
+        `${task.id}.${task.config.output_format || firstImage?.mime_type?.split('/')[1] || 'png'}`
       )
       return
     }
@@ -206,43 +242,16 @@ function TaskCard({
             {task.prompt}
           </p>
           <span className='bg-muted text-muted-foreground shrink-0 rounded-md px-2 py-1 text-xs'>
-            {task.config.size}
+            {imageSettingsLabel}
           </span>
         </div>
       </CardHeader>
 
-      <CardContent className='space-y-3 px-3 pb-3'>
-        {task.status === 'running' ? (
-          <Skeleton className='aspect-square w-full rounded-md' />
-        ) : task.status === 'error' || task.status === 'interrupted' ? (
-          <div
-            className={`${imageResultClassName} border-border bg-muted/40 flex-col border border-dashed px-4 py-5 text-center`}
-          >
-            <AlertCircleIcon className='text-muted-foreground mb-2 size-7 shrink-0' />
-            <p className='text-muted-foreground line-clamp-4 max-w-full text-xs leading-5 break-words'>
-              {task.error || t('Generation was interrupted')}
-            </p>
-          </div>
-        ) : !firstImage ? (
-          <EmptyImageSlot />
-        ) : (
-          <ImagePreview
-            image={firstImage}
-            task={task}
-            onOpen={onPreviewImage}
-          />
-        )}
-      </CardContent>
+      <CardContent className='space-y-3 px-3 pb-3'>{imageContent}</CardContent>
 
       <CardFooter className='bg-muted/25 justify-between gap-2 border-t px-3 py-2'>
         <span className='text-muted-foreground truncate text-xs'>
-          {task.status === 'running'
-            ? t('Generating')
-            : task.status === 'done'
-              ? isEditTask
-                ? t('Edited image')
-                : t('Generated image')
-              : task.errorCode || t('Error')}
+          {statusLabel}
         </span>
         <div className='flex shrink-0 items-center gap-1'>
           <IconButton

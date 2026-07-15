@@ -19,34 +19,49 @@ For commercial licensing, please contact support@quantumnous.com
 import type {
   ImageGenerationConfig,
   ImageGenerationRequest,
+  ImageModelCapabilities,
   ImageReferenceInput,
 } from '../types'
 import { normalizePlaygroundImageConfig } from './image-generation-capabilities'
 
 export function buildImageGenerationPayload(
   prompt: string,
-  config: ImageGenerationConfig
+  config: ImageGenerationConfig,
+  capabilities: ImageModelCapabilities
 ): ImageGenerationRequest {
-  const normalizedConfig = normalizePlaygroundImageConfig(config)
+  const normalizedConfig = normalizePlaygroundImageConfig(config, capabilities)
   const payload: ImageGenerationRequest = {
     model: normalizedConfig.model,
     group: normalizedConfig.group,
     prompt: prompt.trim(),
-    size: normalizedConfig.size,
-    quality: normalizedConfig.quality,
     n: 1,
+    response_format: normalizedConfig.response_format,
   }
 
-  if (normalizedConfig.output_format) {
+  if (capabilities.size_mode === 'dimensions' && normalizedConfig.size) {
+    payload.size = normalizedConfig.size
+  }
+  if (capabilities.size_mode === 'aspect_ratio_resolution') {
+    payload.aspect_ratio = normalizedConfig.aspect_ratio
+    payload.resolution = normalizedConfig.resolution
+  }
+  if (capabilities.qualities.length > 0) {
+    payload.quality = normalizedConfig.quality
+  }
+  if (
+    capabilities.output_formats.length > 0 &&
+    normalizedConfig.output_format
+  ) {
     payload.output_format = normalizedConfig.output_format
   }
   if (
+    capabilities.supports_output_compression &&
     normalizedConfig.output_compression !== undefined &&
     normalizedConfig.output_compression !== null
   ) {
     payload.output_compression = normalizedConfig.output_compression
   }
-  if (normalizedConfig.moderation) {
+  if (capabilities.supports_moderation && normalizedConfig.moderation) {
     payload.moderation = normalizedConfig.moderation
   }
 
@@ -56,22 +71,36 @@ export function buildImageGenerationPayload(
 export function buildImageEditFormData(
   prompt: string,
   config: ImageGenerationConfig,
-  referenceImages: ImageReferenceInput[]
+  referenceImages: ImageReferenceInput[],
+  capabilities: ImageModelCapabilities
 ): FormData {
-  const normalizedConfig = normalizePlaygroundImageConfig(config)
+  const normalizedConfig = normalizePlaygroundImageConfig(config, capabilities)
   const formData = new FormData()
 
   formData.append('model', normalizedConfig.model)
   formData.append('group', normalizedConfig.group)
   formData.append('prompt', prompt.trim())
-  formData.append('size', normalizedConfig.size)
-  formData.append('quality', normalizedConfig.quality)
   formData.append('n', '1')
+  formData.append('response_format', normalizedConfig.response_format)
 
-  if (normalizedConfig.output_format) {
+  if (capabilities.size_mode === 'dimensions' && normalizedConfig.size) {
+    formData.append('size', normalizedConfig.size)
+  }
+  if (capabilities.size_mode === 'aspect_ratio_resolution') {
+    formData.append('aspect_ratio', normalizedConfig.aspect_ratio)
+    formData.append('resolution', normalizedConfig.resolution)
+  }
+  if (capabilities.qualities.length > 0) {
+    formData.append('quality', normalizedConfig.quality)
+  }
+  if (
+    capabilities.output_formats.length > 0 &&
+    normalizedConfig.output_format
+  ) {
     formData.append('output_format', normalizedConfig.output_format)
   }
   if (
+    capabilities.supports_output_compression &&
     normalizedConfig.output_compression !== undefined &&
     normalizedConfig.output_compression !== null
   ) {
@@ -80,7 +109,7 @@ export function buildImageEditFormData(
       String(normalizedConfig.output_compression)
     )
   }
-  if (normalizedConfig.moderation) {
+  if (capabilities.supports_moderation && normalizedConfig.moderation) {
     formData.append('moderation', normalizedConfig.moderation)
   }
 

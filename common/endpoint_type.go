@@ -3,8 +3,8 @@ package common
 import "github.com/QuantumNous/new-api/constant"
 
 // GetEndpointTypesByChannelType returns the endpoint types supported by a channel-model pair.
-func GetEndpointTypesByChannelType(channelType int, modelName string) []constant.EndpointType {
-	if IsChannelImageGenerationModel(channelType, modelName) {
+func GetEndpointTypesByChannelType(channelType int, modelName string, modelMappings ...string) []constant.EndpointType {
+	if IsChannelImageGenerationModel(channelType, modelName, modelMappings...) {
 		return []constant.EndpointType{constant.EndpointTypeImageGeneration}
 	}
 

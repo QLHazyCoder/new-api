@@ -55,7 +55,7 @@ func isChannelUsableForEndpoint(channel *model.Channel, endpointType constant.En
 	}
 	switch endpointType {
 	case constant.EndpointTypeImageGeneration:
-		return common.IsChannelImageGenerationModel(channel.Type, modelName)
+		return common.IsChannelImageGenerationModel(channel.Type, modelName, channel.GetModelMapping())
 	default:
 		return true
 	}

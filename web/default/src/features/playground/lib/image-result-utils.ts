@@ -24,16 +24,22 @@ export function getImageSource(
 ): string {
   if (image.url) return image.url
   if (!image.b64_json) return ''
-  return normalizeBase64Image(image.b64_json, config.output_format || 'png')
+  return normalizeBase64Image(
+    image.b64_json,
+    image.mime_type || config.output_format || 'png'
+  )
 }
 
 export function normalizeBase64Image(
   value: string,
-  format: string = 'png'
+  formatOrMimeType: string = 'png'
 ): string {
   const trimmed = value.trim()
   if (trimmed.startsWith('data:')) return trimmed
-  return `data:image/${format};base64,${trimmed}`
+  const mimeType = formatOrMimeType.includes('/')
+    ? formatOrMimeType
+    : `image/${formatOrMimeType}`
+  return `data:${mimeType};base64,${trimmed}`
 }
 
 export function isImageResultRenderable(image: ImageResult): boolean {

@@ -121,6 +121,8 @@ export interface ImageGenerationConfig {
   model: string
   group: string
   size: string
+  aspect_ratio: string
+  resolution: string
   quality: 'auto' | 'standard' | 'hd' | 'low' | 'medium' | 'high'
   n: number
   response_format: 'url' | 'b64_json'
@@ -134,6 +136,8 @@ export interface ImageGenerationRequest {
   group?: string
   prompt: string
   size?: string
+  aspect_ratio?: string
+  resolution?: string
   quality?: string
   n?: number
   response_format?: 'url' | 'b64_json'
@@ -168,6 +172,7 @@ export interface ImageResult {
   url?: string
   b64_json?: string
   revised_prompt?: string
+  mime_type?: string
 }
 
 export interface ImageTask {
@@ -214,9 +219,38 @@ export interface ModelOption {
   supportedEndpointTypes?: string[]
 }
 
+export type ImageSizeMode = 'none' | 'dimensions' | 'aspect_ratio_resolution'
+
+export interface ImageModelCapabilities {
+  provider: string
+  size_mode: ImageSizeMode
+  sizes: string[]
+  aspect_ratios: string[]
+  resolutions: string[]
+  qualities: string[]
+  output_formats: Array<'png' | 'jpeg' | 'webp'>
+  default_size?: string
+  default_aspect_ratio?: string
+  default_resolution?: string
+  default_quality?: ImageGenerationConfig['quality']
+  default_output_format?: ImageGenerationConfig['output_format']
+  supports_editing: boolean
+  supports_moderation: boolean
+  supports_output_compression: boolean
+  max_images: number
+}
+
+export interface ImageModelOption extends ModelOption {
+  capabilities: ImageModelCapabilities
+}
+
 export interface GroupOption {
   label: string
   value: string
-  ratio: number
+  ratio: number | string
   desc?: string
+}
+
+export interface ImageGroupOption extends GroupOption {
+  models: ImageModelOption[]
 }
