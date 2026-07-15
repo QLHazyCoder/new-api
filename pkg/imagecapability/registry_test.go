@@ -20,7 +20,7 @@ func TestResolveProviderImageCapabilities(t *testing.T) {
 		{name: "gpt image", model: "gpt-image-2", provider: ProviderOpenAI, sizeMode: SizeModeDimensions},
 		{name: "xai image", channelType: constant.ChannelTypeXai, model: "grok-imagine-image", provider: ProviderXAI, sizeMode: SizeModeAspectRatioResolution, defaultResolution: "1K"},
 		{name: "imagen", channelType: constant.ChannelTypeGemini, model: "imagen-4.0-generate-001", provider: ProviderImagen, sizeMode: SizeModeAspectRatioResolution, defaultResolution: "1K"},
-		{name: "gemini native alias", channelType: constant.ChannelTypeGemini, model: "gemini-3.1-flash-image-4k", provider: ProviderGemini, sizeMode: SizeModeAspectRatioResolution, defaultResolution: "4K"},
+		{name: "gemini native alias", channelType: constant.ChannelTypeGemini, model: "gemini-3.1-flash-image-4K", provider: ProviderGemini, sizeMode: SizeModeAspectRatioResolution, defaultResolution: "4K"},
 	}
 
 	for _, test := range tests {
@@ -30,6 +30,9 @@ func TestResolveProviderImageCapabilities(t *testing.T) {
 			assert.Equal(t, test.provider, capability.Provider)
 			assert.Equal(t, test.sizeMode, capability.SizeMode)
 			assert.Equal(t, test.defaultResolution, capability.DefaultResolution)
+			if test.name == "gemini native alias" {
+				assert.Empty(t, capability.Resolutions)
+			}
 		})
 	}
 }
@@ -56,10 +59,9 @@ func TestIntersectUsesConservativeSharedCapabilities(t *testing.T) {
 	assert.False(t, result.SupportsEditing)
 }
 
-func TestNormalizeGeminiImageModelExtractsResolutionAlias(t *testing.T) {
-	model, resolution := NormalizeGeminiImageModel("gemini-3.1-flash-image-2k")
-	assert.Equal(t, "gemini-3.1-flash-image", model)
-	assert.Equal(t, "2K", resolution)
+func TestGeminiImageResolutionIsCaseInsensitive(t *testing.T) {
+	assert.Equal(t, "2K", GeminiImageResolution("gemini-3.1-flash-image-2K"))
+	assert.Equal(t, "1K", GeminiImageResolution("gemini-3.1-flash-image-1k"))
 }
 
 func TestApplyModelAliasDefaultsPreservesPublicResolution(t *testing.T) {
@@ -71,4 +73,5 @@ func TestApplyModelAliasDefaultsPreservesPublicResolution(t *testing.T) {
 
 	capability = ApplyModelAliasDefaults(capability, "gemini-3.1-flash-image-4k")
 	assert.Equal(t, "4K", capability.DefaultResolution)
+	assert.Empty(t, capability.Resolutions)
 }

@@ -14,13 +14,13 @@ func Resolve(channelType int, modelName string) (Capability, bool) {
 		return Capability{}, false
 	}
 
-	geminiModel, resolution := NormalizeGeminiImageModel(normalized)
+	resolution := GeminiImageResolution(normalized)
 	if channelType == constant.ChannelTypeGemini {
-		if strings.HasPrefix(geminiModel, "imagen-") {
+		if strings.HasPrefix(normalized, "imagen-") {
 			return imagenCapability(), true
 		}
-		if isNativeGeminiImageModel(geminiModel) {
-			return nativeGeminiCapability(geminiModel, resolution), true
+		if isNativeGeminiImageModel(normalized) {
+			return nativeGeminiCapability(normalized, resolution), true
 		}
 		return Capability{}, false
 	}
@@ -43,10 +43,10 @@ func Resolve(channelType int, modelName string) (Capability, bool) {
 		return dallE3Capability(), true
 	case strings.HasPrefix(normalized, "grok-imagine-image"):
 		return xaiCapability(), true
-	case strings.HasPrefix(geminiModel, "imagen-"):
+	case strings.HasPrefix(normalized, "imagen-"):
 		return imagenCapability(), true
-	case isNativeGeminiImageModel(geminiModel):
-		return nativeGeminiCapability(geminiModel, resolution), true
+	case isNativeGeminiImageModel(normalized):
+		return nativeGeminiCapability(normalized, resolution), true
 	case strings.HasPrefix(normalized, "flux-") || strings.HasPrefix(normalized, "flux.1-"):
 		return genericImageCapability(), true
 	default:
@@ -54,24 +54,24 @@ func Resolve(channelType int, modelName string) (Capability, bool) {
 	}
 }
 
-func NormalizeGeminiImageModel(modelName string) (string, string) {
-	trimmed := strings.TrimSpace(modelName)
-	lower := strings.ToLower(trimmed)
+func GeminiImageResolution(modelName string) string {
+	lower := strings.ToLower(strings.TrimSpace(modelName))
 	if !isNativeGeminiImageModel(lower) {
-		return trimmed, ""
+		return ""
 	}
 	for _, suffix := range []string{"-1k", "-2k", "-4k"} {
 		if strings.HasSuffix(lower, suffix) {
-			return trimmed[:len(trimmed)-len(suffix)], strings.ToUpper(strings.TrimPrefix(suffix, "-"))
+			return strings.ToUpper(strings.TrimPrefix(suffix, "-"))
 		}
 	}
-	return trimmed, ""
+	return ""
 }
 
 func ApplyModelAliasDefaults(capability Capability, modelName string) Capability {
-	_, resolution := NormalizeGeminiImageModel(modelName)
-	if resolution != "" && containsValue(capability.Resolutions, resolution) {
+	resolution := GeminiImageResolution(modelName)
+	if resolution != "" {
 		capability.DefaultResolution = resolution
+		capability.Resolutions = nil
 	}
 	return capability
 }
@@ -108,6 +108,10 @@ func Intersect(left Capability, right Capability) Capability {
 	result.DefaultSize = intersectedDefault(left.DefaultSize, right.DefaultSize, result.Sizes)
 	result.DefaultAspectRatio = intersectedDefault(left.DefaultAspectRatio, right.DefaultAspectRatio, result.AspectRatios)
 	result.DefaultResolution = intersectedDefault(left.DefaultResolution, right.DefaultResolution, result.Resolutions)
+	if result.DefaultResolution == "" && sizeMode == SizeModeAspectRatioResolution && len(result.Resolutions) == 0 &&
+		left.DefaultResolution != "" && strings.EqualFold(left.DefaultResolution, right.DefaultResolution) {
+		result.DefaultResolution = left.DefaultResolution
+	}
 	result.DefaultQuality = intersectedDefault(left.DefaultQuality, right.DefaultQuality, result.Qualities)
 	result.DefaultOutputFormat = intersectedDefault(left.DefaultOutputFormat, right.DefaultOutputFormat, result.OutputFormats)
 	return result
@@ -198,8 +202,12 @@ func nativeGeminiCapability(modelName string, resolution string) Capability {
 	if strings.HasPrefix(modelName, "gemini-3") {
 		resolutions = []string{"1K", "2K", "4K"}
 	}
-	if !containsValue(resolutions, resolution) {
+	resolutionLocked := resolution != ""
+	if !resolutionLocked {
 		resolution = resolutions[0]
+	}
+	if resolutionLocked {
+		resolutions = nil
 	}
 	return Capability{
 		Provider:           ProviderGemini,

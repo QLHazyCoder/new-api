@@ -15,20 +15,20 @@ func TestConvertImageRequestBuildsNativeGeminiRequest(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeImagesGenerations,
 		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: "gemini-3.1-flash-image-2k",
+			UpstreamModelName: "gemini-3.1-flash-image-1k",
+			ChannelBaseUrl:    "https://gemini.example/v1-proxy",
 		},
 	}
 	request := dto.ImageRequest{
 		Prompt:      "a glass sculpture",
 		AspectRatio: "16:9",
-		Resolution:  "4K",
 	}
 
 	converted, err := (&Adaptor{}).ConvertImageRequest(nil, info, request)
 	require.NoError(t, err)
 	require.IsType(t, &dto.GeminiChatRequest{}, converted)
 	geminiRequest := converted.(*dto.GeminiChatRequest)
-	assert.Equal(t, "gemini-3.1-flash-image", info.UpstreamModelName)
+	assert.Equal(t, "gemini-3.1-flash-image-1k", info.UpstreamModelName)
 	require.Len(t, geminiRequest.Contents, 1)
 	assert.Equal(t, "a glass sculpture", geminiRequest.Contents[0].Parts[0].Text)
 	assert.Equal(t, []string{"TEXT", "IMAGE"}, geminiRequest.GenerationConfig.ResponseModalities)
@@ -36,10 +36,15 @@ func TestConvertImageRequestBuildsNativeGeminiRequest(t *testing.T) {
 	var imageConfig map[string]string
 	require.NoError(t, common.Unmarshal(geminiRequest.GenerationConfig.ImageConfig, &imageConfig))
 	assert.Equal(t, "16:9", imageConfig["aspectRatio"])
-	assert.Equal(t, "4K", imageConfig["imageSize"])
+	assert.Equal(t, "1K", imageConfig["imageSize"])
+
+	requestURL, err := (&Adaptor{}).GetRequestURL(info)
+	require.NoError(t, err)
+	assert.Equal(t, "https://gemini.example/v1-proxy/v1beta/models/gemini-3.1-flash-image-1k:generateContent", requestURL)
+	assert.Equal(t, "gemini-3.1-flash-image-1k", info.UpstreamModelName)
 }
 
-func TestConvertImageRequestUsesGeminiAliasResolution(t *testing.T) {
+func TestConvertImageRequestRejectsConflictingGeminiAliasResolution(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		RelayMode: relayconstant.RelayModeImagesGenerations,
 		ChannelMeta: &relaycommon.ChannelMeta{
@@ -47,12 +52,9 @@ func TestConvertImageRequestUsesGeminiAliasResolution(t *testing.T) {
 		},
 	}
 
-	converted, err := (&Adaptor{}).ConvertImageRequest(nil, info, dto.ImageRequest{Prompt: "test"})
-	require.NoError(t, err)
-	geminiRequest := converted.(*dto.GeminiChatRequest)
-	var imageConfig map[string]string
-	require.NoError(t, common.Unmarshal(geminiRequest.GenerationConfig.ImageConfig, &imageConfig))
-	assert.Equal(t, "2K", imageConfig["imageSize"])
+	_, err := (&Adaptor{}).ConvertImageRequest(nil, info, dto.ImageRequest{Prompt: "test", Resolution: "4K"})
+	require.EqualError(t, err, "resolution 4K conflicts with model resolution 2K")
+	assert.Equal(t, "gemini-3.1-flash-image-2k", info.UpstreamModelName)
 }
 
 func TestConvertImageRequestPreservesOriginAliasResolutionAfterMapping(t *testing.T) {

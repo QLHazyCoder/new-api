@@ -845,3 +845,9 @@ Playground /pg/images/generations
 - 阶段 5：全仓 `go test ./...` 通过；前端 `typecheck`、本次文件定向 lint、4 个行为测试和 production build 通过；`git diff --check`、gofmt、locale JSON、UTF-8 替换字符、冲突标记、许可证首行和敏感信息扫描无本次问题。
 - 阶段 6：最终暂存内容通过差异完整性检查，按本清单提交并推送至远端 `main`。
 - 已知仓库基线：全仓 lint、全仓 format/copyright check 和 `go vet` 仍会命中与本次无关的历史文件；本次涉及文件不在对应错误清单中。当前环境没有 Chromium/Playwright，未执行截图型浏览器验证，不影响编译、构建与纯逻辑交互测试结论。
+
+### 验收后回归修复
+
+- Gemini 生图模型名是不可变路由标识。能力识别只能读取模型名，不得截断、改写大小写或回写 `OriginModelName` / `UpstreamModelName`；最终请求 URL 必须保留进入适配器时的完整字符串。
+- 以 `-1k`、`-2k`、`-4k` 结尾的 Gemini 图片模型（`k` 大小写不敏感）由模型名锁定分辨率。能力接口返回空的可选分辨率列表，Playground 隐藏手动选择并不发送 `resolution`，服务端仅从后缀生成请求体 `imageSize`。
+- 对现场模型 `gemini-3.1-flash-image-1k` 增加转换和 URL 回归测试，并覆盖大小写后缀识别、冲突参数拒绝、能力交集及前端 payload 省略行为。

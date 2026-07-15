@@ -83,4 +83,5 @@ func TestBuildImageModelOptionsPreservesGeminiPublicResolutionAlias(t *testing.T
 	options := buildImageModelOptions(abilities, map[string]bool{"gemini": true})
 	require.Len(t, options, 1)
 	assert.Equal(t, "4K", options[0].Capabilities.DefaultResolution)
+	assert.Empty(t, options[0].Capabilities.Resolutions)
 }

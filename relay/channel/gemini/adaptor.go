@@ -68,15 +68,14 @@ func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInf
 		return nil, errors.New("Gemini image editing is not supported by the images edits endpoint")
 	}
 
-	upstreamModel, aliasResolution := imagecapability.NormalizeGeminiImageModel(info.UpstreamModelName)
+	aliasResolution := imagecapability.GeminiImageResolution(info.UpstreamModelName)
 	if aliasResolution == "" {
-		_, aliasResolution = imagecapability.NormalizeGeminiImageModel(info.OriginModelName)
+		aliasResolution = imagecapability.GeminiImageResolution(info.OriginModelName)
 	}
-	capability, ok := imagecapability.Resolve(channelconstant.ChannelTypeGemini, upstreamModel)
+	capability, ok := imagecapability.Resolve(channelconstant.ChannelTypeGemini, info.UpstreamModelName)
 	if !ok {
 		return nil, fmt.Errorf("model %s does not support Gemini image generation", info.UpstreamModelName)
 	}
-	info.UpstreamModelName = upstreamModel
 
 	if capability.Provider == imagecapability.ProviderImagen {
 		return convertImagenRequest(request, capability)
@@ -117,7 +116,10 @@ func convertNativeGeminiImageRequest(request dto.ImageRequest, capability imagec
 	if err != nil {
 		return nil, err
 	}
-	if request.Resolution == "" {
+	if aliasResolution != "" && request.Resolution != "" && !strings.EqualFold(request.Resolution, aliasResolution) {
+		return nil, fmt.Errorf("resolution %s conflicts with model resolution %s", request.Resolution, aliasResolution)
+	}
+	if aliasResolution != "" {
 		request.Resolution = aliasResolution
 	}
 	resolution, err := requestedImageResolution(request, capability, false)
@@ -191,6 +193,12 @@ func requestedImageResolution(request dto.ImageRequest, capability imagecapabili
 	if resolution == "" {
 		resolution = capability.DefaultResolution
 	}
+	if len(capability.Resolutions) == 0 {
+		if capability.DefaultResolution == "" || !strings.EqualFold(capability.DefaultResolution, resolution) {
+			return "", fmt.Errorf("resolution %s is not supported by this image model", resolution)
+		}
+		return capability.DefaultResolution, nil
+	}
 	if !containsImageOption(capability.Resolutions, resolution) {
 		return "", fmt.Errorf("resolution %s is not supported by this image model", resolution)
 	}
@@ -211,36 +219,37 @@ func (a *Adaptor) Init(info *relaycommon.RelayInfo) {
 }
 
 func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
-
-	if model_setting.GetGeminiSettings().ThinkingAdapterEnabled &&
+	requestModelName := info.UpstreamModelName
+	isImageRelay := info.RelayMode == constant.RelayModeImagesGenerations || info.RelayMode == constant.RelayModeImagesEdits
+	if !isImageRelay && model_setting.GetGeminiSettings().ThinkingAdapterEnabled &&
 		!model_setting.ShouldPreserveThinkingSuffix(info.OriginModelName) {
 		// 新增逻辑：处理 -thinking-<budget> 格式
-		if strings.Contains(info.UpstreamModelName, "-thinking-") {
-			parts := strings.Split(info.UpstreamModelName, "-thinking-")
-			info.UpstreamModelName = parts[0]
-		} else if strings.HasSuffix(info.UpstreamModelName, "-thinking") { // 旧的适配
-			info.UpstreamModelName = strings.TrimSuffix(info.UpstreamModelName, "-thinking")
-		} else if strings.HasSuffix(info.UpstreamModelName, "-nothinking") {
-			info.UpstreamModelName = strings.TrimSuffix(info.UpstreamModelName, "-nothinking")
-		} else if baseModel, level, ok := reasoning.TrimEffortSuffix(info.UpstreamModelName); ok && level != "" {
-			info.UpstreamModelName = baseModel
+		if strings.Contains(requestModelName, "-thinking-") {
+			parts := strings.Split(requestModelName, "-thinking-")
+			requestModelName = parts[0]
+		} else if strings.HasSuffix(requestModelName, "-thinking") { // 旧的适配
+			requestModelName = strings.TrimSuffix(requestModelName, "-thinking")
+		} else if strings.HasSuffix(requestModelName, "-nothinking") {
+			requestModelName = strings.TrimSuffix(requestModelName, "-nothinking")
+		} else if baseModel, level, ok := reasoning.TrimEffortSuffix(requestModelName); ok && level != "" {
+			requestModelName = baseModel
 		}
 	}
 
-	version := model_setting.GetGeminiVersionSetting(info.UpstreamModelName)
+	version := model_setting.GetGeminiVersionSetting(requestModelName)
 
-	if strings.HasPrefix(info.UpstreamModelName, "imagen") {
-		return fmt.Sprintf("%s/%s/models/%s:predict", info.ChannelBaseUrl, version, info.UpstreamModelName), nil
+	if strings.HasPrefix(requestModelName, "imagen") {
+		return fmt.Sprintf("%s/%s/models/%s:predict", info.ChannelBaseUrl, version, requestModelName), nil
 	}
 
-	if strings.HasPrefix(info.UpstreamModelName, "text-embedding") ||
-		strings.HasPrefix(info.UpstreamModelName, "embedding") ||
-		strings.HasPrefix(info.UpstreamModelName, "gemini-embedding") {
+	if strings.HasPrefix(requestModelName, "text-embedding") ||
+		strings.HasPrefix(requestModelName, "embedding") ||
+		strings.HasPrefix(requestModelName, "gemini-embedding") {
 		action := "embedContent"
 		if info.IsGeminiBatchEmbedding {
 			action = "batchEmbedContents"
 		}
-		return fmt.Sprintf("%s/%s/models/%s:%s", info.ChannelBaseUrl, version, info.UpstreamModelName, action), nil
+		return fmt.Sprintf("%s/%s/models/%s:%s", info.ChannelBaseUrl, version, requestModelName, action), nil
 	}
 
 	action := "generateContent"
@@ -250,7 +259,7 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 			info.DisablePing = true
 		}
 	}
-	return fmt.Sprintf("%s/%s/models/%s:%s", info.ChannelBaseUrl, version, info.UpstreamModelName, action), nil
+	return fmt.Sprintf("%s/%s/models/%s:%s", info.ChannelBaseUrl, version, requestModelName, action), nil
 }
 
 func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *relaycommon.RelayInfo) error {

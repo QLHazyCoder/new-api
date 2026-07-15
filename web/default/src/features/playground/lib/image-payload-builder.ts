@@ -42,8 +42,12 @@ export function buildImageGenerationPayload(
     payload.size = normalizedConfig.size
   }
   if (capabilities.size_mode === 'aspect_ratio_resolution') {
-    payload.aspect_ratio = normalizedConfig.aspect_ratio
-    payload.resolution = normalizedConfig.resolution
+    if (normalizedConfig.aspect_ratio) {
+      payload.aspect_ratio = normalizedConfig.aspect_ratio
+    }
+    if (normalizedConfig.resolution) {
+      payload.resolution = normalizedConfig.resolution
+    }
   }
   if (capabilities.qualities.length > 0) {
     payload.quality = normalizedConfig.quality
@@ -87,8 +91,12 @@ export function buildImageEditFormData(
     formData.append('size', normalizedConfig.size)
   }
   if (capabilities.size_mode === 'aspect_ratio_resolution') {
-    formData.append('aspect_ratio', normalizedConfig.aspect_ratio)
-    formData.append('resolution', normalizedConfig.resolution)
+    if (normalizedConfig.aspect_ratio) {
+      formData.append('aspect_ratio', normalizedConfig.aspect_ratio)
+    }
+    if (normalizedConfig.resolution) {
+      formData.append('resolution', normalizedConfig.resolution)
+    }
   }
   if (capabilities.qualities.length > 0) {
     formData.append('quality', normalizedConfig.quality)

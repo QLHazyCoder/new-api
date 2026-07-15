@@ -56,6 +56,12 @@ const geminiCapabilities: ImageModelCapabilities = {
   max_images: 4,
 }
 
+const fixedGeminiCapabilities: ImageModelCapabilities = {
+  ...geminiCapabilities,
+  resolutions: [],
+  default_resolution: '4K',
+}
+
 describe('image payload builder', () => {
   test('keeps GPT dimensions and output controls', () => {
     const payload = buildImageGenerationPayload(
@@ -78,7 +84,7 @@ describe('image payload builder', () => {
       'poster',
       {
         ...DEFAULT_IMAGE_CONFIG,
-        model: 'gemini-3.1-flash-image-4k',
+        model: 'gemini-3.1-flash-image',
         group: 'Gemini',
         aspect_ratio: '16:9',
         resolution: '4K',
@@ -91,5 +97,23 @@ describe('image payload builder', () => {
     assert.equal(payload.size, undefined)
     assert.equal(payload.quality, undefined)
     assert.equal(payload.output_format, undefined)
+  })
+
+  test('omits resolution when Gemini model name locks the image size', () => {
+    const payload = buildImageGenerationPayload(
+      'poster',
+      {
+        ...DEFAULT_IMAGE_CONFIG,
+        model: 'gemini-3.1-flash-image-4K',
+        group: 'Gemini',
+        aspect_ratio: '16:9',
+        resolution: '1K',
+      },
+      fixedGeminiCapabilities
+    )
+
+    assert.equal(payload.model, 'gemini-3.1-flash-image-4K')
+    assert.equal(payload.aspect_ratio, '16:9')
+    assert.equal(payload.resolution, undefined)
   })
 })

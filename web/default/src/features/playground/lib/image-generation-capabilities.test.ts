@@ -85,4 +85,23 @@ describe('playground image capabilities', () => {
     assert.equal(normalized.resolution, '2K')
     assert.equal(normalized.output_format, undefined)
   })
+
+  test('clears manual resolution for a resolution-suffixed model', () => {
+    const normalized = normalizePlaygroundImageConfig(
+      {
+        ...DEFAULT_IMAGE_CONFIG,
+        model: 'gemini-3.1-flash-image-2K',
+        group: 'Gemini',
+        resolution: '4K',
+      },
+      {
+        ...grokCapabilities,
+        provider: 'gemini',
+        resolutions: [],
+        default_resolution: '2K',
+      }
+    )
+
+    assert.equal(normalized.resolution, '')
+  })
 })

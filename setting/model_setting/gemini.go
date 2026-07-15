@@ -1,7 +1,8 @@
 package model_setting
 
 import (
-	"github.com/QuantumNous/new-api/pkg/imagecapability"
+	"strings"
+
 	"github.com/QuantumNous/new-api/setting/config"
 )
 
@@ -71,10 +72,14 @@ func GetGeminiVersionSetting(key string) string {
 }
 
 func IsGeminiModelSupportImagine(model string) bool {
-	model, _ = imagecapability.NormalizeGeminiImageModel(model)
 	for _, v := range geminiSettings.SupportedImagineModels {
-		if v == model {
+		if strings.EqualFold(v, model) {
 			return true
+		}
+		for _, suffix := range []string{"-1k", "-2k", "-4k"} {
+			if strings.EqualFold(v+suffix, model) {
+				return true
+			}
 		}
 	}
 	return false
