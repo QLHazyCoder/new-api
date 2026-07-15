@@ -405,7 +405,7 @@ func TestNewBillingSession_SubscriptionFirstMixedPreConsume(t *testing.T) {
 	assert.Equal(t, 50, info.BillingAllocations[1].Quota)
 }
 
-func TestNewBillingSession_SubscriptionFirstStrictPlanFallsBackToWallet(t *testing.T) {
+func TestNewBillingSession_SubscriptionFirstStrictPlanMixedPreConsume(t *testing.T) {
 	truncate(t)
 
 	const userID, tokenID, subID, planID = 47, 47, 47, 47
@@ -415,15 +415,15 @@ func TestNewBillingSession_SubscriptionFirstStrictPlanFallsBackToWallet(t *testi
 	const subTotal, subUsed int64 = 1000, 950
 
 	seedUser(t, userID, userQuota)
-	seedToken(t, tokenID, userID, "sk-strict-wallet-fallback", tokenRemain)
+	seedToken(t, tokenID, userID, "sk-strict-mixed-preconsume", tokenRemain)
 	seedSubscriptionPlan(t, planID, false)
 	seedSubscriptionWithPlan(t, subID, userID, planID, subTotal, subUsed, false)
 
 	info := &relaycommon.RelayInfo{
 		UserId:          userID,
 		TokenId:         tokenID,
-		TokenKey:        "sk-strict-wallet-fallback",
-		RequestId:       "req-strict-wallet-fallback",
+		TokenKey:        "sk-strict-mixed-preconsume",
+		RequestId:       "req-strict-mixed-preconsume",
 		OriginModelName: "test-model",
 		UsingGroup:      "default",
 		UserSetting:     dto.UserSetting{BillingPreference: "subscription_first"},
@@ -433,12 +433,16 @@ func TestNewBillingSession_SubscriptionFirstStrictPlanFallsBackToWallet(t *testi
 
 	require.Nil(t, apiErr)
 	require.NotNil(t, session)
-	assert.Equal(t, BillingSourceWallet, info.BillingSource)
+	assert.Equal(t, BillingSourceMixed, info.BillingSource)
 	assert.Equal(t, preConsumed, info.FinalPreConsumedQuota)
-	assert.Equal(t, subUsed, getSubscriptionUsed(t, subID))
-	assert.Equal(t, userQuota-preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, int64(1000), getSubscriptionUsed(t, subID))
+	assert.Equal(t, userQuota-50, getUserQuota(t, userID))
 	assert.Equal(t, tokenRemain-preConsumed, getTokenRemainQuota(t, tokenID))
-	assert.Empty(t, info.BillingAllocations)
+	require.Len(t, info.BillingAllocations, 2)
+	assert.Equal(t, BillingSourceSubscription, info.BillingAllocations[0].Source)
+	assert.Equal(t, 50, info.BillingAllocations[0].Quota)
+	assert.Equal(t, BillingSourceWallet, info.BillingAllocations[1].Source)
+	assert.Equal(t, 50, info.BillingAllocations[1].Quota)
 }
 
 func TestBillingSession_MixedSettleRefundsWalletFirst(t *testing.T) {

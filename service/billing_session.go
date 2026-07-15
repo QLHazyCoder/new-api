@@ -440,17 +440,6 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		if preConsumedQuota <= 0 {
 			return trySubscription()
 		}
-		allowOverflow, overflowErr := model.UserActiveSubscriptionsAllowWalletOverflow(relayInfo.UserId, relayInfo.UsingGroup)
-		if overflowErr != nil {
-			return nil, types.NewError(overflowErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
-		}
-		if !allowOverflow {
-			// Strict subscription plans disable mixed subscription+wallet billing.
-			// For subscription_first, that should still fall back to pure wallet
-			// billing instead of blocking the request.
-			return tryWallet()
-		}
-
 		userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
