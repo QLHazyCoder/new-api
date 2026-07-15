@@ -405,6 +405,42 @@ func TestNewBillingSession_SubscriptionFirstMixedPreConsume(t *testing.T) {
 	assert.Equal(t, 50, info.BillingAllocations[1].Quota)
 }
 
+func TestNewBillingSession_SubscriptionFirstStrictPlanFallsBackToWallet(t *testing.T) {
+	truncate(t)
+
+	const userID, tokenID, subID, planID = 47, 47, 47, 47
+	const userQuota = 1000
+	const tokenRemain = 1000
+	const preConsumed = 100
+	const subTotal, subUsed int64 = 1000, 950
+
+	seedUser(t, userID, userQuota)
+	seedToken(t, tokenID, userID, "sk-strict-wallet-fallback", tokenRemain)
+	seedSubscriptionPlan(t, planID, false)
+	seedSubscriptionWithPlan(t, subID, userID, planID, subTotal, subUsed, false)
+
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        "sk-strict-wallet-fallback",
+		RequestId:       "req-strict-wallet-fallback",
+		OriginModelName: "test-model",
+		UsingGroup:      "default",
+		UserSetting:     dto.UserSetting{BillingPreference: "subscription_first"},
+	}
+
+	session, apiErr := NewBillingSession(newBillingTestContext(tokenRemain), info, preConsumed)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceWallet, info.BillingSource)
+	assert.Equal(t, preConsumed, info.FinalPreConsumedQuota)
+	assert.Equal(t, subUsed, getSubscriptionUsed(t, subID))
+	assert.Equal(t, userQuota-preConsumed, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain-preConsumed, getTokenRemainQuota(t, tokenID))
+	assert.Empty(t, info.BillingAllocations)
+}
+
 func TestBillingSession_MixedSettleRefundsWalletFirst(t *testing.T) {
 	truncate(t)
 

@@ -445,13 +445,10 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			return nil, types.NewError(overflowErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
 		}
 		if !allowOverflow {
-			return nil, types.NewErrorWithStatusCode(
-				fmt.Errorf("订阅额度不足，且该订阅不允许余额补差"),
-				types.ErrorCodeInsufficientUserQuota,
-				http.StatusForbidden,
-				types.ErrOptionWithSkipRetry(),
-				types.ErrOptionWithNoRecordErrorLog(),
-			)
+			// Strict subscription plans disable mixed subscription+wallet billing.
+			// For subscription_first, that should still fall back to pure wallet
+			// billing instead of blocking the request.
+			return tryWallet()
 		}
 
 		userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
