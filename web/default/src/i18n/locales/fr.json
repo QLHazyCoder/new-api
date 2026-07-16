@@ -2095,6 +2095,7 @@
     "Generate new backup codes for account recovery": "Générer de nouveaux codes de secours pour la récupération du compte",
     "Generate New Codes": "Générer de nouveaux codes",
     "Generate tokens from the Tokens page; you can scope them to specific models, groups, IPs, and rate-limits.": "Générez des jetons depuis la page Jetons ; vous pouvez les restreindre par modèle, groupe, IP et limites de débit.",
+    "Failed to download image": "Échec du téléchargement de l’image",
     "Generated image": "Image générée",
     "Generating new codes will invalidate all existing backup codes.": "La génération de nouveaux codes invalidera tous les codes de sauvegarde existants.",
     "Generating...": "Génération...",

@@ -2095,6 +2095,7 @@
     "Generate new backup codes for account recovery": "アカウント復旧用の新しいバックアップコードを生成",
     "Generate New Codes": "新しいコードを生成",
     "Generate tokens from the Tokens page; you can scope them to specific models, groups, IPs, and rate-limits.": "トークンページから API キーを発行できます。モデル、グループ、IP、レート制限ごとに細かく権限を設定可能です。",
+    "Failed to download image": "画像のダウンロードに失敗しました",
     "Generated image": "生成された画像",
     "Generating new codes will invalidate all existing backup codes.": "新しいコードを生成すると、既存のすべてのバックアップコードが無効になります。",
     "Generating...": "生成中...",

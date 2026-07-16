@@ -2098,6 +2098,7 @@
     "Generate New Codes": "生成新代码",
     "Generate tokens from the Tokens page; you can scope them to specific models, groups, IPs, and rate-limits.": "在「令牌」页面生成 API Key，可以按模型、分组、IP、速率等维度精细化授权。",
     "Generate": "生成",
+    "Failed to download image": "图片下载失败",
     "Generated image": "生成的图像",
     "Generating": "生成中",
     "Generating new codes will invalidate all existing backup codes.": "生成新代码将使所有现有备份代码失效。",

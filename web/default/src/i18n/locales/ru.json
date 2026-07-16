@@ -2095,6 +2095,7 @@
     "Generate new backup codes for account recovery": "Сгенерировать новые резервные коды для восстановления аккаунта",
     "Generate New Codes": "Сгенерировать новые коды",
     "Generate tokens from the Tokens page; you can scope them to specific models, groups, IPs, and rate-limits.": "Создавайте токены на странице «Токены». Их можно ограничить моделями, группами, IP и лимитами частоты.",
+    "Failed to download image": "Не удалось скачать изображение",
     "Generated image": "Сгенерированное изображение",
     "Generating new codes will invalidate all existing backup codes.": "Генерация новых кодов аннулирует все существующие резервные коды.",
     "Generating...": "Создание...",

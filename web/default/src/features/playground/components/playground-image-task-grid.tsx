@@ -21,6 +21,7 @@ import {
   CopyIcon,
   DownloadIcon,
   ImageIcon,
+  LoaderCircleIcon,
   RefreshCwIcon,
   RotateCcwIcon,
   Trash2Icon,
@@ -97,13 +98,44 @@ async function copyText(text: string, successMessage: string) {
   toast.success(successMessage)
 }
 
-function downloadDataUrl(dataUrl: string, filename: string) {
+function triggerImageDownload(source: string, filename: string) {
   const link = document.createElement('a')
-  link.href = dataUrl
+  link.href = source
   link.download = filename
   document.body.appendChild(link)
   link.click()
   link.remove()
+}
+
+async function downloadImage(source: string, filename: string) {
+  if (source.startsWith('data:')) {
+    triggerImageDownload(source, filename)
+    return
+  }
+
+  const response = await fetch(source, {
+    credentials: 'omit',
+    referrerPolicy: 'no-referrer',
+  })
+  if (!response.ok) {
+    throw new Error(`Image download failed with status ${response.status}`)
+  }
+
+  const imageBlob = await response.blob()
+  if (
+    imageBlob.type &&
+    !imageBlob.type.startsWith('image/') &&
+    imageBlob.type !== 'application/octet-stream'
+  ) {
+    throw new Error(`Unexpected image content type: ${imageBlob.type}`)
+  }
+
+  const objectUrl = URL.createObjectURL(imageBlob)
+  try {
+    triggerImageDownload(objectUrl, filename)
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+  }
 }
 
 interface ImagePreviewSelection {
@@ -177,6 +209,7 @@ function TaskCard({
   onPreviewImage: (preview: ImagePreviewSelection) => void
 }) {
   const { t } = useTranslation()
+  const [isDownloading, setIsDownloading] = useState(false)
   const firstImage =
     task.image && isImageResultRenderable(task.image) ? task.image : undefined
   const firstSource = firstImage ? getImageSource(firstImage, task.config) : ''
@@ -222,16 +255,19 @@ function TaskCard({
     void copyText(firstImage.url, t('Image link copied'))
   }
 
-  const handleDownload = () => {
-    if (!firstSource) return
-    if (firstSource.startsWith('data:')) {
-      downloadDataUrl(
+  const handleDownload = async () => {
+    if (!firstSource || isDownloading) return
+    setIsDownloading(true)
+    try {
+      await downloadImage(
         firstSource,
         `${task.id}.${task.config.output_format || firstImage?.mime_type?.split('/')[1] || 'png'}`
       )
-      return
+    } catch {
+      toast.error(t('Failed to download image'))
+    } finally {
+      setIsDownloading(false)
     }
-    window.open(firstSource, '_blank', 'noopener,noreferrer')
   }
 
   return (
@@ -262,11 +298,15 @@ function TaskCard({
             <CopyIcon className='size-4' />
           </IconButton>
           <IconButton
-            disabled={!canDownload}
+            disabled={!canDownload || isDownloading}
             label={t('Download image')}
-            onClick={handleDownload}
+            onClick={() => void handleDownload()}
           >
-            <DownloadIcon className='size-4' />
+            {isDownloading ? (
+              <LoaderCircleIcon className='size-4 animate-spin' />
+            ) : (
+              <DownloadIcon className='size-4' />
+            )}
           </IconButton>
           <IconButton
             label={t('Reuse prompt')}

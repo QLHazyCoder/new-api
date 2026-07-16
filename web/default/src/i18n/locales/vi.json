@@ -2095,6 +2095,7 @@
     "Generate new backup codes for account recovery": "Tạo mã dự phòng mới để khôi phục tài khoản",
     "Generate New Codes": "Tạo mã mới",
     "Generate tokens from the Tokens page; you can scope them to specific models, groups, IPs, and rate-limits.": "Tạo token tại trang Tokens; bạn có thể giới hạn theo model, nhóm, IP và rate-limit.",
+    "Failed to download image": "Không thể tải hình ảnh xuống",
     "Generated image": "Ảnh được tạo",
     "Generating new codes will invalidate all existing backup codes.": "Tạo mã mới sẽ vô hiệu hóa tất cả các mã dự phòng hiện có.",
     "Generating...": "Đang tạo...",

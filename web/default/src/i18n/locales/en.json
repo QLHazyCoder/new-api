@@ -2097,6 +2097,7 @@
     "Generate new backup codes for account recovery": "Generate new backup codes for account recovery",
     "Generate New Codes": "Generate New Codes",
     "Generate tokens from the Tokens page; you can scope them to specific models, groups, IPs, and rate-limits.": "Generate tokens from the Tokens page; you can scope them to specific models, groups, IPs, and rate-limits.",
+    "Failed to download image": "Failed to download image",
     "Generated image": "Generated image",
     "Generating new codes will invalidate all existing backup codes.": "Generating new codes will invalidate all existing backup codes.",
     "Generating...": "Generating...",
