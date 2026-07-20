@@ -1,11 +1,26 @@
 package model
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/require"
 )
+
+func TestNormalizeLegacyAudioCompletionRatioOptionValue(t *testing.T) {
+	normalized, repaired := normalizeLegacyOptionValue("AudioCompletionRatio", " <nil> ")
+	require.True(t, repaired)
+
+	var ratios map[string]float64
+	require.NoError(t, json.Unmarshal([]byte(normalized), &ratios))
+	require.Equal(t, 2.0, ratios["gpt-4o-realtime"])
+	require.Equal(t, 1.0, ratios["gpt-4o-mini-tts"])
+
+	unchanged, repaired := normalizeLegacyOptionValue("AudioCompletionRatio", "{}")
+	require.False(t, repaired)
+	require.Equal(t, "{}", unchanged)
+}
 
 func TestUpdateOptionMapLogRetentionDays(t *testing.T) {
 	originalRetentionDays := common.LogRetentionDays

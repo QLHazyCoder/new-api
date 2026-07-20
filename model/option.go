@@ -29,6 +29,16 @@ func AllOption() ([]*Option, error) {
 	return options, err
 }
 
+// normalizeLegacyOptionValue repairs the historical nil sentinel emitted by
+// older deployments for this JSON-backed option. Passing it to the ratio map
+// loader would clear the current map before JSON decoding fails.
+func normalizeLegacyOptionValue(key, value string) (string, bool) {
+	if key == "AudioCompletionRatio" && strings.TrimSpace(value) == "<nil>" {
+		return ratio_setting.DefaultAudioCompletionRatio2JSONString(), true
+	}
+	return value, false
+}
+
 func InitOptionMap() {
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap = make(map[string]string)
@@ -191,9 +201,22 @@ func InitOptionMap() {
 }
 
 func loadOptionsFromDatabase() {
-	options, _ := AllOption()
+	options, err := AllOption()
+	if err != nil {
+		common.SysError("failed to load options from database: " + err.Error())
+		return
+	}
 	for _, option := range options {
-		err := updateOptionMap(option.Key, option.Value)
+		value, repaired := normalizeLegacyOptionValue(option.Key, option.Value)
+		if repaired {
+			if err := DB.Model(&Option{}).Where("key = ? AND value = ?", option.Key, option.Value).
+				Update("value", value).Error; err != nil {
+				common.SysError("failed to repair legacy option " + option.Key + ": " + err.Error())
+			} else {
+				common.SysLog("repaired legacy option " + option.Key)
+			}
+		}
+		err := updateOptionMap(option.Key, value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
 		}

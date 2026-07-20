@@ -687,6 +687,18 @@ func AudioCompletionRatio2JSONString() string {
 	return audioCompletionRatioMap.MarshalJSONString()
 }
 
+// DefaultAudioCompletionRatio2JSONString returns the built-in defaults rather
+// than the live map. It is used when repairing a legacy persisted value that
+// cannot be decoded without first clearing the live map.
+func DefaultAudioCompletionRatio2JSONString() string {
+	jsonBytes, err := common.Marshal(defaultAudioCompletionRatio)
+	if err != nil {
+		common.SysError("error marshalling default audio completion ratio: " + err.Error())
+		return "{}"
+	}
+	return string(jsonBytes)
+}
+
 func UpdateAudioCompletionRatioByJSONString(jsonStr string) error {
 	return types.LoadFromJsonStringWithCallback(audioCompletionRatioMap, jsonStr, InvalidateExposedDataCache)
 }
