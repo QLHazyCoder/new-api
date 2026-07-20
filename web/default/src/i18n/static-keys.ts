@@ -24,6 +24,11 @@ export const STATIC_I18N_KEYS = [
   'Console',
   'Model Square',
   'Rankings',
+  'Today',
+  'Yesterday',
+  'Week',
+  'Month',
+  'Year',
   'Docs',
   'About',
 

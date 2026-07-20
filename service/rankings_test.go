@@ -19,11 +19,13 @@ func TestRankingTimeRangesUseConfiguredCalendarDays(t *testing.T) {
 	tests := []struct {
 		period    string
 		wantStart time.Time
+		wantEnd   time.Time
 	}{
-		{period: "today", wantStart: time.Date(2026, time.July, 14, 0, 0, 0, 0, location)},
-		{period: "week", wantStart: time.Date(2026, time.July, 8, 0, 0, 0, 0, location)},
-		{period: "month", wantStart: time.Date(2026, time.June, 15, 0, 0, 0, 0, location)},
-		{period: "year", wantStart: time.Date(2025, time.July, 15, 0, 0, 0, 0, location)},
+		{period: "today", wantStart: time.Date(2026, time.July, 14, 0, 0, 0, 0, location), wantEnd: now.Add(time.Second)},
+		{period: "yesterday", wantStart: time.Date(2026, time.July, 13, 0, 0, 0, 0, location), wantEnd: time.Date(2026, time.July, 14, 0, 0, 0, 0, location)},
+		{period: "week", wantStart: time.Date(2026, time.July, 8, 0, 0, 0, 0, location), wantEnd: now.Add(time.Second)},
+		{period: "month", wantStart: time.Date(2026, time.June, 15, 0, 0, 0, 0, location), wantEnd: now.Add(time.Second)},
+		{period: "year", wantStart: time.Date(2025, time.July, 15, 0, 0, 0, 0, location), wantEnd: now.Add(time.Second)},
 	}
 
 	for _, test := range tests {
@@ -32,7 +34,7 @@ func TestRankingTimeRangesUseConfiguredCalendarDays(t *testing.T) {
 			require.NoError(t, err)
 			start, end := rankingTimeRange(config, now)
 			assert.Equal(t, test.wantStart.Unix(), start)
-			assert.Equal(t, now.Unix()+1, end)
+			assert.Equal(t, test.wantEnd.Unix(), end)
 		})
 	}
 }

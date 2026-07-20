@@ -26,7 +26,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 const rankingsSearchSchema = z.object({
   period: z
-    .enum(['today', 'week', 'month', 'year'])
+    .enum(['today', 'yesterday', 'week', 'month', 'year'])
     .optional()
     .catch(undefined),
 })

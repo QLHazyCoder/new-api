@@ -30,6 +30,7 @@ import { ModelLeaderboard } from './model-leaderboard'
 
 const PERIOD_DESCRIPTIONS: Record<RankingPeriod, string> = {
   today: 'Hourly token usage by model today',
+  yesterday: 'Hourly token usage by model yesterday',
   week: 'Daily token usage by model over the past 7 calendar days',
   month: 'Daily token usage by model over the past 30 calendar days',
   year: 'Weekly token usage by model over the past 365 calendar days',

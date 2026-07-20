@@ -102,11 +102,12 @@ type VendorShareSeries struct {
 }
 
 type rankingPeriodConfig struct {
-	id          string
-	days        int
-	bucketSize  int64
-	labelLayout string
-	hasPrevious bool
+	id                  string
+	days                int
+	bucketSize          int64
+	labelLayout         string
+	hasPrevious         bool
+	completeBeforeToday bool
 }
 
 type rankingCacheItem struct {
@@ -172,6 +173,8 @@ func rankingConfig(period string) (rankingPeriodConfig, error) {
 		return rankingPeriodConfig{id: "week", days: 7, bucketSize: 24 * 3600, labelLayout: "Jan 2", hasPrevious: true}, nil
 	case "today":
 		return rankingPeriodConfig{id: "today", days: 1, bucketSize: 3600, labelLayout: "15:04", hasPrevious: true}, nil
+	case "yesterday":
+		return rankingPeriodConfig{id: "yesterday", days: 1, bucketSize: 3600, labelLayout: "15:04", hasPrevious: true, completeBeforeToday: true}, nil
 	case "month":
 		return rankingPeriodConfig{id: "month", days: 30, bucketSize: 24 * 3600, labelLayout: "Jan 2", hasPrevious: true}, nil
 	case "year":
@@ -223,13 +226,15 @@ func buildRankingsSnapshot(config rankingPeriodConfig, now time.Time) (*Rankings
 }
 
 func rankingTimeRange(config rankingPeriodConfig, now time.Time) (int64, int64) {
-	endTime := now.Unix() + 1
-	if config.days <= 0 {
-		return 0, endTime
-	}
 	localNow := now.In(time.Local)
 	todayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.Local)
-	return todayStart.AddDate(0, 0, 1-config.days).Unix(), endTime
+	if config.days <= 0 {
+		return 0, now.Unix() + 1
+	}
+	if config.completeBeforeToday {
+		return todayStart.AddDate(0, 0, -config.days).Unix(), todayStart.Unix()
+	}
+	return todayStart.AddDate(0, 0, 1-config.days).Unix(), now.Unix() + 1
 }
 
 func previousRankingTimeRange(config rankingPeriodConfig, currentStart int64, currentEnd int64) (int64, int64) {
