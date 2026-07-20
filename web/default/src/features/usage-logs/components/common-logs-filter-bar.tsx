@@ -37,6 +37,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { buildSearchParams } from '../lib/filter'
@@ -52,6 +53,7 @@ import {
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
+const GROUP_ALL_VALUE = '__all_groups__'
 
 type LogTypeValue = (typeof LOG_TYPE_FILTERS)[number]['value']
 const logTypeValueSet = new Set<string>(
@@ -118,6 +120,7 @@ export function CommonLogsFilterBar<TData>(
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
+  const { groupRatio } = usePricingData()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
 
   const searchState = useMemo<CommonLogDraft>(() => {
@@ -262,6 +265,19 @@ export function CommonLogsFilterBar<TData>(
   )
   const logTypeLabel =
     logTypeItems.find((type) => type.value === logType)?.label ?? t('All Types')
+  const groupItems = useMemo(() => {
+    const groups = Object.keys(groupRatio)
+    if (filters.group && !groups.includes(filters.group)) {
+      groups.push(filters.group)
+    }
+
+    return groups
+      .sort((left, right) => left.localeCompare(right))
+      .map((group) => ({ value: group, label: group }))
+  }, [filters.group, groupRatio])
+  const groupLabel =
+    groupItems.find((group) => group.value === filters.group)?.label ??
+    t('All Groups')
 
   const statsBar = (
     <div className='flex flex-wrap items-center gap-2'>
@@ -313,13 +329,30 @@ export function CommonLogsFilterBar<TData>(
   )
   const groupFilter = (
     <LogsFilterField>
-      <LogsFilterInput
-        placeholder={t('Group')}
-        type={sensitiveType}
-        value={filters.group || ''}
-        onChange={(e) => handleChange('group', e.target.value)}
-        onKeyDown={handleKeyDown}
-      />
+      <Select
+        items={groupItems}
+        value={filters.group ?? GROUP_ALL_VALUE}
+        onValueChange={(value) =>
+          handleChange(
+            'group',
+            value !== null && value !== GROUP_ALL_VALUE ? value : undefined
+          )
+        }
+      >
+        <SelectTrigger>
+          <SelectValue>{groupLabel}</SelectValue>
+        </SelectTrigger>
+        <SelectContent alignItemWithTrigger={false}>
+          <SelectGroup>
+            <SelectItem value={GROUP_ALL_VALUE}>{t('All Groups')}</SelectItem>
+            {groupItems.map((group) => (
+              <SelectItem key={group.value} value={group.value}>
+                {group.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
     </LogsFilterField>
   )
   const typeFilter = (
