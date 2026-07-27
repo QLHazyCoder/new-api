@@ -426,6 +426,47 @@ func CleanupPlaygroundImageBatchReferences(batchRecordID int64) {
 	cleanupPlaygroundImageBatchReferences(batchRecordID)
 }
 
+func removePlaygroundImageTaskResults(tasks []model.PlaygroundImageTask, operation string) {
+	for _, task := range tasks {
+		if err := RemovePlaygroundImageResult(task.ResultPath); err != nil {
+			common.SysError(fmt.Sprintf("%s %s: %v", operation, task.TaskID, err))
+			continue
+		}
+		if err := model.ClearPlaygroundImageTaskResult(task.TaskID, task.ResultPath); err != nil {
+			common.SysError(fmt.Sprintf("clear playground image result metadata %s: %v", task.TaskID, err))
+		}
+	}
+}
+
+func enforcePlaygroundImageResultRetention(userID int) {
+	excess, err := model.HideExcessPlaygroundImageResults(userID, common.GetTimestamp())
+	if err != nil {
+		common.SysError(fmt.Sprintf("enforce playground image result retention for user %d: %v", userID, err))
+		return
+	}
+	removePlaygroundImageTaskResults(excess, "remove excess playground image result")
+}
+
+func enforcePlaygroundImageResultRetentionForAllUsers(now int64) {
+	userIDs, err := model.ListPlaygroundImageUsersOverStoredResultLimit(now, 500)
+	if err != nil {
+		common.SysError(fmt.Sprintf("list users over playground image result retention: %v", err))
+		return
+	}
+	for _, userID := range userIDs {
+		enforcePlaygroundImageResultRetention(userID)
+	}
+}
+
+func cleanupHiddenPlaygroundImageResults() {
+	tasks, err := model.ListHiddenPlaygroundImageTasksWithResults(1000)
+	if err != nil {
+		common.SysError(fmt.Sprintf("list hidden playground image results: %v", err))
+		return
+	}
+	removePlaygroundImageTaskResults(tasks, "remove hidden playground image result")
+}
+
 func executeClaimedPlaygroundImageTask(owner string, task model.PlaygroundImageTask) {
 	stopHeartbeat := make(chan struct{})
 	defer func() {
@@ -523,6 +564,8 @@ func executeClaimedPlaygroundImageTask(owner string, task model.PlaygroundImageT
 		} else if err := model.ClearPlaygroundImageTaskResult(task.TaskID, resultPath); err != nil {
 			common.SysError(fmt.Sprintf("clear discarded playground image result metadata: %v", err))
 		}
+	} else {
+		enforcePlaygroundImageResultRetention(task.UserID)
 	}
 	cleanupPlaygroundImageBatchReferences(batchRecordID)
 }
@@ -537,6 +580,8 @@ func RunPlaygroundImageCleanupOnce() {
 		}
 	}
 	now := common.GetTimestamp()
+	enforcePlaygroundImageResultRetentionForAllUsers(now)
+	cleanupHiddenPlaygroundImageResults()
 	tasks, err := model.ListExpiredPlaygroundImageTasks(now, 1000)
 	if err != nil {
 		common.SysError(fmt.Sprintf("cleanup expired playground image tasks: %v", err))

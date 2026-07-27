@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -69,6 +70,73 @@ func TestCreatePlaygroundImageBatchInChunksWithoutProductCountCap(t *testing.T) 
 	require.Len(t, tasks, 503)
 	assert.Equal(t, 0, tasks[0].TaskIndex)
 	assert.Equal(t, 502, tasks[len(tasks)-1].TaskIndex)
+}
+
+func TestHideExcessPlaygroundImageResultsRetainsNewestFifty(t *testing.T) {
+	truncateTables(t)
+	batch, created, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
+		UserID:         1,
+		ClientBatchID:  "result-retention",
+		Mode:           PlaygroundImageModeGenerate,
+		Prompt:         "draw many images",
+		Model:          "gpt-image-2",
+		RequestPayload: `{"model":"gpt-image-2","n":1}`,
+		Count:          PlaygroundImageMaxStoredResultsPerUser + 2,
+	})
+	require.NoError(t, err)
+	require.True(t, created)
+
+	var tasks []PlaygroundImageTask
+	require.NoError(t, DB.Where("batch_record_id = ?", batch.ID).Order("id ASC").Find(&tasks).Error)
+	for index, task := range tasks {
+		require.NoError(t, DB.Model(&PlaygroundImageTask{}).Where("id = ?", task.ID).Updates(map[string]any{
+			"status":      PlaygroundImageTaskSucceeded,
+			"result_path": fmt.Sprintf("results/1/%d.png", index),
+		}).Error)
+	}
+	activeBatch, created, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
+		UserID:         1,
+		ClientBatchID:  "result-retention-active",
+		Mode:           PlaygroundImageModeGenerate,
+		Prompt:         "keep generating",
+		Model:          "gpt-image-2",
+		RequestPayload: `{"model":"gpt-image-2","n":1}`,
+		Count:          1,
+	})
+	require.NoError(t, err)
+	require.True(t, created)
+	var activeTask PlaygroundImageTask
+	require.NoError(t, DB.Where("batch_record_id = ?", activeBatch.ID).First(&activeTask).Error)
+
+	now := common.GetTimestamp()
+	userIDs, err := ListPlaygroundImageUsersOverStoredResultLimit(now, 10)
+	require.NoError(t, err)
+	assert.Equal(t, []int{1}, userIDs)
+
+	excess, err := HideExcessPlaygroundImageResults(1, now)
+	require.NoError(t, err)
+	require.Len(t, excess, 2)
+	assert.Equal(t, []int64{tasks[1].ID, tasks[0].ID}, []int64{excess[0].ID, excess[1].ID})
+
+	var visibleCount int64
+	require.NoError(t, DB.Model(&PlaygroundImageTask{}).
+		Where("user_id = ? AND status = ? AND hidden = ? AND result_path <> '' AND expires_at > ?", 1, PlaygroundImageTaskSucceeded, false, now).
+		Count(&visibleCount).Error)
+	assert.EqualValues(t, PlaygroundImageMaxStoredResultsPerUser, visibleCount)
+
+	var hiddenTask PlaygroundImageTask
+	require.NoError(t, DB.First(&hiddenTask, tasks[0].ID).Error)
+	assert.True(t, hiddenTask.Hidden)
+	assert.Equal(t, "results/1/0.png", hiddenTask.ResultPath)
+
+	var reloadedActiveTask PlaygroundImageTask
+	require.NoError(t, DB.First(&reloadedActiveTask, activeTask.ID).Error)
+	assert.Equal(t, PlaygroundImageTaskQueued, reloadedActiveTask.Status)
+	assert.False(t, reloadedActiveTask.Hidden)
+
+	hiddenResults, err := ListHiddenPlaygroundImageTasksWithResults(10)
+	require.NoError(t, err)
+	require.Len(t, hiddenResults, 2)
 }
 
 func TestClaimPlaygroundImageTasksHonorsGlobalConcurrency(t *testing.T) {

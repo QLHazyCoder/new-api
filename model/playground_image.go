@@ -27,6 +27,10 @@ const (
 
 	playgroundImageQueueLockType  = "playground_image_queue"
 	playgroundImageConcurrencyKey = "PlaygroundImageMaxConcurrency"
+
+	// PlaygroundImageMaxStoredResultsPerUser limits retained successful images,
+	// without restricting queued or running generation tasks.
+	PlaygroundImageMaxStoredResultsPerUser = 50
 )
 
 var ErrPlaygroundImageTaskNotFound = errors.New("playground image task not found")
@@ -271,6 +275,87 @@ func ListPlaygroundImageTasks(userID, page, pageSize int, now int64) ([]Playgrou
 	var tasks []PlaygroundImageTask
 	err := query.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&tasks).Error
 	return tasks, total, err
+}
+
+// HideExcessPlaygroundImageResults keeps only the newest successful image
+// results visible for a user. Result files are removed by the worker after the
+// database transaction commits, so file cleanup can be retried safely.
+func HideExcessPlaygroundImageResults(userID int, now int64) ([]PlaygroundImageTask, error) {
+	if userID <= 0 {
+		return nil, errors.New("invalid playground image user")
+	}
+
+	var excess []PlaygroundImageTask
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).
+			Where("user_id = ? AND status = ? AND hidden = ? AND result_path <> '' AND expires_at > ?", userID, PlaygroundImageTaskSucceeded, false, now).
+			Order("id DESC").
+			Offset(PlaygroundImageMaxStoredResultsPerUser).
+			Find(&excess).Error; err != nil {
+			return err
+		}
+		if len(excess) == 0 {
+			return nil
+		}
+
+		ids := make([]int64, len(excess))
+		for index, task := range excess {
+			ids[index] = task.ID
+		}
+		result := tx.Model(&PlaygroundImageTask{}).
+			Where("id IN ? AND user_id = ? AND status = ? AND hidden = ?", ids, userID, PlaygroundImageTaskSucceeded, false).
+			Updates(map[string]any{
+				"hidden":         true,
+				"discard_result": true,
+				"updated_at":     now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != int64(len(ids)) {
+			return fmt.Errorf("hid %d of %d excess playground image results", result.RowsAffected, len(ids))
+		}
+		return nil
+	})
+	return excess, err
+}
+
+func ListPlaygroundImageUsersOverStoredResultLimit(now int64, limit int) ([]int, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	type userRow struct {
+		UserID int `gorm:"column:user_id"`
+	}
+	var rows []userRow
+	err := DB.Model(&PlaygroundImageTask{}).
+		Select("user_id").
+		Where("status = ? AND hidden = ? AND result_path <> '' AND expires_at > ?", PlaygroundImageTaskSucceeded, false, now).
+		Group("user_id").
+		Having("COUNT(*) > ?", PlaygroundImageMaxStoredResultsPerUser).
+		Order("user_id ASC").
+		Limit(limit).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	userIDs := make([]int, len(rows))
+	for index, row := range rows {
+		userIDs[index] = row.UserID
+	}
+	return userIDs, nil
+}
+
+func ListHiddenPlaygroundImageTasksWithResults(limit int) ([]PlaygroundImageTask, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	var tasks []PlaygroundImageTask
+	err := DB.Where("hidden = ? AND result_path <> '' AND status IN ?", true, []PlaygroundImageTaskStatus{
+		PlaygroundImageTaskSucceeded,
+		PlaygroundImageTaskCancelled,
+	}).Order("updated_at ASC").Limit(limit).Find(&tasks).Error
+	return tasks, err
 }
 
 func GetPlaygroundImageBatchSummary(batch *PlaygroundImageBatch) (*PlaygroundImageBatchSummary, error) {
