@@ -501,6 +501,13 @@ export function normalizeLegacyImageTasks(
   )
 }
 
+export function removePlaygroundImageTask(
+  tasks: ImageTask[],
+  taskId: string
+): ImageTask[] {
+  return tasks.filter((task) => task.id !== taskId)
+}
+
 export function loadImageTasks(): ImageTask[] {
   try {
     const saved = readStoredValue(STORAGE_KEYS.IMAGE_TASKS)

@@ -341,7 +341,6 @@ function TaskCard({
           </IconButton>
           <IconButton
             className='text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive/20'
-            disabled={isLegacyTask}
             label={t('Delete')}
             onClick={() => onDeleteTask(task)}
           >

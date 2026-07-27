@@ -35,6 +35,7 @@ import {
   findImageModelCapabilities,
   normalizePlaygroundImageConfig,
   normalizeImageGenerationCount,
+  removePlaygroundImageTask,
 } from '../lib'
 import type {
   ImageGenerationConfig,
@@ -331,11 +332,16 @@ export function useImageGenerationHandler({
 
   const deleteTask = useCallback(
     async (task: ImageTask) => {
-      if (task.origin !== 'server') return
+      if (task.origin !== 'server') {
+        onTasksUpdate((previous) =>
+          removePlaygroundImageTask(previous, task.id)
+        )
+        return
+      }
       try {
         await deleteServerImageTask(task.id)
         onTasksUpdate((previous) =>
-          previous.filter((item) => item.id !== task.id)
+          removePlaygroundImageTask(previous, task.id)
         )
       } catch (error: unknown) {
         toast.error(getImageGenerationError(error, t('Request failed')).message)

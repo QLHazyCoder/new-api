@@ -358,7 +358,10 @@ export function PlaygroundImageInput({
           />
 
           <PromptInputFooter className='flex-col items-stretch gap-2 p-2.5 sm:flex-row sm:items-center sm:justify-between'>
-            <PromptInputTools className='flex-wrap gap-2'>
+            <PromptInputTools
+              className='flex-wrap gap-2'
+              onClick={(event) => event.stopPropagation()}
+            >
               <ModelGroupSelector
                 className={controlClassName}
                 selectedModel={config.model}

@@ -21,7 +21,7 @@ import { describe, test } from 'node:test'
 
 import { DEFAULT_IMAGE_CONFIG } from '../../constants'
 import type { ImageTask } from '../../types'
-import { normalizeLegacyImageTasks } from './storage'
+import { normalizeLegacyImageTasks, removePlaygroundImageTask } from './storage'
 
 const now = Date.UTC(2026, 6, 26)
 
@@ -65,5 +65,14 @@ describe('playground legacy image task migration', () => {
 
     assert.equal(task.status, 'interrupted')
     assert.equal(task.finishedAt, now)
+  })
+
+  test('allows browser-only history to be removed locally', () => {
+    const [task] = normalizeLegacyImageTasks(
+      [createTask({ id: 'deletable' })],
+      now
+    )
+
+    assert.deepEqual(removePlaygroundImageTask([task], task.id), [])
   })
 })
