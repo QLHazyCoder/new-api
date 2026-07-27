@@ -210,7 +210,7 @@ func loadOptionsFromDatabase() {
 	for _, option := range options {
 		value, repaired := normalizeLegacyOptionValue(option.Key, option.Value)
 		if repaired {
-			if err := DB.Model(&Option{}).Where("key = ? AND value = ?", option.Key, option.Value).
+			if err := DB.Model(&Option{}).Where(&Option{Key: option.Key, Value: option.Value}).
 				Update("value", value).Error; err != nil {
 				common.SysError("failed to repair legacy option " + option.Key + ": " + err.Error())
 			} else {

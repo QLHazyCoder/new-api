@@ -351,7 +351,7 @@ func recoverExpiredPlaygroundImageLeases(tx *gorm.DB, now int64) error {
 
 func resolvePlaygroundImageMaxConcurrency(tx *gorm.DB, fallback int) (int, error) {
 	var option Option
-	err := tx.Select("value").Where("key = ?", playgroundImageConcurrencyKey).First(&option).Error
+	err := tx.Select("value").Where(&Option{Key: playgroundImageConcurrencyKey}).First(&option).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return max(0, fallback), nil
 	}

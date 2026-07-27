@@ -5,6 +5,9 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -139,10 +142,25 @@ func TestClaimPlaygroundImageTasksUsesDatabaseConcurrencyAcrossInstances(t *test
 		require.NoError(t, err)
 	}
 
-	require.NoError(t, DB.Model(&Option{}).Where("key = ?", playgroundImageConcurrencyKey).Update("value", "0").Error)
+	require.NoError(t, DB.Model(&Option{}).Where(&Option{Key: playgroundImageConcurrencyKey}).Update("value", "0").Error)
 	claimed, err = ClaimPlaygroundImageTasks("worker-stale-limited", 2, 500, now, now+45)
 	require.NoError(t, err)
 	assert.Len(t, claimed, 3)
+}
+
+func TestPlaygroundImageConcurrencyOptionQueryEscapesMySQLKeyColumn(t *testing.T) {
+	db, err := gorm.Open(
+		mysql.New(mysql.Config{
+			DSN:                       "gorm:gorm@tcp(localhost:9910)/gorm?charset=utf8&parseTime=True&loc=Local",
+			SkipInitializeWithVersion: true,
+		}),
+		&gorm.Config{DryRun: true, DisableAutomaticPing: true},
+	)
+	require.NoError(t, err)
+
+	statement := db.Select("value").Where(&Option{Key: playgroundImageConcurrencyKey}).First(&Option{}).Statement
+	assert.Contains(t, statement.SQL.String(), "`key`")
+	assert.NotContains(t, statement.SQL.String(), " WHERE key = ")
 }
 
 func TestExpiredStartedLeaseBecomesInterruptedWithoutResubmission(t *testing.T) {
