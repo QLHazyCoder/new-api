@@ -26,7 +26,7 @@
 | 1 | Two-parent merge, frontend flattening, complete local-code migration | Complete |
 | 2 | Backend semantic audit and regression coverage | Complete |
 | 3 | Frontend semantic audit and regression coverage | Complete |
-| 4 | Full validation, encoding audit, Docker build | Pending |
+| 4 | Full validation, encoding audit, Docker validation handoff | Complete |
 | Delivery | Fast-forward `main`, push, and successful multi-arch Actions run | Pending |
 
 ## Protected Feature Matrix
@@ -271,10 +271,24 @@ This section is updated after each stage. A stage may not be marked complete unt
 
 ### Stage 4
 
-- Commit: pending
-- Full automated validation: pending
-- Encoding/mojibake scan: pending
-- Docker build: pending
+- Commit: this stage's `docs: record rc22 merge validation` commit.
+- Reverse commit audit: the 93 local non-merge commits remain fully classified as 92 preserve/move/merge entries and 1 Classic-only retirement. Every protected feature in the matrix has a final backend, frontend, workflow, or test path.
+- Reverse file audit: all 59 files added locally between rc.21 and the original main are accounted for. 41 remain at their original paths, 17 exist at their single-frontend `web` destinations, and the sole missing Classic helper is mapped to `web/src/features/wallet/lib/payment-return.ts`; unaccounted files: 0.
+- Final-tree text audit: all 1,737 paths changed from the original main to the final merge tree were scanned. Text files decode as strict UTF-8 and contain no Unicode replacement character, common mojibake signature, merge-conflict marker, or zero-byte file.
+- i18n structural audit: all 8 i18n JSON/report files parse without errors or duplicate object keys. All 7 locales retain the same 5,276 translation keys, and the sync report remains zero for missing, extra, and suspected-untranslated entries.
+- Copyright repair: the repository checker normalized 5 headers discovered only by the final full check: channel field updates, performance aggregation, rankings implementation/test, and the new usage-log query-parameter module. A second check reported zero pending headers.
+- `git diff --check`: passed for both the clean worktree and the complete `6a978443..HEAD` change set.
+- `go build ./...`: passed.
+- `go test ./...`: passed for all packages.
+- `bun run typecheck`: passed.
+- `bun test`: passed, 119 tests.
+- `bun run lint`: passed with 0 errors and the 124 reviewed warnings recorded in Stage 3.
+- `bun run format:check`: passed after copyright normalization.
+- `bun run copyright:check`: passed with 1,044 checked files, zero additions, and zero pending updates.
+- `bun run build:check`: passed and produced the production frontend bundle.
+- Manual/live exclusions: password login, GitHub OAuth, Passkey, payment callbacks, and Playground image operations were not exercised, as requested. Their existing automated tests remained enabled.
+- Docker validation handoff: at the user's final direction, local Docker emulation is not an acceptance gate. The attempted arm64-host QEMU build was canceled and its binfmt/helper/image state removed; native amd64, arm64, and manifest validation is delegated to `Publish Docker image (Multi-arch)` after pushing `main`.
+- Deployment prerequisites: before production rollout, configure secure cookies, trusted HTTPS origins, and `TRUSTED_PROXIES` for the actual reverse-proxy topology.
 
 ### Delivery
 
