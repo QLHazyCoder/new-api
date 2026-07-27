@@ -48,6 +48,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
+import { PLAYGROUND_IMAGE_MAX_COUNT } from '../constants'
 import {
   normalizePlaygroundImageConfig,
   normalizeImageGenerationCount,
@@ -475,6 +476,7 @@ export function PlaygroundImageInput({
                   className={`${controlClassName} w-20`}
                   disabled={isConfigDisabled || !hasImageModels}
                   inputMode='numeric'
+                  max={PLAYGROUND_IMAGE_MAX_COUNT}
                   min={1}
                   step={1}
                   type='number'

@@ -28,6 +28,10 @@ const (
 	playgroundImageQueueLockType  = "playground_image_queue"
 	playgroundImageConcurrencyKey = "PlaygroundImageMaxConcurrency"
 
+	// PlaygroundImageMaxBatchCount limits a single Playground submission without
+	// changing the upstream n=1 execution model.
+	PlaygroundImageMaxBatchCount = 50
+
 	// PlaygroundImageMaxStoredResultsPerUser limits retained successful images,
 	// without restricting queued or running generation tasks.
 	PlaygroundImageMaxStoredResultsPerUser = 50
@@ -127,7 +131,7 @@ func newPlaygroundImageID(prefix string) string {
 }
 
 func CreatePlaygroundImageBatch(params CreatePlaygroundImageBatchParams) (*PlaygroundImageBatch, bool, error) {
-	if params.UserID <= 0 || params.ClientBatchID == "" || params.Count <= 0 {
+	if params.UserID <= 0 || params.ClientBatchID == "" || params.Count <= 0 || params.Count > PlaygroundImageMaxBatchCount {
 		return nil, false, errors.New("invalid playground image batch")
 	}
 
@@ -277,10 +281,11 @@ func ListPlaygroundImageTasks(userID, page, pageSize int, now int64) ([]Playgrou
 	return tasks, total, err
 }
 
-// HideExcessPlaygroundImageResults keeps only the newest successful image
-// results visible for a user. Result files are removed by the worker after the
-// database transaction commits, so file cleanup can be retried safely.
-func HideExcessPlaygroundImageResults(userID int, now int64) ([]PlaygroundImageTask, error) {
+// PrepareExcessPlaygroundImageResultsForDeletion keeps only the newest
+// successful image results visible for a user. The hidden marker is a durable
+// deletion handoff: the worker removes each file and then hard-deletes its task
+// row. If file deletion fails, the marker lets a later cleanup retry safely.
+func PrepareExcessPlaygroundImageResultsForDeletion(userID int, now int64) ([]PlaygroundImageTask, error) {
 	if userID <= 0 {
 		return nil, errors.New("invalid playground image user")
 	}
@@ -346,13 +351,15 @@ func ListPlaygroundImageUsersOverStoredResultLimit(now int64, limit int) ([]int,
 	return userIDs, nil
 }
 
-func ListHiddenPlaygroundImageTasksWithResults(limit int) ([]PlaygroundImageTask, error) {
+func ListHiddenTerminalPlaygroundImageTasks(limit int) ([]PlaygroundImageTask, error) {
 	if limit <= 0 {
 		limit = 500
 	}
 	var tasks []PlaygroundImageTask
-	err := DB.Where("hidden = ? AND result_path <> '' AND status IN ?", true, []PlaygroundImageTaskStatus{
+	err := DB.Where("hidden = ? AND status IN ?", true, []PlaygroundImageTaskStatus{
 		PlaygroundImageTaskSucceeded,
+		PlaygroundImageTaskFailed,
+		PlaygroundImageTaskInterrupted,
 		PlaygroundImageTaskCancelled,
 	}).Order("updated_at ASC").Limit(limit).Find(&tasks).Error
 	return tasks, err
@@ -674,18 +681,30 @@ func DeletePlaygroundImageTask(taskID string, userID int, now int64) (*Playgroun
 	return result, err
 }
 
-func ClearPlaygroundImageTaskResult(taskID, resultPath string) error {
-	if resultPath == "" {
-		return nil
-	}
-	return DB.Model(&PlaygroundImageTask{}).
-		Where("task_id = ? AND result_path = ?", taskID, resultPath).
-		Updates(map[string]any{
-			"result_path":      "",
-			"result_mime_type": "",
-			"result_size":      0,
-			"updated_at":       common.GetTimestamp(),
-		}).Error
+// DeleteHiddenPlaygroundImageTask permanently removes a task after its result
+// file has been removed. The task must already be hidden so active work cannot
+// be hard-deleted while a worker is still using it.
+func DeleteHiddenPlaygroundImageTask(taskID, resultPath string) (int64, error) {
+	var batchRecordID int64
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		query := lockForUpdate(tx).Where("task_id = ? AND hidden = ?", taskID, true)
+		if resultPath != "" {
+			query = query.Where("result_path = ?", resultPath)
+		}
+		var task PlaygroundImageTask
+		if err := query.First(&task).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPlaygroundImageTaskNotFound
+			}
+			return err
+		}
+		if !task.Status.IsTerminal() {
+			return errors.New("playground image task is still active")
+		}
+		batchRecordID = task.BatchRecordID
+		return tx.Delete(&task).Error
+	})
+	return batchRecordID, err
 }
 
 func GetPlaygroundImageBatchReferencesIfTerminal(batchRecordID int64) (string, error) {
@@ -723,6 +742,14 @@ func ClearPlaygroundImageBatchReferences(batchRecordID int64, references string)
 			"reference_files": "",
 			"updated_at":      common.GetTimestamp(),
 		}).Error
+}
+
+func DeleteEmptyPlaygroundImageBatch(batchRecordID int64) error {
+	if batchRecordID <= 0 {
+		return nil
+	}
+	return DB.Where("id = ? AND reference_files = '' AND NOT EXISTS (SELECT 1 FROM playground_image_tasks WHERE playground_image_tasks.batch_record_id = playground_image_batches.id)", batchRecordID).
+		Delete(&PlaygroundImageBatch{}).Error
 }
 
 func ListPlaygroundImageBatchesWithReferences(limit int) ([]PlaygroundImageBatch, error) {

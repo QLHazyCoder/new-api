@@ -86,9 +86,13 @@ export const DEFAULT_IMAGE_CONFIG: ImageGenerationConfig = {
   output_format: 'png',
 }
 
+export const PLAYGROUND_IMAGE_MAX_COUNT = 50
+
 // Storage keys
 export const STORAGE_KEYS = {
   CONFIG: 'playground_config',
+  IMAGE_DELETE_CONFIRMATION_DISABLED:
+    'playground_image_delete_confirmation_disabled',
   IMAGE_CONFIG: 'playground_image_config',
   MESSAGES: 'playground_messages',
   MODE: 'playground_mode',

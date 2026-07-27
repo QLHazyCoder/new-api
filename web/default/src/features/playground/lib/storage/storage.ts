@@ -396,6 +396,7 @@ export function saveMessages(messages: Message[]): void {
 export function clearPlaygroundData(): void {
   try {
     localStorage.removeItem(STORAGE_KEYS.CONFIG)
+    localStorage.removeItem(STORAGE_KEYS.IMAGE_DELETE_CONFIRMATION_DISABLED)
     localStorage.removeItem(STORAGE_KEYS.IMAGE_CONFIG)
     removeDeprecatedImageTaskStorage()
     localStorage.removeItem(STORAGE_KEYS.MODE)
@@ -414,6 +415,35 @@ export function removeDeprecatedImageTaskStorage(): void {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to remove deprecated image task storage:', error)
+  }
+}
+
+export function loadImageDeleteConfirmationDisabled(): boolean {
+  try {
+    return (
+      localStorage.getItem(STORAGE_KEYS.IMAGE_DELETE_CONFIRMATION_DISABLED) ===
+      'true'
+    )
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to load image delete confirmation preference:', error)
+    return false
+  }
+}
+
+export function saveImageDeleteConfirmationDisabled(disabled: boolean): void {
+  try {
+    if (disabled) {
+      localStorage.setItem(
+        STORAGE_KEYS.IMAGE_DELETE_CONFIRMATION_DISABLED,
+        'true'
+      )
+      return
+    }
+    localStorage.removeItem(STORAGE_KEYS.IMAGE_DELETE_CONFIRMATION_DISABLED)
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to save image delete confirmation preference:', error)
   }
 }
 

@@ -50,7 +50,7 @@ func TestCreatePlaygroundImageBatchIsIdempotentAndPreservesModelName(t *testing.
 	assert.EqualValues(t, 3, taskCount)
 }
 
-func TestCreatePlaygroundImageBatchInChunksWithoutProductCountCap(t *testing.T) {
+func TestCreatePlaygroundImageBatchAcceptsMaximumCount(t *testing.T) {
 	truncateTables(t)
 	batch, created, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
 		UserID:         1,
@@ -59,35 +59,62 @@ func TestCreatePlaygroundImageBatchInChunksWithoutProductCountCap(t *testing.T) 
 		Prompt:         "draw many images",
 		Model:          "gpt-image-2",
 		RequestPayload: `{"model":"gpt-image-2","n":1}`,
-		Count:          503,
+		Count:          PlaygroundImageMaxBatchCount,
 	})
 	require.NoError(t, err)
 	require.True(t, created)
-	assert.Equal(t, 503, batch.TaskCount)
+	assert.Equal(t, PlaygroundImageMaxBatchCount, batch.TaskCount)
 
 	var tasks []PlaygroundImageTask
 	require.NoError(t, DB.Where("batch_record_id = ?", batch.ID).Order("task_index ASC").Find(&tasks).Error)
-	require.Len(t, tasks, 503)
+	require.Len(t, tasks, PlaygroundImageMaxBatchCount)
 	assert.Equal(t, 0, tasks[0].TaskIndex)
-	assert.Equal(t, 502, tasks[len(tasks)-1].TaskIndex)
+	assert.Equal(t, PlaygroundImageMaxBatchCount-1, tasks[len(tasks)-1].TaskIndex)
 }
 
-func TestHideExcessPlaygroundImageResultsRetainsNewestFifty(t *testing.T) {
+func TestCreatePlaygroundImageBatchRejectsCountAboveMaximum(t *testing.T) {
 	truncateTables(t)
-	batch, created, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
+	_, created, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
 		UserID:         1,
-		ClientBatchID:  "result-retention",
+		ClientBatchID:  "too-many-images",
+		Mode:           PlaygroundImageModeGenerate,
+		Prompt:         "draw too many images",
+		Model:          "gpt-image-2",
+		RequestPayload: `{"model":"gpt-image-2","n":1}`,
+		Count:          PlaygroundImageMaxBatchCount + 1,
+	})
+	require.Error(t, err)
+	assert.False(t, created)
+}
+
+func TestExcessPlaygroundImageResultsArePreparedAndHardDeleted(t *testing.T) {
+	truncateTables(t)
+	_, created, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
+		UserID:         1,
+		ClientBatchID:  "result-retention-first",
 		Mode:           PlaygroundImageModeGenerate,
 		Prompt:         "draw many images",
 		Model:          "gpt-image-2",
 		RequestPayload: `{"model":"gpt-image-2","n":1}`,
-		Count:          PlaygroundImageMaxStoredResultsPerUser + 2,
+		Count:          PlaygroundImageMaxBatchCount,
+	})
+	require.NoError(t, err)
+	require.True(t, created)
+	_, created, err = CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
+		UserID:         1,
+		ClientBatchID:  "result-retention-second",
+		Mode:           PlaygroundImageModeGenerate,
+		Prompt:         "draw two more images",
+		Model:          "gpt-image-2",
+		RequestPayload: `{"model":"gpt-image-2","n":1}`,
+		Count:          2,
 	})
 	require.NoError(t, err)
 	require.True(t, created)
 
 	var tasks []PlaygroundImageTask
-	require.NoError(t, DB.Where("batch_record_id = ?", batch.ID).Order("id ASC").Find(&tasks).Error)
+	require.NoError(t, DB.Where("user_id = ?", 1).Order("id ASC").Find(&tasks).Error)
+	require.Len(t, tasks, PlaygroundImageMaxStoredResultsPerUser+2)
 	for index, task := range tasks {
 		require.NoError(t, DB.Model(&PlaygroundImageTask{}).Where("id = ?", task.ID).Updates(map[string]any{
 			"status":      PlaygroundImageTaskSucceeded,
@@ -113,7 +140,7 @@ func TestHideExcessPlaygroundImageResultsRetainsNewestFifty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []int{1}, userIDs)
 
-	excess, err := HideExcessPlaygroundImageResults(1, now)
+	excess, err := PrepareExcessPlaygroundImageResultsForDeletion(1, now)
 	require.NoError(t, err)
 	require.Len(t, excess, 2)
 	assert.Equal(t, []int64{tasks[1].ID, tasks[0].ID}, []int64{excess[0].ID, excess[1].ID})
@@ -134,9 +161,16 @@ func TestHideExcessPlaygroundImageResultsRetainsNewestFifty(t *testing.T) {
 	assert.Equal(t, PlaygroundImageTaskQueued, reloadedActiveTask.Status)
 	assert.False(t, reloadedActiveTask.Hidden)
 
-	hiddenResults, err := ListHiddenPlaygroundImageTasksWithResults(10)
+	hiddenResults, err := ListHiddenTerminalPlaygroundImageTasks(10)
 	require.NoError(t, err)
 	require.Len(t, hiddenResults, 2)
+	for _, hiddenResult := range hiddenResults {
+		_, err := DeleteHiddenPlaygroundImageTask(hiddenResult.TaskID, hiddenResult.ResultPath)
+		require.NoError(t, err)
+	}
+	var deletedCount int64
+	require.NoError(t, DB.Model(&PlaygroundImageTask{}).Where("id IN ?", []int64{tasks[0].ID, tasks[1].ID}).Count(&deletedCount).Error)
+	assert.Zero(t, deletedCount)
 }
 
 func TestClaimPlaygroundImageTasksHonorsGlobalConcurrency(t *testing.T) {
@@ -259,7 +293,7 @@ func TestExpiredStartedLeaseBecomesInterruptedWithoutResubmission(t *testing.T) 
 	assert.Equal(t, int64(0), task.LeaseUntil)
 }
 
-func TestDiscardedRunningTaskRetainsResultMetadataUntilFileRemoval(t *testing.T) {
+func TestDiscardedRunningTaskCanBeHardDeletedAfterFileRemoval(t *testing.T) {
 	truncateTables(t)
 	_, _, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
 		UserID:         1,
@@ -294,9 +328,10 @@ func TestDiscardedRunningTaskRetainsResultMetadataUntilFileRemoval(t *testing.T)
 	assert.Equal(t, PlaygroundImageTaskCancelled, task.Status)
 	assert.Equal(t, "results/1/test.png", task.ResultPath)
 
-	require.NoError(t, ClearPlaygroundImageTaskResult(task.TaskID, task.ResultPath))
-	require.NoError(t, DB.Where("task_id = ?", task.TaskID).First(&task).Error)
-	assert.Empty(t, task.ResultPath)
+	_, err = DeleteHiddenPlaygroundImageTask(task.TaskID, task.ResultPath)
+	require.NoError(t, err)
+	err = DB.Where("task_id = ?", task.TaskID).First(&task).Error
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 }
 
 func TestReferenceMetadataClearsOnlyAfterExplicitFileRemoval(t *testing.T) {

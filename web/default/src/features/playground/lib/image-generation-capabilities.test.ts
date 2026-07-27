@@ -44,8 +44,9 @@ const grokCapabilities: ImageModelCapabilities = {
 }
 
 describe('playground image capabilities', () => {
-  test('normalizes image counts without a product or model maximum', () => {
+  test('normalizes image counts to the Playground maximum', () => {
     assert.equal(normalizeImageGenerationCount(10), 10)
+    assert.equal(normalizeImageGenerationCount(51), 50)
     assert.equal(normalizeImageGenerationCount(2.9), 2)
     assert.equal(normalizeImageGenerationCount(0), 1)
     assert.equal(normalizeImageGenerationCount(-5), 1)

@@ -89,8 +89,8 @@ func playgroundImageCount(payload map[string]json.RawMessage) (int, error) {
 		return 1, nil
 	}
 	var count int
-	if err := common.Unmarshal(raw, &count); err != nil || count < 1 {
-		return 0, errors.New("count must be a positive integer")
+	if err := common.Unmarshal(raw, &count); err != nil || count < 1 || count > model.PlaygroundImageMaxBatchCount {
+		return 0, fmt.Errorf("count must be an integer between 1 and %d", model.PlaygroundImageMaxBatchCount)
 	}
 	return count, nil
 }
@@ -105,8 +105,8 @@ func validatePlaygroundImageBatchFields(clientBatchID, modelName, prompt string,
 	if strings.TrimSpace(prompt) == "" {
 		return errors.New("prompt is required")
 	}
-	if count < 1 {
-		return errors.New("count must be a positive integer")
+	if count < 1 || count > model.PlaygroundImageMaxBatchCount {
+		return fmt.Errorf("count must be an integer between 1 and %d", model.PlaygroundImageMaxBatchCount)
 	}
 	return nil
 }
@@ -225,7 +225,7 @@ func CreatePlaygroundImageEditBatch(c *gin.Context) {
 	if countValue := firstPlaygroundImageFormValue(form.Value, "count"); countValue != "" {
 		count, err = strconv.Atoi(countValue)
 		if err != nil {
-			playgroundImageAPIError(c, http.StatusBadRequest, "count must be a positive integer")
+			playgroundImageAPIError(c, http.StatusBadRequest, fmt.Sprintf("count must be an integer between 1 and %d", model.PlaygroundImageMaxBatchCount))
 			return
 		}
 	}
@@ -473,11 +473,17 @@ func DeletePlaygroundImageTask(c *gin.Context) {
 		playgroundImageAPIError(c, http.StatusInternalServerError, "failed to delete image task")
 		return
 	}
-	if result.ResultPath != "" && !result.WasActive {
-		if err := service.RemovePlaygroundImageResult(result.ResultPath); err != nil {
-			common.SysError(fmt.Sprintf("remove deleted playground image result: %v", err))
-		} else if err := model.ClearPlaygroundImageTaskResult(c.Param("id"), result.ResultPath); err != nil {
-			common.SysError(fmt.Sprintf("clear deleted playground image result metadata: %v", err))
+	if !result.WasActive {
+		if result.ResultPath != "" {
+			if err := service.RemovePlaygroundImageResult(result.ResultPath); err != nil {
+				common.SysError(fmt.Sprintf("remove deleted playground image result: %v", err))
+				service.CleanupPlaygroundImageBatchReferences(result.BatchRecordID)
+				common.ApiSuccess(c, nil)
+				return
+			}
+		}
+		if _, err := model.DeleteHiddenPlaygroundImageTask(c.Param("id"), result.ResultPath); err != nil && !errors.Is(err, model.ErrPlaygroundImageTaskNotFound) {
+			common.SysError(fmt.Sprintf("hard-delete playground image task: %v", err))
 		}
 	}
 	service.CleanupPlaygroundImageBatchReferences(result.BatchRecordID)

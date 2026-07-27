@@ -410,15 +410,18 @@ func cleanupPlaygroundImageBatchReferences(batchRecordID int64) {
 		common.SysError(fmt.Sprintf("release playground image references: %v", err))
 		return
 	}
-	if referenceJSON == "" {
-		return
+	if referenceJSON != "" {
+		if err := RemovePlaygroundImageReferencesJSON(referenceJSON); err != nil {
+			common.SysError(fmt.Sprintf("remove playground image references: %v", err))
+			return
+		}
+		if err := model.ClearPlaygroundImageBatchReferences(batchRecordID, referenceJSON); err != nil {
+			common.SysError(fmt.Sprintf("clear playground image reference metadata: %v", err))
+			return
+		}
 	}
-	if err := RemovePlaygroundImageReferencesJSON(referenceJSON); err != nil {
-		common.SysError(fmt.Sprintf("remove playground image references: %v", err))
-		return
-	}
-	if err := model.ClearPlaygroundImageBatchReferences(batchRecordID, referenceJSON); err != nil {
-		common.SysError(fmt.Sprintf("clear playground image reference metadata: %v", err))
+	if err := model.DeleteEmptyPlaygroundImageBatch(batchRecordID); err != nil {
+		common.SysError(fmt.Sprintf("hard-delete empty playground image batch: %v", err))
 	}
 }
 
@@ -426,25 +429,32 @@ func CleanupPlaygroundImageBatchReferences(batchRecordID int64) {
 	cleanupPlaygroundImageBatchReferences(batchRecordID)
 }
 
-func removePlaygroundImageTaskResults(tasks []model.PlaygroundImageTask, operation string) {
+func hardDeletePreparedPlaygroundImageTasks(tasks []model.PlaygroundImageTask, operation string) {
 	for _, task := range tasks {
-		if err := RemovePlaygroundImageResult(task.ResultPath); err != nil {
-			common.SysError(fmt.Sprintf("%s %s: %v", operation, task.TaskID, err))
+		if task.ResultPath != "" {
+			if err := RemovePlaygroundImageResult(task.ResultPath); err != nil {
+				common.SysError(fmt.Sprintf("%s %s: %v", operation, task.TaskID, err))
+				continue
+			}
+		}
+		batchRecordID, err := model.DeleteHiddenPlaygroundImageTask(task.TaskID, task.ResultPath)
+		if err != nil {
+			if !errors.Is(err, model.ErrPlaygroundImageTaskNotFound) {
+				common.SysError(fmt.Sprintf("hard-delete playground image task %s: %v", task.TaskID, err))
+			}
 			continue
 		}
-		if err := model.ClearPlaygroundImageTaskResult(task.TaskID, task.ResultPath); err != nil {
-			common.SysError(fmt.Sprintf("clear playground image result metadata %s: %v", task.TaskID, err))
-		}
+		cleanupPlaygroundImageBatchReferences(batchRecordID)
 	}
 }
 
 func enforcePlaygroundImageResultRetention(userID int) {
-	excess, err := model.HideExcessPlaygroundImageResults(userID, common.GetTimestamp())
+	excess, err := model.PrepareExcessPlaygroundImageResultsForDeletion(userID, common.GetTimestamp())
 	if err != nil {
 		common.SysError(fmt.Sprintf("enforce playground image result retention for user %d: %v", userID, err))
 		return
 	}
-	removePlaygroundImageTaskResults(excess, "remove excess playground image result")
+	hardDeletePreparedPlaygroundImageTasks(excess, "remove excess playground image result")
 }
 
 func enforcePlaygroundImageResultRetentionForAllUsers(now int64) {
@@ -459,12 +469,12 @@ func enforcePlaygroundImageResultRetentionForAllUsers(now int64) {
 }
 
 func cleanupHiddenPlaygroundImageResults() {
-	tasks, err := model.ListHiddenPlaygroundImageTasksWithResults(1000)
+	tasks, err := model.ListHiddenTerminalPlaygroundImageTasks(1000)
 	if err != nil {
-		common.SysError(fmt.Sprintf("list hidden playground image results: %v", err))
+		common.SysError(fmt.Sprintf("list hidden terminal playground image tasks: %v", err))
 		return
 	}
-	removePlaygroundImageTaskResults(tasks, "remove hidden playground image result")
+	hardDeletePreparedPlaygroundImageTasks(tasks, "remove hidden playground image task")
 }
 
 func executeClaimedPlaygroundImageTask(owner string, task model.PlaygroundImageTask) {
@@ -561,8 +571,8 @@ func executeClaimedPlaygroundImageTask(owner string, task model.PlaygroundImageT
 	if discard {
 		if err := RemovePlaygroundImageResult(resultPath); err != nil {
 			common.SysError(fmt.Sprintf("remove discarded playground image result: %v", err))
-		} else if err := model.ClearPlaygroundImageTaskResult(task.TaskID, resultPath); err != nil {
-			common.SysError(fmt.Sprintf("clear discarded playground image result metadata: %v", err))
+		} else if _, err := model.DeleteHiddenPlaygroundImageTask(task.TaskID, resultPath); err != nil {
+			common.SysError(fmt.Sprintf("hard-delete discarded playground image task: %v", err))
 		}
 	} else {
 		enforcePlaygroundImageResultRetention(task.UserID)

@@ -19,7 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { removeDeprecatedImageTaskStorage } from './storage'
+import {
+  loadImageDeleteConfirmationDisabled,
+  removeDeprecatedImageTaskStorage,
+  saveImageDeleteConfirmationDisabled,
+} from './storage'
 
 test('removes only deprecated browser image task history', () => {
   const originalLocalStorage = Object.getOwnPropertyDescriptor(
@@ -34,8 +38,14 @@ test('removes only deprecated browser image task history', () => {
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
     value: {
+      getItem(key: string) {
+        return values.get(key) ?? null
+      },
       removeItem(key: string) {
         values.delete(key)
+      },
+      setItem(key: string, value: string) {
+        values.set(key, value)
       },
     },
   })
@@ -45,6 +55,45 @@ test('removes only deprecated browser image task history', () => {
 
     assert.equal(values.has('playground_image_tasks'), false)
     assert.equal(values.get('playground_image_config'), '{"n":2}')
+  } finally {
+    if (originalLocalStorage) {
+      Object.defineProperty(globalThis, 'localStorage', originalLocalStorage)
+    } else {
+      Reflect.deleteProperty(globalThis, 'localStorage')
+    }
+  }
+})
+
+test('persists the image delete confirmation preference separately from task history', () => {
+  const originalLocalStorage = Object.getOwnPropertyDescriptor(
+    globalThis,
+    'localStorage'
+  )
+  const values = new Map<string, string>()
+
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem(key: string) {
+        return values.get(key) ?? null
+      },
+      removeItem(key: string) {
+        values.delete(key)
+      },
+      setItem(key: string, value: string) {
+        values.set(key, value)
+      },
+    },
+  })
+
+  try {
+    assert.equal(loadImageDeleteConfirmationDisabled(), false)
+
+    saveImageDeleteConfirmationDisabled(true)
+    assert.equal(loadImageDeleteConfirmationDisabled(), true)
+
+    saveImageDeleteConfirmationDisabled(false)
+    assert.equal(loadImageDeleteConfirmationDisabled(), false)
   } finally {
     if (originalLocalStorage) {
       Object.defineProperty(globalThis, 'localStorage', originalLocalStorage)

@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { PLAYGROUND_IMAGE_MAX_COUNT } from '../constants'
 import type {
   ImageGenerationConfig,
   ImageGroupOption,
@@ -112,7 +113,7 @@ export function normalizePlaygroundImageConfig(
 
 export function normalizeImageGenerationCount(count: number): number {
   if (!Number.isFinite(count)) return 1
-  return Math.min(Number.MAX_SAFE_INTEGER, Math.max(1, Math.floor(count)))
+  return Math.min(PLAYGROUND_IMAGE_MAX_COUNT, Math.max(1, Math.floor(count)))
 }
 
 export function resolveImageModelSelection(

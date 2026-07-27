@@ -120,6 +120,27 @@ func TestCreatePlaygroundImageGenerationBatchSplitsCountAndIsIdempotent(t *testi
 	assert.EqualValues(t, 10, taskCount)
 }
 
+func TestCreatePlaygroundImageGenerationBatchRejectsCountAboveMaximum(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupPlaygroundImageControllerTestDB(t)
+	body, err := common.Marshal(map[string]any{
+		"client_batch_id": "too-many-images",
+		"count":           model.PlaygroundImageMaxBatchCount + 1,
+		"model":           "gpt-image-2",
+		"group":           "image",
+		"prompt":          "draw too many images",
+	})
+	require.NoError(t, err)
+
+	recorder := runPlaygroundImageGenerationBatchRequest(t, body)
+	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "between 1 and 50")
+
+	var taskCount int64
+	require.NoError(t, db.Model(&model.PlaygroundImageTask{}).Count(&taskCount).Error)
+	assert.Zero(t, taskCount)
+}
+
 func TestCreatePlaygroundImageEditBatchStoresReferenceOnce(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := setupPlaygroundImageControllerTestDB(t)
@@ -185,6 +206,53 @@ func TestCreatePlaygroundImageEditBatchStoresReferenceOnce(t *testing.T) {
 	var taskCount int64
 	require.NoError(t, db.Model(&model.PlaygroundImageTask{}).Where("batch_record_id = ?", batch.ID).Count(&taskCount).Error)
 	assert.EqualValues(t, 3, taskCount)
+}
+
+func TestDeletePlaygroundImageTaskHardDeletesCompletedResult(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupPlaygroundImageControllerTestDB(t)
+	storageRoot := t.TempDir()
+	t.Setenv("PLAYGROUND_IMAGE_STORAGE_PATH", storageRoot)
+
+	batch, created, err := model.CreatePlaygroundImageBatch(model.CreatePlaygroundImageBatchParams{
+		UserID:         1,
+		ClientBatchID:  "delete-completed-image",
+		Mode:           model.PlaygroundImageModeGenerate,
+		Prompt:         "delete this image",
+		Model:          "gpt-image-2",
+		RequestPayload: `{"model":"gpt-image-2","n":1}`,
+		Count:          1,
+	})
+	require.NoError(t, err)
+	require.True(t, created)
+	var task model.PlaygroundImageTask
+	require.NoError(t, db.Where("batch_record_id = ?", batch.ID).First(&task).Error)
+
+	resultPath := filepath.Join("results", "1", "delete-completed.png")
+	fullPath := filepath.Join(storageRoot, resultPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0o750))
+	require.NoError(t, os.WriteFile(fullPath, []byte("image"), 0o640))
+	require.NoError(t, db.Model(&model.PlaygroundImageTask{}).Where("id = ?", task.ID).Updates(map[string]any{
+		"status":      model.PlaygroundImageTaskSucceeded,
+		"result_path": resultPath,
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Set("id", 1)
+	context.Params = gin.Params{{Key: "id", Value: task.TaskID}}
+	context.Request = httptest.NewRequest(http.MethodDelete, "/api/playground/image-tasks/"+task.TaskID, nil)
+	DeletePlaygroundImageTask(context)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var remaining model.PlaygroundImageTask
+	err = db.Where("task_id = ?", task.TaskID).First(&remaining).Error
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	var remainingBatch model.PlaygroundImageBatch
+	err = db.Where("id = ?", batch.ID).First(&remainingBatch).Error
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	_, err = os.Stat(fullPath)
+	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
 func TestPlaygroundImageSignedContentStaysOnMainSiteAndDownloads(t *testing.T) {

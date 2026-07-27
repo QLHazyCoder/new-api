@@ -31,8 +31,10 @@ import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogClose,
@@ -48,7 +50,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-import { getImageSource, isImageResultRenderable } from '../lib'
+import {
+  getImageSource,
+  isImageResultRenderable,
+  loadImageDeleteConfirmationDisabled,
+  saveImageDeleteConfirmationDisabled,
+} from '../lib'
 import type { ImageReferencePreview, ImageResult, ImageTask } from '../types'
 
 interface PlaygroundImageTaskGridProps {
@@ -359,6 +366,36 @@ export function PlaygroundImageTaskGrid({
 }: PlaygroundImageTaskGridProps) {
   const { t } = useTranslation()
   const [preview, setPreview] = useState<ImagePreviewSelection | null>(null)
+  const [taskPendingDelete, setTaskPendingDelete] = useState<ImageTask | null>(
+    null
+  )
+  const [skipImageDeleteConfirmation, setSkipImageDeleteConfirmation] =
+    useState(loadImageDeleteConfirmationDisabled)
+  const [
+    doNotShowDeleteConfirmationAgain,
+    setDoNotShowDeleteConfirmationAgain,
+  ] = useState(false)
+
+  const requestDeleteTask = (task: ImageTask) => {
+    const needsConfirmation = task.status === 'done' && Boolean(task.image)
+    if (!needsConfirmation || skipImageDeleteConfirmation) {
+      onDeleteTask(task)
+      return
+    }
+    setDoNotShowDeleteConfirmationAgain(false)
+    setTaskPendingDelete(task)
+  }
+
+  const confirmDeleteTask = () => {
+    if (!taskPendingDelete) return
+    if (doNotShowDeleteConfirmationAgain) {
+      saveImageDeleteConfirmationDisabled(true)
+      setSkipImageDeleteConfirmation(true)
+    }
+    const task = taskPendingDelete
+    setTaskPendingDelete(null)
+    onDeleteTask(task)
+  }
 
   if (tasks.length === 0) {
     return (
@@ -381,7 +418,7 @@ export function PlaygroundImageTaskGrid({
               task={task}
               onReusePrompt={onReusePrompt}
               onRetryTask={onRetryTask}
-              onDeleteTask={onDeleteTask}
+              onDeleteTask={requestDeleteTask}
               onPreviewImage={setPreview}
             />
           ))}
@@ -441,6 +478,33 @@ export function PlaygroundImageTaskGrid({
             </div>
           </DialogContent>
         </Dialog>
+
+        <ConfirmDialog
+          destructive
+          desc={t(
+            'This will permanently delete the image from your history and cannot be undone.'
+          )}
+          confirmText={t('Delete')}
+          handleConfirm={confirmDeleteTask}
+          open={Boolean(taskPendingDelete)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setTaskPendingDelete(null)
+              setDoNotShowDeleteConfirmationAgain(false)
+            }
+          }}
+          title={t('Delete generated image?')}
+        >
+          <label className='flex cursor-pointer items-center gap-2 text-sm'>
+            <Checkbox
+              checked={doNotShowDeleteConfirmationAgain}
+              onCheckedChange={(checked) =>
+                setDoNotShowDeleteConfirmationAgain(checked === true)
+              }
+            />
+            <span>{t('Do not show this again')}</span>
+          </label>
+        </ConfirmDialog>
       </>
     </TooltipProvider>
   )

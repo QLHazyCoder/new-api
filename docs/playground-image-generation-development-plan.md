@@ -860,7 +860,7 @@ Playground /pg/images/generations
 
 现有 `controller.Relay`、`middleware.Distribute` 和 `relay.ImageHelper` 已经完整负责分组权限、选渠道、模型映射、重试、预扣、结算与日志。本次不能另写一套计费或供应商调用逻辑，正确边界是：HTTP 提交接口只持久化任务，后台 Worker 再构造内部 `/pg/images/*` 请求复用原 Relay 链。外部兼容接口 `/v1/images/*` 保持同步，不受此次改动影响。
 
-数量属于游乐场批次语义，而不是单次上游请求的 `n`。批次数量不使用模型 `max_images`，服务器始终把一个批次拆成多个 `n=1` 任务，从而统一 GPT、Grok 和 Gemini 的执行方式。模型名称是不可变路由标识，从提交、数据库、任务响应到内部 Relay 均原样保存和传递，不做截断、大小写变换或分辨率后缀改写。
+数量属于游乐场批次语义，而不是单次上游请求的 `n`。批次数量不使用模型 `max_images`，但游乐场固定接受 `1..50`；服务器始终把一个批次拆成多个 `n=1` 任务，从而统一 GPT、Grok 和 Gemini 的执行方式。模型名称是不可变路由标识，从提交、数据库、任务响应到内部 Relay 均原样保存和传递，不做截断、大小写变换或分辨率后缀改写。
 
 ### 重构方案
 
@@ -882,7 +882,7 @@ Browser
 - Worker 在调用 Relay 前写入 `upstream_started_at`。租约过期时，未开始上游的任务可重新排队；已开始上游的任务只转为 `interrupted`，绝不自动重提。
 - 图生图参考图按批次保存一次，通过 pipe 流式重建 multipart，避免任务数乘以参考图大小形成内存副本；所有子任务终态且文件删除成功后才清数据库元数据，删除失败保留元数据供清理任务重试。
 - 结果图只接受 PNG、JPEG、WebP、GIF，拒绝 SVG、非图片和路径穿越。上游 URL 由服务器下载，前端只收到本站 7 天签名地址；任务错误入库前统一脱敏 HTTP(S) URL。
-- 图片任务历史完全以服务器为唯一来源。每名用户最多保留最近 50 张成功结果，超过上限时最旧结果从历史中隐藏并由可重试清理器删除文件；进行中的任务不计入上限。其余记录仍按服务器 7 天生命周期管理；升级时会一次性清除旧浏览器 `playground_image_tasks` 缓存，不再读取或写入本地图片任务。
+- 图片任务历史完全以服务器为唯一来源。每名用户最多保留最近 50 张成功结果，超过上限时最旧结果从用户列表移除，并在文件删除成功后硬删除对应任务记录；若文件系统短暂失败，仅保留不可见的重试标记，Worker 会继续清理。进行中的任务不计入上限。其余记录仍按服务器 7 天生命周期管理；升级时会一次性清除旧浏览器 `playground_image_tasks` 缓存，不再读取或写入本地图片任务。
 
 ### 文件结构设计
 
@@ -894,8 +894,8 @@ Browser
 - `model/main.go`、`model/option.go`、`main.go`：自动迁移、配置默认值/校验/热更新和 Worker 启动接线。
 - `web/default/src/features/playground/api.ts`：异步批次、分页任务、重试和删除 API 客户端。
 - `web/default/src/features/playground/hooks/use-image-generation-handler.ts`：批次提交、服务器任务恢复、可见性控制和活动任务轮询。
-- `web/default/src/features/playground/lib/storage/storage.ts`：仅负责 7 天旧本地历史兼容，不持久化服务器任务。
-- `web/default/src/features/playground/components/playground-image-input.tsx`：无业务最大值的整数数量输入框，失焦和提交时归一化。
+- `web/default/src/features/playground/lib/storage/storage.ts`：保存界面配置和删除确认偏好，并一次性清除旧图片任务缓存；不读取或持久化图片任务。
+- `web/default/src/features/playground/components/playground-image-input.tsx`：`1..50` 的整数数量输入框，失焦和提交时归一化；服务端与模型层同步校验，不能通过直接请求绕过。
 - `web/default/src/features/playground/components/playground-image-task-grid.tsx`：排队、执行、保存、终态展示，以及本站链接预览/下载/复制。
 - `web/default/src/features/system-settings/content/drawing-settings-section.tsx`：管理员实时配置全站图片并发，`0` 表示不限。
 - `web/default/src/i18n/locales/*.json`：同步新增管理配置和任务状态文案。
@@ -905,18 +905,18 @@ Browser
 
 | 阶段 | 任务 | 状态 | 验收 |
 | --- | --- | --- | --- |
-| 1 | 数据模型、幂等批次、租约状态机和自动迁移 | 已完成 | 数量 503 分片写入；相同 client id 只生成一批；模型名原样保存 |
+| 1 | 数据模型、幂等批次、租约状态机和自动迁移 | 已完成 | 单批最多 50 个 `n=1` 任务；相同 client id 只生成一批；模型名原样保存 |
 | 2 | Worker、内部 Relay、结果/参考图存储与签名内容 | 已完成 | 每任务 `n=1`；复用既有计费；上游地址不返回；文件删除可重试 |
 | 3 | 全局并发热配置和管理端输入 | 已完成 | `0` 不限；`3` 时全站最多运行 3 个；修改无需重启 |
-| 4 | 前端服务器任务迁移和数量输入框 | 已完成 | 默认 1；允许大于 4；刷新/切页恢复；隐藏页停止轮询 |
+| 4 | 前端服务器任务迁移和数量输入框 | 已完成 | 默认 1；上限 50；刷新/切页恢复；隐藏页停止轮询 |
 | 5 | 定向测试、全量测试、生产构建与安全审查 | 已完成 | Go、TS、Bun、lint、build、迁移、乱码和敏感地址扫描 |
 
 ### 阶段自检记录
 
-- 阶段 1：验证 503 条任务跨插入分片创建，数据库不依赖模型 `max_images`；相同用户和 `client_batch_id` 的不同重试载荷仍返回原批次；租约过期且已开始上游的任务变为 `interrupted`。
+- 阶段 1：验证 50 条任务拆分为独立 `n=1` 请求，51 条被前后端与模型层拒绝；数据库不依赖模型 `max_images`；相同用户和 `client_batch_id` 的不同重试载荷仍返回原批次；租约过期且已开始上游的任务变为 `interrupted`。
 - 阶段 2：验证 `count=10` 生成 10 个任务且持久化请求固定 `n=1`；图生图 3 个任务只保存 1 份参考图；结果仅落本站共享目录，data URL 可保存，SVG 和路径穿越被拒绝。
 - 阶段 3：后端拒绝负并发，OptionMap 和原子值同步更新；管理端 schema、默认值和所有语言文案已接线。
-- 阶段 4：移除页面离开时中断真实任务的逻辑；服务器活动任务每 2 秒轮询，页面隐藏暂停，重新聚焦和切回图片模式立即刷新；旧本地运行任务只读显示为中断。
+- 阶段 4：移除页面离开时中断真实任务的逻辑；服务器活动任务每 2 秒轮询，页面隐藏暂停，重新聚焦和切回图片模式立即刷新；旧本地图片任务缓存会一次性清除。
 - 阶段 5：全仓 `go test ./... -count=1` 通过；新增 model/service/controller 专项 `-race` 和涉及包 `go vet` 通过。前端 9 项 Bun 测试、定向 oxlint/oxfmt、`npm run build:check` 通过；7 份 locale JSON 与新增键、UTF-8、冲突标记、`git diff --check`、模型名改写和敏感上游地址扫描通过。
 - 阶段 5 审查修正：并发配置改为每批动态读取并由数据库 Option 跨实例兜底；首次任务列表加载失败和提交后刷新失败会继续轮询；图生图 multipart 改为流式传输；下载和 Relay 错误中的上游 URL 在用户可见前脱敏。
 
