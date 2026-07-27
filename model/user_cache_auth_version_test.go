@@ -32,6 +32,47 @@ func useUserCacheMiniRedis(t *testing.T) *miniredis.Miniredis {
 	return server
 }
 
+func TestAdministrativeQuotaMutationsKeepDatabaseAndCacheConsistent(t *testing.T) {
+	truncateTables(t)
+	server := useUserCacheMiniRedis(t)
+	user := User{
+		Username: "quota-cache-admin", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", Quota: 100, AuthVersion: 1,
+		AffCode: "quota-cache-admin-aff",
+	}
+	require.NoError(t, DB.Create(&user).Error)
+	require.NoError(t, populateUserCache(user))
+
+	require.NoError(t, IncreaseUserQuota(user.Id, 25, true))
+	cached, err := GetUserCache(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 125, cached.Quota)
+	assert.Equal(t, 125, mustUserQuota(t, user.Id))
+
+	require.NoError(t, DecreaseUserQuota(user.Id, 5, true))
+	cached, err = GetUserCache(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 120, cached.Quota)
+	assert.Equal(t, 120, mustUserQuota(t, user.Id))
+
+	require.NoError(t, OverrideUserQuota(user.Id, 42))
+	assert.False(t, server.Exists(getUserCacheKey(user.Id)))
+	cached, err = GetUserCache(user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 42, cached.Quota)
+
+	require.NoError(t, OverrideUserQuota(user.Id, common.MaxQuota))
+	assert.Error(t, IncreaseUserQuota(user.Id, 1, true))
+	assert.Equal(t, common.MaxQuota, mustUserQuota(t, user.Id))
+}
+
+func mustUserQuota(t *testing.T, userID int) int {
+	t.Helper()
+	var quota int
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userID).Select("quota").Scan(&quota).Error)
+	return quota
+}
+
 func TestUserAuthFenceRollbackExpiresAndRecovers(t *testing.T) {
 	truncateTables(t)
 	server := useUserCacheMiniRedis(t)

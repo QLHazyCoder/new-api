@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -158,4 +159,56 @@ func TestManageUserDeleteReturnsImmediatelyAndUnknownActionFails(t *testing.T) {
 	require.NoError(t, db.First(&unchanged, unchanged.Id).Error)
 	assert.EqualValues(t, 1, unchanged.AuthVersion)
 	assert.Equal(t, common.UserStatusEnabled, unchanged.Status)
+}
+
+func TestManageUserQuotaRejectsDeletedUsersAndOutOfRangeValues(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	deleted := model.User{
+		Username: "managed-deleted-quota-user", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", Quota: 100, AuthVersion: 1, AffCode: "deleted-quota-aff",
+	}
+	require.NoError(t, db.Create(&deleted).Error)
+	require.NoError(t, db.Delete(&deleted).Error)
+
+	recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":"add","value":25}`, deleted.Id))
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	var stored model.User
+	require.NoError(t, db.Unscoped().First(&stored, deleted.Id).Error)
+	assert.Equal(t, 100, stored.Quota)
+
+	active := model.User{
+		Username: "managed-overflow-quota-user", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", Quota: math.MaxInt32, AuthVersion: 1, AffCode: "overflow-quota-aff",
+	}
+	require.NoError(t, db.Create(&active).Error)
+	recorder = performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":"add","value":1}`, active.Id))
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	stored = model.User{}
+	require.NoError(t, db.First(&stored, active.Id).Error)
+	assert.Equal(t, math.MaxInt32, stored.Quota)
+}
+
+func TestManageUserQuotaModesPersistExpectedValues(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	user := model.User{
+		Username: "managed-quota-modes-user", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", Quota: 100, AuthVersion: 1, AffCode: "quota-modes-aff",
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	for _, test := range []struct {
+		mode  string
+		value int
+		want  int
+	}{
+		{mode: "add", value: 25, want: 125},
+		{mode: "subtract", value: 5, want: 120},
+		{mode: "override", value: 42, want: 42},
+	} {
+		recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":%q,"value":%d}`, user.Id, test.mode, test.value))
+		assert.Contains(t, recorder.Body.String(), `"success":true`)
+		var stored model.User
+		require.NoError(t, db.First(&stored, user.Id).Error)
+		assert.Equal(t, test.want, stored.Quota)
+	}
 }

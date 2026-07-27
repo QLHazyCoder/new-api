@@ -103,6 +103,11 @@ func TestHardDeleteUserPublishesTombstoneAndPurgesAuthenticationData(t *testing.
 	// Administrative hard deletion commonly targets an already soft-deleted
 	// user; the shared version increment must therefore query unscoped.
 	require.NoError(t, DB.Delete(&user).Error)
+	_, err := GetUserById(user.Id, false)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	softDeleted, err := GetUserByIdUnscoped(user.Id, false)
+	require.NoError(t, err)
+	assert.True(t, softDeleted.DeletedAt.Valid)
 
 	require.NoError(t, HardDeleteUserById(user.Id))
 

@@ -500,15 +500,25 @@ func SearchUsers(keyword string, group string, role *int, status *int, startIdx 
 }
 
 func GetUserById(id int, selectAll bool) (*User, error) {
+	return getUserById(DB, id, selectAll)
+}
+
+// GetUserByIdUnscoped is reserved for administrator cleanup flows that must
+// locate an already soft-deleted account before permanently deleting it.
+func GetUserByIdUnscoped(id int, selectAll bool) (*User, error) {
+	return getUserById(DB.Unscoped(), id, selectAll)
+}
+
+func getUserById(query *gorm.DB, id int, selectAll bool) (*User, error) {
 	if id == 0 {
 		return nil, errors.New("id 为空！")
 	}
 	user := User{Id: id}
 	var err error = nil
 	if selectAll {
-		err = DB.First(&user, "id = ?", id).Error
+		err = query.First(&user, "id = ?", id).Error
 	} else {
-		err = DB.Omit("password", "access_token").First(&user, "id = ?", id).Error
+		err = query.Omit("password", "access_token").First(&user, "id = ?", id).Error
 	}
 	return &user, err
 }
@@ -1325,8 +1335,23 @@ func GetUserSetting(id int, fromDB bool) (settingMap dto.UserSetting, err error)
 }
 
 func IncreaseUserQuota(id int, quota int, db bool) (err error) {
-	if quota < 0 {
-		return errors.New("quota 不能为负数！")
+	if quota < 0 || quota > common.MaxQuota {
+		return errors.New("quota 超出允许范围")
+	}
+	if quota == 0 {
+		return nil
+	}
+	if db {
+		if err := increaseUserQuota(id, quota); err != nil {
+			return err
+		}
+		if err := cacheIncrUserQuota(id, int64(quota)); err != nil {
+			common.SysLog("failed to increase user quota cache: " + err.Error())
+			if invalidateErr := invalidateUserCache(id); invalidateErr != nil {
+				common.SysLog("failed to invalidate user cache after quota increase: " + invalidateErr.Error())
+			}
+		}
+		return nil
 	}
 	gopool.Go(func() {
 		err := cacheIncrUserQuota(id, int64(quota))
@@ -1334,7 +1359,7 @@ func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 			common.SysLog("failed to increase user quota: " + err.Error())
 		}
 	})
-	if !db && common.BatchUpdateEnabled {
+	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeUserQuota, id, quota)
 		return nil
 	}
@@ -1342,16 +1367,36 @@ func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 }
 
 func increaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", quota)).Error
-	if err != nil {
-		return err
+	result := DB.Model(&User{}).
+		Where("id = ? AND quota <= ?", id, common.MaxQuota-quota).
+		Update("quota", gorm.Expr("quota + ?", quota))
+	if result.Error != nil {
+		return result.Error
 	}
-	return err
+	if result.RowsAffected != 1 {
+		return errors.New("用户不存在或调整后的额度超出允许范围")
+	}
+	return nil
 }
 
 func DecreaseUserQuota(id int, quota int, db bool) (err error) {
-	if quota < 0 {
-		return errors.New("quota 不能为负数！")
+	if quota < 0 || quota > common.MaxQuota {
+		return errors.New("quota 超出允许范围")
+	}
+	if quota == 0 {
+		return nil
+	}
+	if db {
+		if err := decreaseUserQuota(id, quota); err != nil {
+			return err
+		}
+		if err := cacheDecrUserQuota(id, int64(quota)); err != nil {
+			common.SysLog("failed to decrease user quota cache: " + err.Error())
+			if invalidateErr := invalidateUserCache(id); invalidateErr != nil {
+				common.SysLog("failed to invalidate user cache after quota decrease: " + invalidateErr.Error())
+			}
+		}
+		return nil
 	}
 	gopool.Go(func() {
 		err := cacheDecrUserQuota(id, int64(quota))
@@ -1359,7 +1404,7 @@ func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 			common.SysLog("failed to decrease user quota: " + err.Error())
 		}
 	})
-	if !db && common.BatchUpdateEnabled {
+	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
 		return nil
 	}
@@ -1367,11 +1412,37 @@ func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 }
 
 func decreaseUserQuota(id int, quota int) (err error) {
-	err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota - ?", quota)).Error
-	if err != nil {
+	result := DB.Model(&User{}).
+		Where("id = ? AND quota >= ?", id, common.MinQuota+quota).
+		Update("quota", gorm.Expr("quota - ?", quota))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("用户不存在或调整后的额度超出允许范围")
+	}
+	return nil
+}
+
+// OverrideUserQuota replaces an administrator-managed quota and invalidates
+// the cached user snapshot so the next read is database-authoritative.
+func OverrideUserQuota(id int, quota int) error {
+	if quota < common.MinQuota || quota > common.MaxQuota {
+		return errors.New("quota 超出允许范围")
+	}
+	var user User
+	if err := DB.Select("id", "quota").Where("id = ?", id).First(&user).Error; err != nil {
 		return err
 	}
-	return err
+	if user.Quota != quota {
+		if err := DB.Model(&User{}).Where("id = ?", id).Update("quota", quota).Error; err != nil {
+			return err
+		}
+	}
+	if err := invalidateUserCache(id); err != nil {
+		common.SysLog("failed to invalidate user cache after quota override: " + err.Error())
+	}
+	return nil
 }
 
 func DeltaUpdateUserQuota(id int, delta int) (err error) {

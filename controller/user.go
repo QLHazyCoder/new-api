@@ -1016,7 +1016,7 @@ func DeleteUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	originUser, err := model.GetUserById(id, false)
+	originUser, err := model.GetUserByIdUnscoped(id, false)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -1156,9 +1156,9 @@ func ManageUser(c *gin.Context) {
 	user := model.User{
 		Id: req.Id,
 	}
-	// Fill attributes
-	model.DB.Unscoped().Where(&user).First(&user)
-	if user.Id == 0 {
+	// Management actions only apply to active rows. Soft-deleted users must be
+	// handled by the dedicated permanent-deletion flow.
+	if err := model.DB.Where(&user).First(&user).Error; err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserNotExists)
 		return
 	}
@@ -1224,6 +1224,10 @@ func ManageUser(c *gin.Context) {
 		}
 		user.Role = common.RoleCommonUser
 	case "add_quota":
+		if req.Value < common.MinQuota || req.Value > common.MaxQuota {
+			common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+			return
+		}
 		switch req.Mode {
 		case "add":
 			if req.Value <= 0 {
@@ -1251,7 +1255,7 @@ func ManageUser(c *gin.Context) {
 			})
 		case "override":
 			oldQuota := user.Quota
-			if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("quota", req.Value).Error; err != nil {
+			if err := model.OverrideUserQuota(user.Id, req.Value); err != nil {
 				common.ApiError(c, err)
 				return
 			}
