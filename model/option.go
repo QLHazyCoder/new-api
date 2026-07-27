@@ -232,29 +232,45 @@ func SyncOptions(frequency int) {
 	}
 }
 
-func UpdateOption(key string, value string) error {
-	if key == "PlaygroundImageMaxConcurrency" {
+func validateOptionValue(key string, value string) error {
+	if key == operation_setting.ToolPriceOptionKey {
+		return operation_setting.ValidateToolPricesJSON(value)
+	}
+	return nil
+}
+
+func normalizeOptionValue(key string, value string) (string, error) {
+	switch key {
+	case "PlaygroundImageMaxConcurrency":
 		normalizedValue, _, err := normalizePlaygroundImageMaxConcurrency(value)
 		if err != nil {
-			return err
+			return "", err
 		}
 		value = normalizedValue
-	}
-	if key == "LogRetentionDays" {
+	case "LogRetentionDays":
 		normalizedValue, _, err := normalizeLogRetentionDaysOptionValue(value)
 		if err != nil {
-			return err
+			return "", err
 		}
 		value = normalizedValue
-	}
-	if key == "TopUpInviteRewardPercent" {
+	case "TopUpInviteRewardPercent":
 		normalizedValue, _, err := normalizeTopUpInviteRewardPercentOptionValue(value)
 		if err != nil {
-			return err
+			return "", err
 		}
 		value = normalizedValue
 	}
+	if err := validateOptionValue(key, value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
 
+func UpdateOption(key string, value string) error {
+	value, err := normalizeOptionValue(key, value)
+	if err != nil {
+		return err
+	}
 	// Save to database first
 	option := Option{
 		Key: key,
@@ -281,31 +297,11 @@ func UpdateOptionsBulk(values map[string]string) error {
 	}
 	normalizedValues := make(map[string]string, len(values))
 	for k, v := range values {
-		if k == "PlaygroundImageMaxConcurrency" {
-			normalizedValue, _, err := normalizePlaygroundImageMaxConcurrency(v)
-			if err != nil {
-				return err
-			}
-			normalizedValues[k] = normalizedValue
-			continue
+		normalizedValue, err := normalizeOptionValue(k, v)
+		if err != nil {
+			return err
 		}
-		if k == "LogRetentionDays" {
-			normalizedValue, _, err := normalizeLogRetentionDaysOptionValue(v)
-			if err != nil {
-				return err
-			}
-			normalizedValues[k] = normalizedValue
-			continue
-		}
-		if k == "TopUpInviteRewardPercent" {
-			normalizedValue, _, err := normalizeTopUpInviteRewardPercentOptionValue(v)
-			if err != nil {
-				return err
-			}
-			normalizedValues[k] = normalizedValue
-			continue
-		}
-		normalizedValues[k] = v
+		normalizedValues[k] = normalizedValue
 	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		for k, v := range normalizedValues {
@@ -332,6 +328,12 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if key == retiredThemeOptionKey {
+		common.OptionMapRWMutex.Lock()
+		delete(common.OptionMap, key)
+		common.OptionMapRWMutex.Unlock()
+		return nil
+	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 
@@ -715,6 +717,11 @@ func normalizePlaygroundImageMaxConcurrency(value string) (string, int, error) {
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理
 func handleConfigUpdate(key, value string) bool {
+	if key == operation_setting.ToolPriceOptionKey {
+		operation_setting.LoadToolPricesFromJSONString(value)
+		return true
+	}
+
 	parts := strings.SplitN(key, ".", 2)
 	if len(parts) != 2 {
 		return false // 不是分层配置
@@ -738,13 +745,9 @@ func handleConfigUpdate(key, value string) bool {
 	// 特定配置的后处理
 	if configName == "performance_setting" {
 		performance_setting.UpdateAndSync()
-	} else if configName == "tool_price_setting" {
-		operation_setting.RebuildToolPriceIndex()
 	} else if configName == "billing_setting" {
 		InvalidatePricingCache()
 		ratio_setting.InvalidateExposedDataCache()
-	} else if configName == "theme" {
-		system_setting.UpdateAndSyncTheme()
 	}
 
 	return true // 已处理

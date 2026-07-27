@@ -30,6 +30,44 @@ func withSystemTaskRegistry(t *testing.T, handlers ...SystemTaskHandler) {
 	})
 }
 
+func TestValidateLogCleanupTargetTimestamp(t *testing.T) {
+	now := time.Date(2026, 6, 8, 12, 0, 0, 0, time.UTC)
+	originalRetentionDays := common.LogRetentionDays
+	t.Cleanup(func() {
+		common.LogRetentionDays = originalRetentionDays
+	})
+
+	t.Run("rejects future timestamp", func(t *testing.T) {
+		common.LogRetentionDays = 30
+		err := validateLogCleanupTargetTimestamp(now.Add(time.Second).Unix(), now)
+		require.ErrorContains(t, err, "future")
+	})
+
+	t.Run("rejects non-positive timestamp", func(t *testing.T) {
+		common.LogRetentionDays = 30
+		err := validateLogCleanupTargetTimestamp(0, now)
+		require.ErrorContains(t, err, "required")
+	})
+
+	t.Run("rejects timestamp inside retention window", func(t *testing.T) {
+		common.LogRetentionDays = 30
+		err := validateLogCleanupTargetTimestamp(now.AddDate(0, 0, -7).Unix(), now)
+		require.ErrorContains(t, err, "30 days")
+	})
+
+	t.Run("allows timestamp at retention cutoff", func(t *testing.T) {
+		common.LogRetentionDays = 30
+		err := validateLogCleanupTargetTimestamp(now.AddDate(0, 0, -30).Unix(), now)
+		require.NoError(t, err)
+	})
+
+	t.Run("allows any past timestamp when retention disabled", func(t *testing.T) {
+		common.LogRetentionDays = 0
+		err := validateLogCleanupTargetTimestamp(now.Add(-time.Second).Unix(), now)
+		require.NoError(t, err)
+	})
+}
+
 type stubScheduledHandler struct {
 	taskType string
 	enabled  bool

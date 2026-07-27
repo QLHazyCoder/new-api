@@ -166,8 +166,8 @@ func StartSystemTaskRunner() {
 }
 
 func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
-	if targetTimestamp <= 0 {
-		return nil, errors.New("target timestamp is required")
+	if err := validateLogCleanupTargetTimestamp(targetTimestamp, time.Now()); err != nil {
+		return nil, err
 	}
 
 	activeTask, err := model.GetActiveSystemTask(model.SystemTaskTypeLogCleanup)
@@ -193,6 +193,28 @@ func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
 	}
 	notifySystemTaskRunner()
 	return task, nil
+}
+
+func validateLogCleanupTargetTimestamp(targetTimestamp int64, now time.Time) error {
+	if targetTimestamp <= 0 {
+		return errors.New("target timestamp is required")
+	}
+	if targetTimestamp > now.Unix() {
+		return errors.New("target timestamp cannot be in the future")
+	}
+
+	retentionDays := common.LogRetentionDays
+	if retentionDays <= 0 {
+		return nil
+	}
+	if retentionDays > common.MaxLogRetentionDays {
+		retentionDays = common.MaxLogRetentionDays
+	}
+	retentionCutoff := now.AddDate(0, 0, -retentionDays).Unix()
+	if targetTimestamp > retentionCutoff {
+		return fmt.Errorf("logs within the last %d days are protected", retentionDays)
+	}
+	return nil
 }
 
 // EnqueueSystemTask creates an on-demand task of the given type. The returned

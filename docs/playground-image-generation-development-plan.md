@@ -14,14 +14,14 @@
 
 ### 前端 Playground
 
-- 页面入口：`web/default/src/features/playground/index.tsx`
-- API 常量：`web/default/src/features/playground/constants.ts`
-- 请求构造：`web/default/src/features/playground/lib/payload-builder.ts`
-- 请求发送：`web/default/src/features/playground/api.ts`
-- 流式处理：`web/default/src/features/playground/hooks/use-stream-request.ts`
-- 状态持久化：`web/default/src/features/playground/hooks/use-playground-state.ts` 与 `web/default/src/features/playground/lib/storage.ts`
-- 输入组件：`web/default/src/features/playground/components/playground-input.tsx`
-- 聊天展示：`web/default/src/features/playground/components/playground-chat.tsx`
+- 页面入口：`web/src/features/playground/index.tsx`
+- API 常量：`web/src/features/playground/constants.ts`
+- 请求构造：`web/src/features/playground/lib/payload-builder.ts`
+- 请求发送：`web/src/features/playground/api.ts`
+- 流式处理：`web/src/features/playground/hooks/use-stream-request.ts`
+- 状态持久化：`web/src/features/playground/hooks/use-playground-state.ts` 与 `web/src/features/playground/lib/storage.ts`
+- 输入组件：`web/src/features/playground/components/playground-input.tsx`
+- 聊天展示：`web/src/features/playground/components/playground-chat.tsx`
 
 现有前端固定使用：
 
@@ -69,7 +69,7 @@ if strings.HasPrefix(c.Request.URL.Path, "/pg") {
 - 生图模型名规则：`common/model.go`
 - 定价与端点缓存：`model/pricing.go`
 - OpenAI models list：`controller/model.go`
-- Pricing 前端能力推断：`web/default/src/features/pricing/lib/model-metadata.ts`
+- Pricing 前端能力推断：`web/src/features/pricing/lib/model-metadata.ts`
 
 后端已经会把图片生成模型优先标记为 `EndpointTypeImageGeneration`。`model.GetPricing()` 也会生成 `SupportedEndpointTypes`，其中 `image-generation` 是图片输出端点。`/v1/models` 的 `ListModels` 返回 `dto.OpenAIModels` 时也会填充 `SupportedEndpointTypes`。
 
@@ -482,18 +482,18 @@ t('API did not return image data')
 开发后必须运行：
 
 ```bash
-cd web/default
+cd web
 bun run i18n:sync
 ```
 
 并补齐：
 
-- `web/default/src/i18n/locales/en.json`
-- `web/default/src/i18n/locales/zh.json`
-- `web/default/src/i18n/locales/fr.json`
-- `web/default/src/i18n/locales/ja.json`
-- `web/default/src/i18n/locales/ru.json`
-- `web/default/src/i18n/locales/vi.json`
+- `web/src/i18n/locales/en.json`
+- `web/src/i18n/locales/zh.json`
+- `web/src/i18n/locales/fr.json`
+- `web/src/i18n/locales/ja.json`
+- `web/src/i18n/locales/ru.json`
+- `web/src/i18n/locales/vi.json`
 
 ### 权限、计费与日志
 
@@ -644,8 +644,8 @@ bun run i18n:sync
 自检清单：
 
 - `go test ./...` 或受影响包测试通过。
-- `cd web/default && bun run typecheck` 通过。
-- `cd web/default && bun run build` 通过。
+- `cd web && bun run typecheck` 通过。
+- `cd web && bun run build` 通过。
 - `/pg/chat/completions` 仍可正常聊天。
 - `/pg/images/generations` 可正常生图。
 - `/pg/images/generations` 与 `/v1/images/generations` 的 relay mode、上游路径、计费入口一致，差异只在登录态鉴权和 Playground 分组选择。
@@ -813,9 +813,9 @@ Playground /pg/images/generations
 - `controller/user.go`：提供登录用户专用图片模型能力接口。
 - `relay/channel/xai`：显式转换宽高比与分辨率并复用 OpenAI 图片响应。
 - `relay/channel/gemini`：区分 Imagen 与 Gemini 原生图片协议并统一响应。
-- `web/default/src/features/playground/hooks/use-playground-image-options.ts`：一次加载已过滤的图片分组及模型。
-- `web/default/src/features/playground/lib/image-generation-capabilities.ts`：按服务端能力归一化配置，不再判断模型名称。
-- `web/default/src/features/playground/components/playground-image-input.tsx`：按能力动态显示像素尺寸、宽高比、分辨率、质量和格式。
+- `web/src/features/playground/hooks/use-playground-image-options.ts`：一次加载已过滤的图片分组及模型。
+- `web/src/features/playground/lib/image-generation-capabilities.ts`：按服务端能力归一化配置，不再判断模型名称。
+- `web/src/features/playground/components/playground-image-input.tsx`：按能力动态显示像素尺寸、宽高比、分辨率、质量和格式。
 
 ### 分阶段开发清单
 
@@ -892,13 +892,13 @@ Browser
 - `setting/playground_image.go`：原子保存全局图片任务并发配置，供 Worker 每轮实时读取。
 - `router/api-router.go`：注册游乐场异步 API；签名内容路由不依赖登录态，其余接口继续使用 `UserAuth`。
 - `model/main.go`、`model/option.go`、`main.go`：自动迁移、配置默认值/校验/热更新和 Worker 启动接线。
-- `web/default/src/features/playground/api.ts`：异步批次、分页任务、重试和删除 API 客户端。
-- `web/default/src/features/playground/hooks/use-image-generation-handler.ts`：批次提交、服务器任务恢复、可见性控制和活动任务轮询。
-- `web/default/src/features/playground/lib/storage/storage.ts`：保存界面配置和删除确认偏好，并一次性清除旧图片任务缓存；不读取或持久化图片任务。
-- `web/default/src/features/playground/components/playground-image-input.tsx`：`1..50` 的整数数量输入框，失焦和提交时归一化；服务端与模型层同步校验，不能通过直接请求绕过。
-- `web/default/src/features/playground/components/playground-image-task-grid.tsx`：排队、执行、保存、终态展示，以及本站链接预览/下载/复制。
-- `web/default/src/features/system-settings/content/drawing-settings-section.tsx`：管理员实时配置全站图片并发，`0` 表示不限。
-- `web/default/src/i18n/locales/*.json`：同步新增管理配置和任务状态文案。
+- `web/src/features/playground/api.ts`：异步批次、分页任务、重试和删除 API 客户端。
+- `web/src/features/playground/hooks/use-image-generation-handler.ts`：批次提交、服务器任务恢复、可见性控制和活动任务轮询。
+- `web/src/features/playground/lib/storage/storage.ts`：保存界面配置和删除确认偏好，并一次性清除旧图片任务缓存；不读取或持久化图片任务。
+- `web/src/features/playground/components/playground-image-input.tsx`：`1..50` 的整数数量输入框，失焦和提交时归一化；服务端与模型层同步校验，不能通过直接请求绕过。
+- `web/src/features/playground/components/playground-image-task-grid.tsx`：排队、执行、保存、终态展示，以及本站链接预览/下载/复制。
+- `web/src/features/system-settings/content/drawing-settings-section.tsx`：管理员实时配置全站图片并发，`0` 表示不限。
+- `web/src/i18n/locales/*.json`：同步新增管理配置和任务状态文案。
 - `*_test.go`、`*.test.ts`：覆盖幂等、拆分、并发、租约、文件安全、参考图共享、数量归一化和旧历史迁移。
 
 ### 开发清单

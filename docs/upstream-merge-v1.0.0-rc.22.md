@@ -23,7 +23,7 @@
 | Stage | Deliverable | Status |
 | --- | --- | --- |
 | 0 | Preservation inventory and audit baseline | Complete |
-| 1 | Two-parent merge, frontend flattening, complete local-code migration | Pending |
+| 1 | Two-parent merge, frontend flattening, complete local-code migration | Complete |
 | 2 | Backend semantic audit and regression coverage | Pending |
 | 3 | Frontend semantic audit and regression coverage | Pending |
 | 4 | Full validation, encoding audit, Docker build | Pending |
@@ -183,6 +183,31 @@ Disposition labels are planning requirements and must be confirmed against the f
 
 Inventory count: 92 preserve/move/merge entries plus 1 Classic-only retirement entry, totaling 93 local non-merge commits.
 
+## Classic Deletion Proof
+
+The final index contains no path under `web/classic` or `web/default`. The intersection between locally modified files and files deleted by this merge contains only the following Classic paths; their active behavior is mapped below.
+
+| Deleted Classic path(s) | Active single-frontend destination or retirement reason |
+| --- | --- |
+| `web/classic/rsbuild.config.ts` | Retired with the Classic build; `web/rsbuild.config.ts` is the only build configuration. |
+| `web/classic/src/components/settings/OperationSetting.jsx` | `web/src/features/system-settings/operations` and the section registry. |
+| `web/classic/src/components/settings/PaymentSetting.jsx` | `web/src/features/system-settings/integrations/payment-settings-section.tsx`. |
+| `web/classic/src/components/settings/PersonalSetting.jsx` | `web/src/features/profile`. |
+| `web/classic/src/components/settings/personal/cards/NotificationSettings.jsx` | `web/src/features/profile/components/tabs/notification-tab.tsx`. |
+| `web/classic/src/components/table/tokens/modals/EditTokenModal.jsx` | `web/src/features/keys/components/api-keys-mutate-drawer.tsx`. |
+| `web/classic/src/components/topup/InvitationCard.jsx` | `web/src/features/wallet/components/affiliate-rewards-card.tsx`. |
+| `web/classic/src/components/topup/RechargeCard.jsx` | `web/src/features/wallet/components/recharge-form-card.tsx`. |
+| `web/classic/src/components/topup/SubscriptionPlansCard.jsx` | `web/src/features/wallet/components/subscription-plans-card.tsx`. |
+| `web/classic/src/components/topup/index.jsx` | `web/src/features/wallet/index.tsx`. |
+| `web/classic/src/helpers/paymentReturn.js` | `web/src/features/wallet/lib/payment-return.ts`. |
+| `web/classic/src/helpers/index.js` | Retired Classic-only barrel; payment-return behavior was migrated explicitly. |
+| `web/classic/src/i18n/locales/{en,fr,ja,ru,vi,zh-CN,zh-TW,zh}.json` | `web/src/i18n/locales`; standard `zh-CN` and `zh-TW` runtime codes remain normalized by `web/src/i18n/languages.ts`. |
+| `web/classic/src/pages/Setting/Model/SettingGlobalModel.jsx` | `web/src/features/system-settings/models/global-settings-card.tsx`. |
+| `web/classic/src/pages/Setting/Operation/SettingsCreditLimit.jsx` | `web/src/features/system-settings/general/quota-settings-section.tsx`. |
+| `web/classic/src/pages/Setting/Payment/SettingsGeneralPayment.jsx` | `web/src/features/system-settings/integrations/payment-settings-section.tsx`. |
+
+All 59 files added locally since rc.21 were checked against the merge result. Non-frontend files remain at their original paths, the 17 `web/default` additions exist under `web`, and the Classic payment-return helper maps to the typed wallet implementation.
+
 ## Validation Record
 
 This section is updated after each stage. A stage may not be marked complete until its commit and gate results are recorded.
@@ -196,11 +221,18 @@ This section is updated after each stage. A stage may not be marked complete unt
 
 ### Stage 1
 
-- Commit: pending
-- Merge parents: pending
-- Conflict-marker scan: pending
-- Old-directory scan: pending
-- Basic build/test: pending
+- Commit: this stage's `merge: sync upstream v1.0.0-rc.22` merge commit.
+- Merge parents: local preservation commit `4b1276d7` and tagged upstream commit `bc14c18f`.
+- Conflict-marker scan: passed; the index has no unresolved entries or conflict markers.
+- Old-directory scan: passed; neither old frontend directory is tracked and no source or build configuration refers to either path.
+- Local-added-file audit: passed; all 59 local additions remain or have an explicit migration mapping.
+- `git diff --cached --check`: passed.
+- `bun install --frozen-lockfile`: passed.
+- `bun run typecheck`: passed.
+- `bun test`: passed, 115 tests.
+- `bun run build:check`: passed and produced `web/dist`.
+- `go build ./...`: passed after the frontend asset build.
+- `go test ./...`: passed.
 
 ### Stage 2
 

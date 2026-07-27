@@ -4,7 +4,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
@@ -19,7 +18,7 @@ const (
 
 func paymentReturnPath(suffix string) string {
 	base := strings.TrimRight(system_setting.ServerAddress, "/")
-	return base + common.ThemeAwarePath(suffix)
+	return base + suffix
 }
 
 func paymentResultPath(scope string, status string) string {
@@ -31,5 +30,5 @@ func paymentResultPath(scope string, status string) string {
 	if status != "" {
 		values.Set("pay", status)
 	}
-	return paymentReturnPath("/console/topup?" + values.Encode())
+	return paymentReturnPath("/wallet?" + values.Encode())
 }
