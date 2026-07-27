@@ -17,7 +17,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/setting"
 )
 
 const (
@@ -629,11 +628,9 @@ func StartPlaygroundImageTaskRunner() {
 			select {
 			case <-pollTicker.C:
 				for {
-					maxConcurrency := setting.GetPlaygroundImageMaxConcurrency()
 					now := common.GetTimestamp()
-					claimed, err := model.ClaimPlaygroundImageTasks(
+					claimed, continueClaiming, err := model.ClaimPlaygroundImageTasks(
 						owner,
-						maxConcurrency,
 						playgroundImageClaimLimit,
 						now,
 						now+int64(playgroundImageLeaseDuration.Seconds()),
@@ -645,7 +642,7 @@ func StartPlaygroundImageTaskRunner() {
 					for _, task := range claimed {
 						go executeClaimedPlaygroundImageTask(owner, task)
 					}
-					if maxConcurrency > 0 || len(claimed) < playgroundImageClaimLimit {
+					if !continueClaiming {
 						break
 					}
 				}

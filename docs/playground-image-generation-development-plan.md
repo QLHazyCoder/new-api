@@ -878,7 +878,7 @@ Browser
 
 - 批次以 `(user_id, client_batch_id)` 唯一，网络重试不会重复建任务。
 - 任务状态固定为 `queued/running/saving/succeeded/failed/interrupted/cancelled`。
-- 全局并发 `PlaygroundImageMaxConcurrency=0` 时同轮持续领取全部待执行任务；正整数时用数据库队列锁和租约保证全站上限，溢出任务继续排队。每次领取都在队列锁事务内读取数据库 Option，蓝绿实例的旧进程内值不能突破新配置。
+- `PlaygroundImageMaxConcurrency` 是数据库迁移创建并由启动流程强校验的必需配置，已有值不会被迁移覆盖；`0` 时同轮持续领取全部待执行任务，正整数时用数据库队列锁和租约保证全站上限，溢出任务继续排队。空队列不读取该配置；存在待执行任务时在队列锁事务内以数据库值为唯一依据，蓝绿实例不存在进程内回退值。
 - Worker 在调用 Relay 前写入 `upstream_started_at`。租约过期时，未开始上游的任务可重新排队；已开始上游的任务只转为 `interrupted`，绝不自动重提。
 - 图生图参考图按批次保存一次，通过 pipe 流式重建 multipart，避免任务数乘以参考图大小形成内存副本；所有子任务终态且文件删除成功后才清数据库元数据，删除失败保留元数据供清理任务重试。
 - 结果图只接受 PNG、JPEG、WebP、GIF，拒绝 SVG、非图片和路径穿越。上游 URL 由服务器下载，前端只收到本站 7 天签名地址；任务错误入库前统一脱敏 HTTP(S) URL。
@@ -889,7 +889,7 @@ Browser
 - `model/playground_image.go`：独立批次/任务表、幂等创建、状态机、队列锁、租约领取、中断恢复、分页和过期清理元数据。
 - `service/playground_image_worker.go`：动态并发调度、租约心跳、Relay 执行回调、结果校验落盘、参考图与 7 天文件清理。
 - `controller/playground_image_task.go`：批次提交、任务查询/重试/删除、签名内容接口，以及复用现有 Relay 的内部 Gin 请求执行器。
-- `setting/playground_image.go`：原子保存全局图片任务并发配置，供 Worker 每轮实时读取。
+- `model/required_option.go`：声明必须持久化的配置，迁移时只补缺失默认值，启动时拒绝缺失或非法值。
 - `router/api-router.go`：注册游乐场异步 API；签名内容路由不依赖登录态，其余接口继续使用 `UserAuth`。
 - `model/main.go`、`model/option.go`、`main.go`：自动迁移、配置默认值/校验/热更新和 Worker 启动接线。
 - `web/src/features/playground/api.ts`：异步批次、分页任务、重试和删除 API 客户端。
@@ -915,10 +915,17 @@ Browser
 
 - 阶段 1：验证 50 条任务拆分为独立 `n=1` 请求，51 条被前后端与模型层拒绝；数据库不依赖模型 `max_images`；相同用户和 `client_batch_id` 的不同重试载荷仍返回原批次；租约过期且已开始上游的任务变为 `interrupted`。
 - 阶段 2：验证 `count=10` 生成 10 个任务且持久化请求固定 `n=1`；图生图 3 个任务只保存 1 份参考图；结果仅落本站共享目录，data URL 可保存，SVG 和路径穿越被拒绝。
-- 阶段 3：后端拒绝负并发，OptionMap 和原子值同步更新；管理端 schema、默认值和所有语言文案已接线。
+- 阶段 3：后端拒绝负并发，数据库 Option 是 Worker 的唯一并发配置源；管理端 schema、默认值和所有语言文案已接线。
 - 阶段 4：移除页面离开时中断真实任务的逻辑；服务器活动任务每 2 秒轮询，页面隐藏暂停，重新聚焦和切回图片模式立即刷新；旧本地图片任务缓存会一次性清除。
 - 阶段 5：全仓 `go test ./... -count=1` 通过；新增 model/service/controller 专项 `-race` 和涉及包 `go vet` 通过。前端 9 项 Bun 测试、定向 oxlint/oxfmt、`npm run build:check` 通过；7 份 locale JSON 与新增键、UTF-8、冲突标记、`git diff --check`、模型名改写和敏感上游地址扫描通过。
-- 阶段 5 审查修正：并发配置改为每批动态读取并由数据库 Option 跨实例兜底；首次任务列表加载失败和提交后刷新失败会继续轮询；图生图 multipart 改为流式传输；下载和 Relay 错误中的上游 URL 在用户可见前脱敏。
+- 阶段 5 审查修正：并发配置改为每批从数据库 Option 动态读取；首次任务列表加载失败和提交后刷新失败会继续轮询；图生图 multipart 改为流式传输；下载和 Relay 错误中的上游 URL 在用户可见前脱敏。
+
+### 必需配置根因修复（2026-07-27）
+
+- 根因：默认并发值过去只存在于进程内 OptionMap，旧数据库没有对应行；Worker 即使在空队列也会每 500ms 查询该行，导致持续 `record not found` 和共享数据库无效负载。
+- 数据迁移：主库表迁移完成后，以幂等冲突忽略语义补建 `PlaygroundImageMaxConcurrency=0`。只在键缺失时插入，已有合法值原样保留，禁止静默覆盖或修正用户数据。
+- 启动约束：所有实例初始化 OptionMap 前必须确认该行存在且为非负整数；缺失或非法时启动失败，不再采用进程内默认值继续运行。
+- 领取约束：空队列不读取并发 Option；存在待执行任务时才在队列锁事务内读取数据库值。专项测试覆盖缺失补建、已有值保持、非法值拒绝、空队列跳过读取、缺失配置不认领任务和不限并发分批排空信号。
 
 ### 最终审查结论
 

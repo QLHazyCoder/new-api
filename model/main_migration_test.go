@@ -32,6 +32,9 @@ func TestMigrateDBFastIncludesAuthorizationTables(t *testing.T) {
 	})
 
 	require.NoError(t, migrateDBFast())
+	var requiredOption Option
+	require.NoError(t, db.Where(&Option{Key: playgroundImageConcurrencyKey}).First(&requiredOption).Error)
+	require.Equal(t, "0", requiredOption.Value)
 	for _, table := range []struct {
 		name  string
 		model any

@@ -39,7 +39,11 @@ func normalizeLegacyOptionValue(key, value string) (string, bool) {
 	return value, false
 }
 
-func InitOptionMap() {
+func InitOptionMap() error {
+	if err := validateRequiredOptions(DB); err != nil {
+		return err
+	}
+
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap = make(map[string]string)
 
@@ -64,7 +68,7 @@ func InitOptionMap() {
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
 	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
-	common.OptionMap["PlaygroundImageMaxConcurrency"] = "0"
+	common.OptionMap[playgroundImageConcurrencyKey] = strconv.Itoa(playgroundImageDefaultMaxConcurrency)
 	common.OptionMap["TaskEnabled"] = strconv.FormatBool(common.TaskEnabled)
 	common.OptionMap["DataExportEnabled"] = strconv.FormatBool(common.DataExportEnabled)
 	common.OptionMap["ChannelDisableThreshold"] = strconv.FormatFloat(common.ChannelDisableThreshold, 'f', -1, 64)
@@ -199,6 +203,7 @@ func InitOptionMap() {
 
 	common.OptionMapRWMutex.Unlock()
 	loadOptionsFromDatabase()
+	return nil
 }
 
 func loadOptionsFromDatabase() {
@@ -241,7 +246,7 @@ func validateOptionValue(key string, value string) error {
 
 func normalizeOptionValue(key string, value string) (string, error) {
 	switch key {
-	case "PlaygroundImageMaxConcurrency":
+	case playgroundImageConcurrencyKey:
 		normalizedValue, _, err := normalizePlaygroundImageMaxConcurrency(value)
 		if err != nil {
 			return "", err
@@ -337,12 +342,11 @@ func updateOptionMap(key string, value string) (err error) {
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 
-	if key == "PlaygroundImageMaxConcurrency" {
-		normalizedValue, intValue, err := normalizePlaygroundImageMaxConcurrency(value)
+	if key == playgroundImageConcurrencyKey {
+		normalizedValue, _, err := normalizePlaygroundImageMaxConcurrency(value)
 		if err != nil {
 			return err
 		}
-		setting.SetPlaygroundImageMaxConcurrency(intValue)
 		common.OptionMap[key] = normalizedValue
 		return nil
 	}

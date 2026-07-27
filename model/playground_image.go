@@ -25,8 +25,7 @@ const (
 	PlaygroundImageModeGenerate = "generate"
 	PlaygroundImageModeEdit     = "edit"
 
-	playgroundImageQueueLockType  = "playground_image_queue"
-	playgroundImageConcurrencyKey = "PlaygroundImageMaxConcurrency"
+	playgroundImageQueueLockType = "playground_image_queue"
 
 	// PlaygroundImageMaxBatchCount limits a single Playground submission without
 	// changing the upstream n=1 execution model.
@@ -441,27 +440,36 @@ func recoverExpiredPlaygroundImageLeases(tx *gorm.DB, now int64) error {
 		}).Error
 }
 
-func resolvePlaygroundImageMaxConcurrency(tx *gorm.DB, fallback int) (int, error) {
-	var option Option
-	err := tx.Select("value").Where(&Option{Key: playgroundImageConcurrencyKey}).First(&option).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return max(0, fallback), nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	_, value, err := normalizePlaygroundImageMaxConcurrency(option.Value)
-	return value, err
+func hasQueuedPlaygroundImageTasks(tx *gorm.DB, now int64) (bool, error) {
+	var task PlaygroundImageTask
+	result := tx.Select("id").
+		Where("status = ? AND hidden = ? AND expires_at > ?", PlaygroundImageTaskQueued, false, now).
+		Limit(1).
+		Find(&task)
+	return result.RowsAffected > 0, result.Error
 }
 
-func ClaimPlaygroundImageTasks(owner string, maxConcurrency, claimLimit int, now, leaseUntil int64) ([]PlaygroundImageTask, error) {
+func resolvePlaygroundImageMaxConcurrency(tx *gorm.DB) (int, error) {
+	var option Option
+	if err := tx.Select("value").Where(&Option{Key: playgroundImageConcurrencyKey}).First(&option).Error; err != nil {
+		return 0, fmt.Errorf("read required option %s: %w", playgroundImageConcurrencyKey, err)
+	}
+	_, value, err := normalizePlaygroundImageMaxConcurrency(option.Value)
+	if err != nil {
+		return 0, fmt.Errorf("parse required option %s: %w", playgroundImageConcurrencyKey, err)
+	}
+	return value, nil
+}
+
+func ClaimPlaygroundImageTasks(owner string, claimLimit int, now, leaseUntil int64) ([]PlaygroundImageTask, bool, error) {
 	if owner == "" {
-		return nil, errors.New("playground image worker owner is required")
+		return nil, false, errors.New("playground image worker owner is required")
 	}
 	if claimLimit <= 0 {
 		claimLimit = 500
 	}
 	var claimed []PlaygroundImageTask
+	var continueClaiming bool
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockPlaygroundImageQueue(tx, now); err != nil {
 			return err
@@ -469,8 +477,14 @@ func ClaimPlaygroundImageTasks(owner string, maxConcurrency, claimLimit int, now
 		if err := recoverExpiredPlaygroundImageLeases(tx, now); err != nil {
 			return err
 		}
-		var err error
-		maxConcurrency, err = resolvePlaygroundImageMaxConcurrency(tx, maxConcurrency)
+		hasQueuedTasks, err := hasQueuedPlaygroundImageTasks(tx, now)
+		if err != nil {
+			return err
+		}
+		if !hasQueuedTasks {
+			return nil
+		}
+		maxConcurrency, err := resolvePlaygroundImageMaxConcurrency(tx)
 		if err != nil {
 			return err
 		}
@@ -524,9 +538,13 @@ func ClaimPlaygroundImageTasks(owner string, maxConcurrency, claimLimit int, now
 		if result.RowsAffected != int64(len(ids)) {
 			return fmt.Errorf("claimed %d of %d playground image tasks", result.RowsAffected, len(ids))
 		}
+		continueClaiming = maxConcurrency == 0 && len(claimed) == claimLimit
 		return nil
 	})
-	return claimed, err
+	if err != nil {
+		return nil, false, err
+	}
+	return claimed, continueClaiming, nil
 }
 
 func HeartbeatPlaygroundImageTask(taskID, owner string, leaseUntil, now int64) error {

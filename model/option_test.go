@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/stretchr/testify/require"
 )
 
@@ -45,18 +44,14 @@ func TestUpdateOptionMapLogRetentionDays(t *testing.T) {
 
 func TestUpdateOptionMapPlaygroundImageMaxConcurrency(t *testing.T) {
 	originalOptionMap := common.OptionMap
-	originalConcurrency := setting.GetPlaygroundImageMaxConcurrency()
 	t.Cleanup(func() {
 		common.OptionMap = originalOptionMap
-		setting.SetPlaygroundImageMaxConcurrency(originalConcurrency)
 	})
 
-	common.OptionMap = map[string]string{"PlaygroundImageMaxConcurrency": "0"}
-	require.NoError(t, updateOptionMap("PlaygroundImageMaxConcurrency", " 3 "))
-	require.Equal(t, 3, setting.GetPlaygroundImageMaxConcurrency())
-	require.Equal(t, "3", common.OptionMap["PlaygroundImageMaxConcurrency"])
+	common.OptionMap = map[string]string{playgroundImageConcurrencyKey: "0"}
+	require.NoError(t, updateOptionMap(playgroundImageConcurrencyKey, " 3 "))
+	require.Equal(t, "3", common.OptionMap[playgroundImageConcurrencyKey])
 
-	require.Error(t, updateOptionMap("PlaygroundImageMaxConcurrency", "-1"))
-	require.Equal(t, 3, setting.GetPlaygroundImageMaxConcurrency())
-	require.Equal(t, "3", common.OptionMap["PlaygroundImageMaxConcurrency"])
+	require.Error(t, updateOptionMap(playgroundImageConcurrencyKey, "-1"))
+	require.Equal(t, "3", common.OptionMap[playgroundImageConcurrencyKey])
 }

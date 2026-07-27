@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,6 +13,14 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func setPlaygroundImageMaxConcurrency(t *testing.T, value int) {
+	t.Helper()
+	require.NoError(t, DB.Create(&Option{
+		Key:   playgroundImageConcurrencyKey,
+		Value: strconv.Itoa(value),
+	}).Error)
+}
 
 func TestCreatePlaygroundImageBatchIsIdempotentAndPreservesModelName(t *testing.T) {
 	truncateTables(t)
@@ -175,6 +184,7 @@ func TestExcessPlaygroundImageResultsArePreparedAndHardDeleted(t *testing.T) {
 
 func TestClaimPlaygroundImageTasksHonorsGlobalConcurrency(t *testing.T) {
 	truncateTables(t)
+	setPlaygroundImageMaxConcurrency(t, 3)
 	_, _, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
 		UserID:         1,
 		ClientBatchID:  "limited-concurrency",
@@ -186,25 +196,29 @@ func TestClaimPlaygroundImageTasksHonorsGlobalConcurrency(t *testing.T) {
 	})
 	require.NoError(t, err)
 	now := common.GetTimestamp()
-	claimed, err := ClaimPlaygroundImageTasks("worker-a", 3, 500, now, now+45)
+	claimed, continueClaiming, err := ClaimPlaygroundImageTasks("worker-a", 500, now, now+45)
 	require.NoError(t, err)
 	assert.Len(t, claimed, 3)
+	assert.False(t, continueClaiming)
 
-	secondClaim, err := ClaimPlaygroundImageTasks("worker-b", 3, 500, now, now+45)
+	secondClaim, continueClaiming, err := ClaimPlaygroundImageTasks("worker-b", 500, now, now+45)
 	require.NoError(t, err)
 	assert.Empty(t, secondClaim)
+	assert.False(t, continueClaiming)
 
 	for _, task := range claimed {
 		_, err := FailPlaygroundImageTask(task.TaskID, "worker-a", "test completion", "test", now)
 		require.NoError(t, err)
 	}
-	thirdClaim, err := ClaimPlaygroundImageTasks("worker-b", 3, 500, now, now+45)
+	thirdClaim, continueClaiming, err := ClaimPlaygroundImageTasks("worker-b", 500, now, now+45)
 	require.NoError(t, err)
 	assert.Len(t, thirdClaim, 3)
+	assert.False(t, continueClaiming)
 }
 
 func TestClaimPlaygroundImageTasksUnlimitedClaimsAllPending(t *testing.T) {
 	truncateTables(t)
+	setPlaygroundImageMaxConcurrency(t, 0)
 	_, _, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
 		UserID:         1,
 		ClientBatchID:  "unlimited-concurrency",
@@ -216,9 +230,10 @@ func TestClaimPlaygroundImageTasksUnlimitedClaimsAllPending(t *testing.T) {
 	})
 	require.NoError(t, err)
 	now := common.GetTimestamp()
-	claimed, err := ClaimPlaygroundImageTasks("worker-unlimited", 0, 500, now, now+45)
+	claimed, continueClaiming, err := ClaimPlaygroundImageTasks("worker-unlimited", 500, now, now+45)
 	require.NoError(t, err)
 	assert.Len(t, claimed, 10)
+	assert.False(t, continueClaiming)
 }
 
 func TestClaimPlaygroundImageTasksUsesDatabaseConcurrencyAcrossInstances(t *testing.T) {
@@ -236,18 +251,83 @@ func TestClaimPlaygroundImageTasksUsesDatabaseConcurrencyAcrossInstances(t *test
 	require.NoError(t, err)
 	now := common.GetTimestamp()
 
-	claimed, err := ClaimPlaygroundImageTasks("worker-stale-unlimited", 0, 500, now, now+45)
+	claimed, continueClaiming, err := ClaimPlaygroundImageTasks("worker-a", 500, now, now+45)
 	require.NoError(t, err)
 	require.Len(t, claimed, 2)
+	require.False(t, continueClaiming)
 	for _, task := range claimed {
-		_, err := FailPlaygroundImageTask(task.TaskID, "worker-stale-unlimited", "test completion", "test", now)
+		_, err := FailPlaygroundImageTask(task.TaskID, "worker-a", "test completion", "test", now)
 		require.NoError(t, err)
 	}
 
 	require.NoError(t, DB.Model(&Option{}).Where(&Option{Key: playgroundImageConcurrencyKey}).Update("value", "0").Error)
-	claimed, err = ClaimPlaygroundImageTasks("worker-stale-limited", 2, 500, now, now+45)
+	claimed, continueClaiming, err = ClaimPlaygroundImageTasks("worker-b", 500, now, now+45)
 	require.NoError(t, err)
 	assert.Len(t, claimed, 3)
+	assert.False(t, continueClaiming)
+}
+
+func TestClaimPlaygroundImageTasksSkipsRequiredOptionWhenQueueIsEmpty(t *testing.T) {
+	truncateTables(t)
+	now := common.GetTimestamp()
+
+	claimed, continueClaiming, err := ClaimPlaygroundImageTasks("worker-empty", 500, now, now+45)
+	require.NoError(t, err)
+	assert.Empty(t, claimed)
+	assert.False(t, continueClaiming)
+}
+
+func TestClaimPlaygroundImageTasksFailsWhenRequiredOptionIsMissing(t *testing.T) {
+	truncateTables(t)
+	_, _, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
+		UserID:         1,
+		ClientBatchID:  "missing-required-concurrency",
+		Mode:           PlaygroundImageModeGenerate,
+		Prompt:         "draw one image",
+		Model:          "gpt-image-2",
+		RequestPayload: `{"model":"gpt-image-2","n":1}`,
+		Count:          1,
+	})
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+
+	claimed, continueClaiming, err := ClaimPlaygroundImageTasks("worker-missing-option", 500, now, now+45)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	require.ErrorContains(t, err, playgroundImageConcurrencyKey)
+	assert.Empty(t, claimed)
+	assert.False(t, continueClaiming)
+
+	var runningCount int64
+	require.NoError(t, DB.Model(&PlaygroundImageTask{}).
+		Where("status = ?", PlaygroundImageTaskRunning).
+		Count(&runningCount).Error)
+	assert.Zero(t, runningCount)
+}
+
+func TestClaimPlaygroundImageTasksUnlimitedSignalsAdditionalWork(t *testing.T) {
+	truncateTables(t)
+	setPlaygroundImageMaxConcurrency(t, 0)
+	_, _, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
+		UserID:         1,
+		ClientBatchID:  "unlimited-drain-signal",
+		Mode:           PlaygroundImageModeGenerate,
+		Prompt:         "draw three images",
+		Model:          "gpt-image-2",
+		RequestPayload: `{"model":"gpt-image-2","n":1}`,
+		Count:          3,
+	})
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+
+	claimed, continueClaiming, err := ClaimPlaygroundImageTasks("worker-unlimited", 2, now, now+45)
+	require.NoError(t, err)
+	assert.Len(t, claimed, 2)
+	assert.True(t, continueClaiming)
+
+	claimed, continueClaiming, err = ClaimPlaygroundImageTasks("worker-unlimited", 2, now, now+45)
+	require.NoError(t, err)
+	assert.Len(t, claimed, 1)
+	assert.False(t, continueClaiming)
 }
 
 func TestPlaygroundImageConcurrencyOptionQueryEscapesMySQLKeyColumn(t *testing.T) {
@@ -267,6 +347,7 @@ func TestPlaygroundImageConcurrencyOptionQueryEscapesMySQLKeyColumn(t *testing.T
 
 func TestExpiredStartedLeaseBecomesInterruptedWithoutResubmission(t *testing.T) {
 	truncateTables(t)
+	setPlaygroundImageMaxConcurrency(t, 0)
 	batch, _, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
 		UserID:         1,
 		ClientBatchID:  "interrupted-batch",
@@ -278,13 +359,13 @@ func TestExpiredStartedLeaseBecomesInterruptedWithoutResubmission(t *testing.T) 
 	})
 	require.NoError(t, err)
 	now := common.GetTimestamp()
-	claimed, err := ClaimPlaygroundImageTasks("worker-old", 0, 500, now, now+45)
+	claimed, _, err := ClaimPlaygroundImageTasks("worker-old", 500, now, now+45)
 	require.NoError(t, err)
 	require.Len(t, claimed, 1)
 	require.NoError(t, MarkPlaygroundImageTaskUpstreamStarted(claimed[0].TaskID, "worker-old", now))
 	require.NoError(t, DB.Model(&PlaygroundImageTask{}).Where("task_id = ?", claimed[0].TaskID).Update("lease_until", now-1).Error)
 
-	reclaimed, err := ClaimPlaygroundImageTasks("worker-new", 0, 500, now, now+45)
+	reclaimed, _, err := ClaimPlaygroundImageTasks("worker-new", 500, now, now+45)
 	require.NoError(t, err)
 	assert.Empty(t, reclaimed)
 	var task PlaygroundImageTask
@@ -295,6 +376,7 @@ func TestExpiredStartedLeaseBecomesInterruptedWithoutResubmission(t *testing.T) 
 
 func TestDiscardedRunningTaskCanBeHardDeletedAfterFileRemoval(t *testing.T) {
 	truncateTables(t)
+	setPlaygroundImageMaxConcurrency(t, 0)
 	_, _, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
 		UserID:         1,
 		ClientBatchID:  "discard-result",
@@ -306,7 +388,7 @@ func TestDiscardedRunningTaskCanBeHardDeletedAfterFileRemoval(t *testing.T) {
 	})
 	require.NoError(t, err)
 	now := common.GetTimestamp()
-	claimed, err := ClaimPlaygroundImageTasks("worker-discard", 0, 500, now, now+45)
+	claimed, _, err := ClaimPlaygroundImageTasks("worker-discard", 500, now, now+45)
 	require.NoError(t, err)
 	require.Len(t, claimed, 1)
 	deleteResult, err := DeletePlaygroundImageTask(claimed[0].TaskID, 1, now)
