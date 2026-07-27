@@ -90,7 +90,6 @@ export const DEFAULT_IMAGE_CONFIG: ImageGenerationConfig = {
 export const STORAGE_KEYS = {
   CONFIG: 'playground_config',
   IMAGE_CONFIG: 'playground_image_config',
-  IMAGE_TASKS: 'playground_image_tasks',
   MESSAGES: 'playground_messages',
   MODE: 'playground_mode',
   PARAMETER_ENABLED: 'playground_parameter_enabled',

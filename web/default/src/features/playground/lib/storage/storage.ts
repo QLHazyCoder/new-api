@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { MESSAGE_STATUS, STORAGE_KEYS } from '../../constants'
 import type {
   ImageGenerationConfig,
-  ImageTask,
   Message,
   ParameterEnabled,
   PlaygroundConfig,
@@ -52,6 +51,7 @@ const TRUNCATED_CONTENT_SUFFIX = '\n\n[...]'
 const MIN_PREFIX_COLLAPSE_LENGTH = 2000
 const MIN_REPEATED_SECTION_COUNT = 3
 const SECTION_HEADING_LINE_PATTERN = /^#{2,6}\s+\d+\.\s+.+$/gm
+const DEPRECATED_IMAGE_TASKS_STORAGE_KEY = 'playground_image_tasks'
 
 function readStoredValue(key: string): unknown | null {
   const saved = localStorage.getItem(key)
@@ -397,13 +397,23 @@ export function clearPlaygroundData(): void {
   try {
     localStorage.removeItem(STORAGE_KEYS.CONFIG)
     localStorage.removeItem(STORAGE_KEYS.IMAGE_CONFIG)
-    localStorage.removeItem(STORAGE_KEYS.IMAGE_TASKS)
+    removeDeprecatedImageTaskStorage()
     localStorage.removeItem(STORAGE_KEYS.MODE)
     localStorage.removeItem(STORAGE_KEYS.PARAMETER_ENABLED)
     localStorage.removeItem(STORAGE_KEYS.MESSAGES)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to clear playground data:', error)
+  }
+}
+
+// Image task history moved to the server. Only remove data written by older browsers.
+export function removeDeprecatedImageTaskStorage(): void {
+  try {
+    localStorage.removeItem(DEPRECATED_IMAGE_TASKS_STORAGE_KEY)
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to remove deprecated image task storage:', error)
   }
 }
 
@@ -447,97 +457,4 @@ export function saveImageConfig(config: Partial<ImageGenerationConfig>): void {
     // eslint-disable-next-line no-console
     console.error('Failed to save image config:', error)
   }
-}
-
-function sanitizeImageTasksForStorage(
-  tasks: ImageTask[],
-  now = Date.now()
-): ImageTask[] {
-  const cutoff = now - 7 * 24 * 60 * 60 * 1000
-  return tasks
-    .filter(
-      (task) =>
-        task.origin !== 'server' &&
-        Number.isFinite(task.createdAt) &&
-        task.createdAt >= cutoff
-    )
-    .slice(0, 20)
-    .map((task) => ({
-      ...task,
-      origin: 'legacy',
-      referenceImages: task.referenceImages?.map((image) => ({
-        id: image.id,
-        name: image.name,
-        dataUrl: image.dataUrl,
-        type: image.type,
-        size: image.size,
-      })),
-    }))
-}
-
-export function markRunningImageTasksInterrupted(
-  tasks: ImageTask[],
-  now = Date.now()
-): ImageTask[] {
-  return tasks.map((task) => {
-    if (!['queued', 'running', 'saving'].includes(task.status)) return task
-
-    return {
-      ...task,
-      status: 'interrupted',
-      error: task.error || 'Generation was interrupted',
-      finishedAt: task.finishedAt ?? now,
-    }
-  })
-}
-
-export function normalizeLegacyImageTasks(
-  tasks: ImageTask[],
-  now = Date.now()
-): ImageTask[] {
-  return markRunningImageTasksInterrupted(
-    sanitizeImageTasksForStorage(tasks, now),
-    now
-  )
-}
-
-export function removePlaygroundImageTask(
-  tasks: ImageTask[],
-  taskId: string
-): ImageTask[] {
-  return tasks.filter((task) => task.id !== taskId)
-}
-
-export function loadImageTasks(): ImageTask[] {
-  try {
-    const saved = readStoredValue(STORAGE_KEYS.IMAGE_TASKS)
-    if (!saved) return []
-
-    const parsed = unwrapStoredValue(saved)
-    if (!Array.isArray(parsed)) return []
-
-    const sanitized = normalizeLegacyImageTasks(parsed as ImageTask[])
-    if (JSON.stringify(sanitized) !== JSON.stringify(parsed)) {
-      saveImageTasks(sanitized)
-    }
-    return sanitized
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to load image tasks:', error)
-    return []
-  }
-}
-
-export function saveImageTasks(tasks: ImageTask[]): void {
-  try {
-    const sanitized = sanitizeImageTasksForStorage(tasks)
-    writeStoredValue(STORAGE_KEYS.IMAGE_TASKS, sanitized)
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error('Failed to save image tasks:', error)
-  }
-}
-
-export function persistInterruptedImageTasks(tasks: ImageTask[]): void {
-  saveImageTasks(markRunningImageTasksInterrupted(tasks))
 }

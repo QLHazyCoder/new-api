@@ -35,7 +35,6 @@ import {
   findImageModelCapabilities,
   normalizePlaygroundImageConfig,
   normalizeImageGenerationCount,
-  removePlaygroundImageTask,
 } from '../lib'
 import type {
   ImageGenerationConfig,
@@ -138,7 +137,6 @@ function mapServerImageTask(task: ServerImageTask): ImageTask {
     downloadUrl: task.image?.download_url,
     error: task.error,
     errorCode: task.error_code,
-    origin: 'server',
     createdAt: task.created_at * 1000,
     startedAt: task.started_at ? task.started_at * 1000 : undefined,
     finishedAt: task.finished_at ? task.finished_at * 1000 : undefined,
@@ -177,14 +175,9 @@ export function useImageGenerationHandler({
         const serverTasks = (await getAllImageTasks()).map(mapServerImageTask)
         hasLoadedTasksRef.current = true
         hasActiveTasksRef.current = serverTasks.some(isActiveImageTask)
-        onTasksUpdate((previous) => {
-          const legacyTasks = previous.filter(
-            (task) => task.origin !== 'server'
-          )
-          return [...serverTasks, ...legacyTasks].sort(
-            (left, right) => right.createdAt - left.createdAt
-          )
-        })
+        onTasksUpdate(
+          serverTasks.sort((left, right) => right.createdAt - left.createdAt)
+        )
       })()
       refreshRequestRef.current = request
       try {
@@ -313,7 +306,6 @@ export function useImageGenerationHandler({
 
   const retryTask = useCallback(
     async (task: ImageTask) => {
-      if (task.origin !== 'server') return
       if (task.mode === 'edit') {
         toast.error(t('Upload the reference images again to retry this edit'))
         return
@@ -332,16 +324,10 @@ export function useImageGenerationHandler({
 
   const deleteTask = useCallback(
     async (task: ImageTask) => {
-      if (task.origin !== 'server') {
-        onTasksUpdate((previous) =>
-          removePlaygroundImageTask(previous, task.id)
-        )
-        return
-      }
       try {
         await deleteServerImageTask(task.id)
         onTasksUpdate((previous) =>
-          removePlaygroundImageTask(previous, task.id)
+          previous.filter((item) => item.id !== task.id)
         )
       } catch (error: unknown) {
         toast.error(getImageGenerationError(error, t('Request failed')).message)

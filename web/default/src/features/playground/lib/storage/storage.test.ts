@@ -17,62 +17,39 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { test } from 'node:test'
 
-import { DEFAULT_IMAGE_CONFIG } from '../../constants'
-import type { ImageTask } from '../../types'
-import { normalizeLegacyImageTasks, removePlaygroundImageTask } from './storage'
+import { removeDeprecatedImageTaskStorage } from './storage'
 
-const now = Date.UTC(2026, 6, 26)
+test('removes only deprecated browser image task history', () => {
+  const originalLocalStorage = Object.getOwnPropertyDescriptor(
+    globalThis,
+    'localStorage'
+  )
+  const values = new Map([
+    ['playground_image_tasks', '[{"id":"legacy-task"}]'],
+    ['playground_image_config', '{"n":2}'],
+  ])
 
-function createTask(overrides: Partial<ImageTask>): ImageTask {
-  return {
-    id: 'legacy-task',
-    prompt: 'draw a test image',
-    config: DEFAULT_IMAGE_CONFIG,
-    status: 'done',
-    createdAt: now - 1000,
-    ...overrides,
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      removeItem(key: string) {
+        values.delete(key)
+      },
+    },
+  })
+
+  try {
+    removeDeprecatedImageTaskStorage()
+
+    assert.equal(values.has('playground_image_tasks'), false)
+    assert.equal(values.get('playground_image_config'), '{"n":2}')
+  } finally {
+    if (originalLocalStorage) {
+      Object.defineProperty(globalThis, 'localStorage', originalLocalStorage)
+    } else {
+      Reflect.deleteProperty(globalThis, 'localStorage')
+    }
   }
-}
-
-describe('playground legacy image task migration', () => {
-  test('keeps only local tasks created within seven days', () => {
-    const tasks = normalizeLegacyImageTasks(
-      [
-        createTask({ id: 'recent' }),
-        createTask({
-          id: 'expired',
-          createdAt: now - 8 * 24 * 60 * 60 * 1000,
-        }),
-        createTask({ id: 'server', origin: 'server' }),
-      ],
-      now
-    )
-
-    assert.deepEqual(
-      tasks.map((task) => task.id),
-      ['recent']
-    )
-    assert.equal(tasks[0].origin, 'legacy')
-  })
-
-  test('marks old active browser tasks as interrupted', () => {
-    const [task] = normalizeLegacyImageTasks(
-      [createTask({ status: 'running' })],
-      now
-    )
-
-    assert.equal(task.status, 'interrupted')
-    assert.equal(task.finishedAt, now)
-  })
-
-  test('allows browser-only history to be removed locally', () => {
-    const [task] = normalizeLegacyImageTasks(
-      [createTask({ id: 'deletable' })],
-      now
-    )
-
-    assert.deepEqual(removePlaygroundImageTask([task], task.id), [])
-  })
 })

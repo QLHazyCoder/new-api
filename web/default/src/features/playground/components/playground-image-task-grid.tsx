@@ -216,7 +216,6 @@ function TaskCard({
   const canCopyLink = Boolean(firstImage?.url)
   const canDownload = Boolean(firstSource)
   const isActiveTask = ['queued', 'running', 'saving'].includes(task.status)
-  const isLegacyTask = task.origin !== 'server'
   const isEditTask = task.mode === 'edit'
   const imageSettingsLabel =
     task.config.size ||
@@ -333,7 +332,7 @@ function TaskCard({
             <RotateCcwIcon className='size-4' />
           </IconButton>
           <IconButton
-            disabled={isActiveTask || isLegacyTask}
+            disabled={isActiveTask}
             label={t('Retry')}
             onClick={() => onRetryTask(task)}
           >

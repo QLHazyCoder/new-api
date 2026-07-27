@@ -175,8 +175,6 @@ export type ImageTaskStatus =
   | 'interrupted'
   | 'cancelled'
 
-export type ImageTaskOrigin = 'server' | 'legacy'
-
 export interface ImageResult {
   url?: string
   b64_json?: string
@@ -197,7 +195,6 @@ export interface ImageTask {
   error?: string
   errorCode?: string
   downloadUrl?: string
-  origin?: ImageTaskOrigin
   createdAt: number
   startedAt?: number
   finishedAt?: number

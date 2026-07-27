@@ -28,12 +28,11 @@ import {
   getInitialParameterEnabled,
   getInitialPlaygroundConfig,
   loadImageConfig,
-  loadImageTasks,
   loadMessages,
   loadPlaygroundMode,
+  removeDeprecatedImageTaskStorage,
   saveConfig,
   saveImageConfig,
-  saveImageTasks,
   saveMessages,
   saveParameterEnabled,
   savePlaygroundMode,
@@ -60,7 +59,7 @@ export function usePlaygroundState() {
     return loadPlaygroundMode()
   })
 
-  // Load initial state from localStorage
+  // Load persisted playground configuration.
   const [config, setConfig] = useState<PlaygroundConfig>(
     getInitialPlaygroundConfig
   )
@@ -78,9 +77,7 @@ export function usePlaygroundState() {
   const latestMessagesRef = useRef<Message[]>(messages)
   const hasLoadedMessagesRef = useRef(false)
 
-  const [imageTasks, setImageTasks] = useState<ImageTask[]>(() => {
-    return loadImageTasks()
-  })
+  const [imageTasks, setImageTasks] = useState<ImageTask[]>([])
 
   const [models, setModels] = useState<ModelOption[]>([])
   const [groups, setGroups] = useState<GroupOption[]>([])
@@ -131,6 +128,10 @@ export function usePlaygroundState() {
     },
     []
   )
+
+  useEffect(() => {
+    removeDeprecatedImageTaskStorage()
+  }, [])
 
   // Update config with automatic save
   const setMode = useCallback((value: PlaygroundMode) => {
@@ -196,7 +197,6 @@ export function usePlaygroundState() {
     (updater: ImageTask[] | ((prev: ImageTask[]) => ImageTask[])) => {
       setImageTasks((prev) => {
         const newTasks = typeof updater === 'function' ? updater(prev) : updater
-        saveImageTasks(newTasks)
         return newTasks
       })
     },
