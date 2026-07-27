@@ -158,12 +158,13 @@ export function PrefillGroupFormDrawer({
     }
 
     try {
-      const response = isEdit
-        ? await updatePrefillGroup({
-            id: currentGroup!.id,
-            ...payload,
-          })
-        : await createPrefillGroup(payload)
+      const response =
+        isEdit && currentGroup
+          ? await updatePrefillGroup({
+              id: currentGroup.id,
+              ...payload,
+            })
+          : await createPrefillGroup(payload)
 
       if (response.success) {
         toast.success(
@@ -277,22 +278,20 @@ export function PrefillGroupFormDrawer({
                   <FormItem>
                     <FormLabel>Group Type</FormLabel>
                     <Select
-                      items={[
-                        ...PREFILL_GROUP_TYPES.map((type) => ({
-                          value: type.value,
-                          label: (
-                            <div className='flex flex-col text-left'>
-                              <span className='font-medium'>{type.label}</span>
-                              <span
-                                data-prefill-description
-                                className='text-muted-foreground text-xs'
-                              >
-                                {type.description}
-                              </span>
-                            </div>
-                          ),
-                        })),
-                      ]}
+                      items={PREFILL_GROUP_TYPES.map((type) => ({
+                        value: type.value,
+                        label: (
+                          <div className='flex flex-col text-left'>
+                            <span className='font-medium'>{type.label}</span>
+                            <span
+                              data-prefill-description
+                              className='text-muted-foreground text-xs'
+                            >
+                              {type.description}
+                            </span>
+                          </div>
+                        ),
+                      }))}
                       value={field.value}
                       onValueChange={(value) =>
                         value !== null &&

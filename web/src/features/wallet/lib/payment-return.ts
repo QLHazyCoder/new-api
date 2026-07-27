@@ -126,10 +126,7 @@ export function readPaymentReturnMarker(): PaymentReturnMarker | null {
     const parsed = JSON.parse(raw) as PaymentReturnMarker
     if (!isPaymentReturnScope(parsed?.scope)) return null
     if (typeof parsed?.createdAt !== 'number') return null
-    if (
-      parsed.status !== undefined &&
-      !isPaymentReturnStatus(parsed.status)
-    ) {
+    if (parsed.status !== undefined && !isPaymentReturnStatus(parsed.status)) {
       return null
     }
     return parsed
@@ -153,7 +150,7 @@ export function hasRecentPaymentMarker(
   maxAgeMs = 10 * 60 * 1000
 ) {
   if (!marker) return false
-  return now-marker.createdAt >= 0 && now-marker.createdAt <= maxAgeMs
+  return now - marker.createdAt >= 0 && now - marker.createdAt <= maxAgeMs
 }
 
 export function hasQuotaChanged(

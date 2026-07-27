@@ -165,7 +165,9 @@ export async function getGroups(): Promise<ApiResponse<string[]>> {
 /**
  * Get groups available for assigning users in admin user management.
  */
-export async function getUserManagementGroups(): Promise<ApiResponse<string[]>> {
+export async function getUserManagementGroups(): Promise<
+  ApiResponse<string[]>
+> {
   const res = await api.get('/api/group/user-management')
   return res.data
 }

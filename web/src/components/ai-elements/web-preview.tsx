@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+/* eslint-disable react/iframe-missing-sandbox -- interactive previews require scripts and their original origin */
 'use client'
 
 import { ChevronDownIcon } from 'lucide-react'

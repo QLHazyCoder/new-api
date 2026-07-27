@@ -227,6 +227,7 @@ export function HeroTerminalDemo(props: HeroTerminalDemoProps) {
             const isActive = index === activeIndex
             return (
               <button
+                type='button'
                 key={item.id}
                 onClick={() => handleSelect(index)}
                 className={cn(

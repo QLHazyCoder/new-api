@@ -21,16 +21,17 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { PasswordInput } from '@/components/password-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { ConfirmDialog } from '@/components/confirm-dialog'
-import { displayAmountToQuota, quotaToDisplayAmount } from '@/lib/currency'
 import { useStatus } from '@/hooks/use-status'
+import { displayAmountToQuota, quotaToDisplayAmount } from '@/lib/currency'
 import { ROLE } from '@/lib/roles'
+
 import { updateUserSettings } from '../../api'
 import {
   DEFAULT_QUOTA_WARNING_THRESHOLD,
@@ -71,8 +72,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
   const { status } = useStatus()
   const isAdmin = (profile?.role ?? 0) >= ROLE.ADMIN
   const [loading, setLoading] = useState(false)
-  const [disableIpLogConfirmOpen, setDisableIpLogConfirmOpen] =
-    useState(false)
+  const [disableIpLogConfirmOpen, setDisableIpLogConfirmOpen] = useState(false)
   const [settings, setSettings] = useState<UserSettings>({
     notify_type: 'email',
     quota_warning_threshold: 0,
@@ -104,8 +104,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
     )
     if (profile?.setting) {
       const parsed = parseUserSettings(profile.setting)
-      const threshold =
-        parsed.quota_warning_threshold ?? defaultThreshold
+      const threshold = parsed.quota_warning_threshold ?? defaultThreshold
       setSettings({
         notify_type: normalizeNotifyType(parsed.notify_type),
         quota_warning_threshold: quotaToDisplayAmount(threshold),
@@ -145,7 +144,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
       } else {
         toast.error(response.message || t('Failed to update settings'))
       }
-    } catch (_error) {
+    } catch {
       toast.error(t('Failed to update settings'))
     } finally {
       setLoading(false)
@@ -171,8 +170,9 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
           value={[notifyType]}
           onValueChange={(value) => {
             const nextValue = value.find((item) => item !== notifyType)
-            if (nextValue)
+            if (nextValue) {
               updateField('notify_type', normalizeNotifyType(nextValue))
+            }
           }}
           aria-label={t('Notification Method')}
           variant='outline'
@@ -214,7 +214,9 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
           step='any'
         />
         <p className='text-muted-foreground text-xs'>
-          {t('Get notified when balance falls below this value. Set 0 to disable.')}
+          {t(
+            'Get notified when balance falls below this value. Set 0 to disable.'
+          )}
         </p>
       </div>
 

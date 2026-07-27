@@ -22,6 +22,7 @@ import { describe, test } from 'node:test'
 import { PAYMENT_TYPES } from '../constants'
 import {
   dispatchSelectedPayment,
+  getPaymentFormSource,
   isStripePayment,
   isWaffoPayment,
   isWaffoPancakePayment,
@@ -34,6 +35,23 @@ describe('payment type classification', () => {
     assert.equal(isWaffoPancakePayment(PAYMENT_TYPES.WAFFO_PANCAKE), true)
     assert.equal(isWaffoPancakePayment(PAYMENT_TYPES.WAFFO), false)
     assert.equal(isStripePayment(PAYMENT_TYPES.STRIPE), true)
+  })
+})
+
+describe('payment form target', () => {
+  test('uses the current tab for Safari and a new tab for Chromium', () => {
+    assert.equal(
+      getPaymentFormSource(
+        'Mozilla/5.0 (Macintosh) AppleWebKit/605.1.15 Version/18.0 Safari/605.1.15'
+      ),
+      'same_tab'
+    )
+    assert.equal(
+      getPaymentFormSource(
+        'Mozilla/5.0 AppleWebKit/537.36 Chrome/134.0.0.0 Safari/537.36'
+      ),
+      'new_tab'
+    )
   })
 })
 

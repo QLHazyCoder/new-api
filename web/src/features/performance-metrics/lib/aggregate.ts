@@ -60,9 +60,7 @@ export function sumPerformanceCounters(
   }
 }
 
-export function weightedSuccessRate(
-  rows: PerformanceCounterSource[]
-): number {
+export function weightedSuccessRate(rows: PerformanceCounterSource[]): number {
   const totals = sumPerformanceCounters(rows)
   if (totals.requestCount > 0) {
     return (totals.successCount / totals.requestCount) * 100

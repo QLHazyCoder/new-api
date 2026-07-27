@@ -33,6 +33,8 @@ import {
   isStripePayment,
   isWaffoPayment,
   isWaffoPancakePayment,
+  getPaymentFormSource,
+  markPaymentFlowStart,
   submitPaymentForm,
 } from '../lib'
 import type { AmountRequest, AmountResponse } from '../types'
@@ -131,6 +133,7 @@ export function usePayment() {
 
         // Handle Stripe payment
         if (isStripe && response.data?.pay_link) {
+          markPaymentFlowStart('topup', 'new_tab')
           window.open(response.data.pay_link as string, '_blank')
           toast.success(i18next.t('Redirecting to payment page...'))
           return true
@@ -140,7 +143,9 @@ export function usePayment() {
         if (!isStripe && response.data) {
           const url = (response as unknown as { url?: string }).url
           if (url) {
-            submitPaymentForm(url, response.data)
+            const source = getPaymentFormSource()
+            markPaymentFlowStart('topup', source)
+            submitPaymentForm(url, response.data, source)
             toast.success(i18next.t('Redirecting to payment page...'))
             return true
           }

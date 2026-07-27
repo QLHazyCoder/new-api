@@ -63,7 +63,7 @@ import {
   transformFormDataToPayload,
   transformRedemptionToFormDefaults,
 } from '../lib'
-import { type Redemption } from '../types'
+import type { Redemption } from '../types'
 import { useRedemptions } from './redemptions-provider'
 
 type RedemptionsMutateDrawerProps = {
@@ -91,16 +91,18 @@ export function RedemptionsMutateDrawer({
   useEffect(() => {
     if (open && isUpdate && currentRow) {
       // For update, fetch fresh data
-      getRedemption(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformRedemptionToFormDefaults(result.data))
-        }
-      })
+      getRedemption(currentRow.id)
+        .then((result) => {
+          if (result.success && result.data) {
+            form.reset(transformRedemptionToFormDefaults(result.data))
+          }
+        })
+        .catch(() => toast.error(t('Request failed')))
     } else if (open && !isUpdate) {
       // For create, reset to defaults
       form.reset(REDEMPTION_FORM_DEFAULT_VALUES)
     }
-  }, [open, isUpdate, currentRow, form])
+  }, [open, isUpdate, currentRow, form, t])
 
   const onSubmit = async (data: RedemptionFormValues) => {
     setIsSubmitting(true)
@@ -226,7 +228,7 @@ export function RedemptionsMutateDrawer({
                         step={tokensOnly ? 1 : 0.01}
                         placeholder={quotaPlaceholder}
                         onChange={(e) =>
-                          field.onChange(parseFloat(e.target.value) || 0)
+                          field.onChange(Number.parseFloat(e.target.value) || 0)
                         }
                       />
                     </FormControl>
@@ -314,7 +316,9 @@ export function RedemptionsMutateDrawer({
                           max='100'
                           placeholder={t('Number of codes to create')}
                           onChange={(e) =>
-                            field.onChange(parseInt(e.target.value, 10) || 1)
+                            field.onChange(
+                              Number.parseInt(e.target.value, 10) || 1
+                            )
                           }
                         />
                       </FormControl>

@@ -242,9 +242,7 @@ export function RatioSettingsCard({
       GroupRatio: formatJsonForTextarea(groupDefaults.GroupRatio),
       TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
       UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
-      GroupDescriptions: formatJsonForTextarea(
-        groupDefaults.GroupDescriptions
-      ),
+      GroupDescriptions: formatJsonForTextarea(groupDefaults.GroupDescriptions),
       GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
       AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
       GroupSpecialUsableGroup: formatJsonForTextarea(
@@ -307,9 +305,7 @@ export function RatioSettingsCard({
       GroupRatio: formatJsonForTextarea(groupDefaults.GroupRatio),
       TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
       UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
-      GroupDescriptions: formatJsonForTextarea(
-        groupDefaults.GroupDescriptions
-      ),
+      GroupDescriptions: formatJsonForTextarea(groupDefaults.GroupDescriptions),
       GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
       AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
       GroupSpecialUsableGroup: formatJsonForTextarea(

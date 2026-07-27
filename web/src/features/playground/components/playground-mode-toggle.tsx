@@ -18,7 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { ImageIcon, MessageSquareIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+
 import type { PlaygroundMode } from '../types'
 
 interface PlaygroundModeToggleProps {

@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { toIntlLocale } from '@/i18n/languages'
 /**
  * ============================================================================
  * Currency Formatting Library
@@ -84,7 +85,6 @@ import {
   type CurrencyConfig,
   type CurrencyDisplayType,
 } from '@/stores/system-config-store'
-import { toIntlLocale } from '@/i18n/languages'
 
 export interface CurrencyFormatOptions {
   /** Fraction digits to use when |value| >= 1 */
@@ -523,7 +523,9 @@ export function quotaToDisplayAmount(quota: number | null | undefined): number {
  * storage and backend threshold comparison. A value of 0 intentionally remains
  * 0 so the backend can treat it as "disable reminder".
  */
-export function displayAmountToQuota(amount: number | null | undefined): number {
+export function displayAmountToQuota(
+  amount: number | null | undefined
+): number {
   if (amount == null || Number.isNaN(amount) || amount === 0) return 0
 
   const { config, meta } = getCurrencyDisplay()

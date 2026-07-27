@@ -41,7 +41,7 @@ import {
 import type { PerformanceGroup } from '@/features/performance-metrics/types'
 import { cn } from '@/lib/utils'
 
-import { type UptimeDayPoint } from '../lib/mock-stats'
+import type { UptimeDayPoint } from '../lib/mock-stats'
 import type { PricingModel } from '../types'
 import { LatencyTrendChart, UptimeTrendChart } from './model-details-charts'
 import { UptimeSparkline } from './model-details-uptime-sparkline'

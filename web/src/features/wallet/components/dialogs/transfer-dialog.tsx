@@ -20,6 +20,11 @@ import { Loader2 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+
+import { Dialog } from '@/components/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   displayAmountToQuota,
   getCurrencyDisplay,
@@ -27,10 +32,6 @@ import {
   quotaToDisplayAmount,
 } from '@/lib/currency'
 import { formatQuota } from '@/lib/format'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Dialog } from '@/components/dialog'
 
 interface TransferDialogProps {
   open: boolean
@@ -78,9 +79,11 @@ export function TransferDialog({
       return
     }
     if (!Number.isFinite(inputAmount) || transferQuota < minQuota) {
-      toast.error(t('Transfer amount must be at least {{amount}}', {
-        amount: formatQuota(minQuota),
-      }))
+      toast.error(
+        t('Transfer amount must be at least {{amount}}', {
+          amount: formatQuota(minQuota),
+        })
+      )
       return
     }
     if (transferQuota > availableQuota) {
@@ -158,7 +161,9 @@ export function TransferDialog({
             </p>
             {!canTransfer && (
               <p className='text-destructive'>
-                {t('Available rewards have not reached the minimum transfer amount')}
+                {t(
+                  'Available rewards have not reached the minimum transfer amount'
+                )}
               </p>
             )}
           </div>

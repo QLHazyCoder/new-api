@@ -34,6 +34,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
+import { markPaymentFlowStart } from '@/features/wallet/lib'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { formatQuota } from '@/lib/format'
 import { DEFAULT_CURRENCY_CONFIG } from '@/stores/system-config-store'
@@ -47,7 +48,6 @@ import {
 } from '../../api'
 import { formatDuration, formatResetPeriod } from '../../lib'
 import type { PlanRecord } from '../../types'
-import { markPaymentFlowStart } from '@/features/wallet/lib'
 
 interface PaymentMethod {
   type: string
@@ -201,10 +201,7 @@ export function SubscriptionPurchaseDialog(props: Props) {
         payment_method: selectedEpayMethod,
       })
       if (res.message === 'success' && res.url) {
-        markPaymentFlowStart(
-          'subscription',
-          isSafari ? 'same_tab' : 'new_tab'
-        )
+        markPaymentFlowStart('subscription', isSafari ? 'same_tab' : 'new_tab')
         const form = document.createElement('form')
         form.action = res.url
         form.method = 'POST'
@@ -413,12 +410,10 @@ export function SubscriptionPurchaseDialog(props: Props) {
             {hasEpay && (
               <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-2'>
                 <Select
-                  items={[
-                    ...(props.epayMethods || []).map((m) => ({
-                      value: m.type,
-                      label: m.name || m.type,
-                    })),
-                  ]}
+                  items={(props.epayMethods || []).map((m) => ({
+                    value: m.type,
+                    label: m.name || m.type,
+                  }))}
                   value={selectedEpayMethod}
                   onValueChange={(v) => v !== null && setSelectedEpayMethod(v)}
                   disabled={limitReached}

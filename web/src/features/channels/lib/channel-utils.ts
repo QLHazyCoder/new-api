@@ -16,9 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { toIntlLocale } from '@/i18n/languages'
 import { formatCurrencyFromUSD, formatQuotaWithCurrency } from '@/lib/currency'
 import { formatTimestampToDate } from '@/lib/format'
-import { toIntlLocale } from '@/i18n/languages'
 
 import {
   CHANNEL_STATUS_CONFIG,

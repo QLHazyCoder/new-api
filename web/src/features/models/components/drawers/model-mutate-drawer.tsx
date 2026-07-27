@@ -427,7 +427,7 @@ export function ModelMutateDrawer({
 
   const parseOptionalInteger = (value?: string) => {
     if (!value || value.trim() === '') return 0
-    const parsed = parseInt(value, 10)
+    const parsed = Number.parseInt(value, 10)
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
   }
 
@@ -454,7 +454,9 @@ export function ModelMutateDrawer({
         tags: parseModelTags(model.tags),
         vendor_id: model.vendor_id,
         endpoints: model.endpoints || '',
-        context_length: model.context_length ? String(model.context_length) : '',
+        context_length: model.context_length
+          ? String(model.context_length)
+          : '',
         max_output_tokens: model.max_output_tokens
           ? String(model.max_output_tokens)
           : '',
@@ -921,9 +923,7 @@ export function ModelMutateDrawer({
 
             {/* Display Metadata */}
             <SideDrawerSection>
-              <h3 className='text-sm font-semibold'>
-                {t('Display Metadata')}
-              </h3>
+              <h3 className='text-sm font-semibold'>{t('Display Metadata')}</h3>
 
               <div className='grid gap-4 sm:grid-cols-2'>
                 <FormField
@@ -975,7 +975,9 @@ export function ModelMutateDrawer({
                         />
                       </FormControl>
                       <FormDescription>
-                        {t('Maximum response tokens shown on the pricing page.')}
+                        {t(
+                          'Maximum response tokens shown on the pricing page.'
+                        )}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

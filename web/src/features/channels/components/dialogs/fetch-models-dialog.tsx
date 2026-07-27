@@ -49,9 +49,7 @@ import {
 import { useChannels } from '../channels-provider'
 
 function normalizeModelNameList(models: readonly string[]): string[] {
-  return Array.from(
-    new Set(models.map((m) => normalizeModelName(m)).filter(Boolean))
-  )
+  return [...new Set(models.map((m) => normalizeModelName(m)).filter(Boolean))]
 }
 
 type FetchModelsDialogProps = {
@@ -140,8 +138,8 @@ export function FetchModelsDialog({
         setFetchedModels(list)
         setSelectedModels(existingModels)
         toast.success(t('Fetched {{count}} models', { count: list.length }))
-      } else {
-        const response = await fetchUpstreamModels(activeChannel!.id)
+      } else if (activeChannel) {
+        const response = await fetchUpstreamModels(activeChannel.id)
         if (response.success) {
           const list = Array.isArray(response.data) ? response.data : []
           setFetchedModels(list)
@@ -345,7 +343,7 @@ export function FetchModelsDialog({
                     <Tooltip>
                       <TooltipTrigger
                         render={<Info className='h-3.5 w-3.5 text-amber-500' />}
-                      ></TooltipTrigger>
+                      />
                       <TooltipContent>
                         {t('From model redirect, not yet added to models list')}
                       </TooltipContent>
@@ -420,92 +418,90 @@ export function FetchModelsDialog({
           </Button>
         </div>
       ) : (
-        <>
-          <div className='space-y-4'>
-            {/* Search Bar */}
-            <div className='relative'>
-              <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
-              <Input
-                placeholder={t('Search models...')}
-                value={searchKeyword}
-                onChange={(e) => setSearchKeyword(e.target.value)}
-                className='pl-9'
-              />
-            </div>
+        <div className='space-y-4'>
+          {/* Search Bar */}
+          <div className='relative'>
+            <Search className='text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2' />
+            <Input
+              placeholder={t('Search models...')}
+              value={searchKeyword}
+              onChange={(e) => setSearchKeyword(e.target.value)}
+              className='pl-9'
+            />
+          </div>
 
-            {/* Tabs for New vs Existing vs Removed */}
-            <Tabs
-              key={`${activeChannel?.id ?? 'custom'}-${fetchedModels.length}-${removedModels.length}`}
-              defaultValue={
-                newModels.length > 0
-                  ? 'new'
-                  : removedModels.length > 0
-                    ? 'removed'
-                    : 'existing'
-              }
+          {/* Tabs for New vs Existing vs Removed */}
+          <Tabs
+            key={`${activeChannel?.id ?? 'custom'}-${fetchedModels.length}-${removedModels.length}`}
+            defaultValue={
+              newModels.length > 0
+                ? 'new'
+                : removedModels.length > 0
+                  ? 'removed'
+                  : 'existing'
+            }
+          >
+            <TabsList
+              className={`grid w-full ${removedModels.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}
             >
-              <TabsList
-                className={`grid w-full ${removedModels.length > 0 ? 'grid-cols-3' : 'grid-cols-2'}`}
+              <TabsTrigger value='new' disabled={newModels.length === 0}>
+                {t('New Models ({{count}})', { count: newModels.length })}
+              </TabsTrigger>
+              <TabsTrigger
+                value='existing'
+                disabled={existingFilteredModels.length === 0}
               >
-                <TabsTrigger value='new' disabled={newModels.length === 0}>
-                  {t('New Models ({{count}})', { count: newModels.length })}
-                </TabsTrigger>
-                <TabsTrigger
-                  value='existing'
-                  disabled={existingFilteredModels.length === 0}
-                >
-                  {t('Existing Models ({{count}})', {
-                    count: existingFilteredModels.length,
+                {t('Existing Models ({{count}})', {
+                  count: existingFilteredModels.length,
+                })}
+              </TabsTrigger>
+              {removedModels.length > 0 && (
+                <TabsTrigger value='removed'>
+                  {t('Removed Models ({{count}})', {
+                    count: removedModels.length,
                   })}
                 </TabsTrigger>
-                {removedModels.length > 0 && (
-                  <TabsTrigger value='removed'>
-                    {t('Removed Models ({{count}})', {
-                      count: removedModels.length,
-                    })}
-                  </TabsTrigger>
-                )}
-              </TabsList>
-
-              <TabsContent
-                value='new'
-                className='max-h-96 space-y-2 overflow-y-auto'
-              >
-                {getSortedCategoryEntries(newModelsByCategory).map(
-                  ([category, models]) => renderModelCategory(category, models)
-                )}
-              </TabsContent>
-
-              <TabsContent
-                value='existing'
-                className='max-h-96 space-y-2 overflow-y-auto'
-              >
-                {getSortedCategoryEntries(existingModelsByCategory).map(
-                  ([category, models]) => renderModelCategory(category, models)
-                )}
-              </TabsContent>
-
-              {removedModels.length > 0 && (
-                <TabsContent
-                  value='removed'
-                  className='max-h-96 space-y-2 overflow-y-auto'
-                >
-                  <p className='text-muted-foreground text-xs'>
-                    {t(
-                      'These models are still in your selection but were not returned by the upstream listing. Entries that are only model_mapping source aliases are omitted. Toggle to adjust before saving.'
-                    )}
-                  </p>
-                  {renderModelCategory(t('Removed'), removedModels)}
-                </TabsContent>
               )}
-            </Tabs>
+            </TabsList>
 
-            {/* Selection Summary */}
-            <div className='bg-muted/50 rounded-lg border p-3 text-sm'>
-              {t('{{n}} model(s) selected', { n: selectedModels.length })}
-            </div>
+            <TabsContent
+              value='new'
+              className='max-h-96 space-y-2 overflow-y-auto'
+            >
+              {getSortedCategoryEntries(newModelsByCategory).map(
+                ([category, models]) => renderModelCategory(category, models)
+              )}
+            </TabsContent>
+
+            <TabsContent
+              value='existing'
+              className='max-h-96 space-y-2 overflow-y-auto'
+            >
+              {getSortedCategoryEntries(existingModelsByCategory).map(
+                ([category, models]) => renderModelCategory(category, models)
+              )}
+            </TabsContent>
+
+            {removedModels.length > 0 && (
+              <TabsContent
+                value='removed'
+                className='max-h-96 space-y-2 overflow-y-auto'
+              >
+                <p className='text-muted-foreground text-xs'>
+                  {t(
+                    'These models are still in your selection but were not returned by the upstream listing. Entries that are only model_mapping source aliases are omitted. Toggle to adjust before saving.'
+                  )}
+                </p>
+                {renderModelCategory(t('Removed'), removedModels)}
+              </TabsContent>
+            )}
+          </Tabs>
+
+          {/* Selection Summary */}
+          <div className='bg-muted/50 rounded-lg border p-3 text-sm'>
+            {t('{{n}} model(s) selected', { n: selectedModels.length })}
           </div>
-        </>
+        </div>
       )}
     </Dialog>
   )

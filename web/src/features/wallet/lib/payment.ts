@@ -29,14 +29,13 @@ import type { PaymentMethod, PresetAmount, TopupInfo } from '../types'
 // Payment Processing Functions
 // ============================================================================
 
-/**
- * Check if browser is Safari
- */
-function isSafariBrowser(): boolean {
-  return (
-    navigator.userAgent.includes('Safari') &&
-    !navigator.userAgent.includes('Chrome')
-  )
+export type PaymentFormSource = 'new_tab' | 'same_tab'
+
+export function getPaymentFormSource(
+  userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent
+): PaymentFormSource {
+  const isSafari = userAgent.includes('Safari') && !userAgent.includes('Chrome')
+  return isSafari ? 'same_tab' : 'new_tab'
 }
 
 /**
@@ -44,15 +43,15 @@ function isSafariBrowser(): boolean {
  */
 export function submitPaymentForm(
   url: string,
-  params: Record<string, unknown>
-): 'new_tab' | 'same_tab' {
+  params: Record<string, unknown>,
+  source = getPaymentFormSource()
+): PaymentFormSource {
   const form = document.createElement('form')
   form.action = url
   form.method = 'POST'
-  const isSafari = isSafariBrowser()
 
   // Don't open in new tab for Safari
-  if (!isSafari) {
+  if (source === 'new_tab') {
     form.target = '_blank'
   }
 
@@ -69,7 +68,7 @@ export function submitPaymentForm(
   form.submit()
   document.body.removeChild(form)
 
-  return isSafari ? 'same_tab' : 'new_tab'
+  return source
 }
 
 /**

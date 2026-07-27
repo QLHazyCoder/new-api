@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+/* eslint-disable react/iframe-missing-sandbox -- configured chat presets require full login and media capabilities */
 import { Link, createFileRoute, redirect } from '@tanstack/react-router'
 import { Loader2, MessageCircleWarning } from 'lucide-react'
 import { useMemo } from 'react'

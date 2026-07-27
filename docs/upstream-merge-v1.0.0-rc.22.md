@@ -25,7 +25,7 @@
 | 0 | Preservation inventory and audit baseline | Complete |
 | 1 | Two-parent merge, frontend flattening, complete local-code migration | Complete |
 | 2 | Backend semantic audit and regression coverage | Complete |
-| 3 | Frontend semantic audit and regression coverage | Pending |
+| 3 | Frontend semantic audit and regression coverage | Complete |
 | 4 | Full validation, encoding audit, Docker build | Pending |
 | Delivery | Fast-forward `main`, push, and successful multi-arch Actions run | Pending |
 
@@ -252,9 +252,22 @@ This section is updated after each stage. A stage may not be marked complete unt
 
 ### Stage 3
 
-- Commit: pending
-- Frontend install/typecheck/test/lint/build: pending
-- Locale JSON audit: pending
+- Commit: this stage's `fix: preserve frontend customizations after rc22 merge` commit.
+- Authentication client audit: no frontend source uses `New-Api-User`, the retired frontend directories, or a legacy Session client. Protected direct streaming requests obtain headers through `getFreshAuthHeaders`; normal requests use the rc.22 `api` client and refresh-cookie flow.
+- Feature-path audit: Playground image generation/editing and async history, performance metrics, administrator-only rankings, wallet and subscription flows, payment returns, user management, pricing, and usage-log filtering all remain connected under `web/src`. All 17 relocated local additions exist; every non-test implementation has an import or export reference, and all relocated tests are discovered by `bun test`.
+- Payment return repair: generic Stripe and Epay flows now write the same return marker used by Creem, Waffo, and subscriptions. Safari is classified as a same-tab form flow before submission so navigation cannot race marker persistence. Pure return-state, marker-age, quota-change, and browser-target tests were added.
+- Locale audit: `sync-i18n.mjs` now always uses English as the stable base, folds legacy root-level keys into the active `translation` namespace, and uses the union of locale keys without overwriting local additions. Chinese image strings accidentally copied into other locales by the old richest-locale algorithm were replaced with reviewed English, French, Japanese, Russian, Vietnamese, Traditional Chinese, and Simplified Chinese values.
+- Locale result: all 7 locale files parse, contain only the `translation` root, and expose the same 5,276 keys. The sync report records zero missing, extra, or suspected-untranslated values for every locale; two consecutive sync runs were byte-for-byte idempotent. The only CJK text in English is the intentional WeChat reply keyword `验证码` inside its English instruction.
+- Lint baseline audit: the untouched rc.22 frontend produced 386 errors with the locked oxlint version. Safe automatic fixes removed type-import side effects, missing braces, redundant spreads, obsolete catch bindings, and equivalent string/index operations. The 55 inherited nested-ternary findings and 48 inherited array-index-key findings were retained as warnings to avoid an unrelated 103-site rendering rewrite; every other lint error was repaired, leaving 0 errors and 124 visible warnings.
+- Structural repair: query-string construction moved to `web/src/features/usage-logs/lib/query-params.ts`, breaking the API/utility import cycle while retaining the barrel export. Search state moved to `web/src/context/search-context.ts`, breaking the Provider/command-menu cycle. `web/src/features/wallet/lib/payment-return.test.ts` owns payment-return regression coverage.
+- Mechanical-change audit: the final stage contains 196 modified frontend files, 3 new frontend files, this audit document, and no deletion. Large diffs were checked as brace, type-import, spread, catch-binding, formatting, or the explicit semantic repairs above; typecheck, tests, lint, and the production build passed after formatting.
+- Encoding and residue audit: all 200 staged files decoded as strict UTF-8, no replacement characters or common mojibake sequences were found, and the Vietnamese phrase `Âm thanh` was confirmed as legitimate text. Conflict markers, tracked `web/default` or `web/classic` files, old-directory references outside this audit, and `New-Api-User` references are absent.
+- `bun install --frozen-lockfile`: passed with no lockfile or installation changes.
+- `bun run typecheck`: passed.
+- `bun test`: passed, 119 tests.
+- `bun run lint`: passed with 0 errors; the 124 reviewed warnings remain visible.
+- `bun run format:check`: passed.
+- `bun run build:check`: passed and produced the production frontend bundle.
 
 ### Stage 4
 

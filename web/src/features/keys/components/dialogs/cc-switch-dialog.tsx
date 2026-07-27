@@ -143,7 +143,7 @@ function buildCCSwitchURL(
   apiKey: string
 ): string {
   const serverAddress = getServerAddress()
-  const endpoint = app === 'codex' ? serverAddress + '/v1' : serverAddress
+  const endpoint = app === 'codex' ? `${serverAddress}/v1` : serverAddress
   const params = new URLSearchParams()
   params.set('resource', 'provider')
   params.set('app', app)

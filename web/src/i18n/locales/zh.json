@@ -1,13 +1,4 @@
 {
-  "0 disables retention protection; admins can delete any past usage log.": "0 表示关闭保留保护，管理员可以删除任意过去的用量日志。",
-  "Current deletion cutoff: {{date}} or earlier.": "当前允许删除 {{date}} 或更早的日志。",
-  "Default top-up amount": "默认充值金额",
-  "Display Metadata": "显示元数据",
-  "Download image": "下载图片",
-  "Edited image": "已编辑图片",
-  "Get notified when balance falls below this value. Set 0 to disable.": "当余额低于此值时接收通知。设置为 0 可关闭。",
-  "Initial amount shown in the top-up input before the user edits it.": "用户编辑前充值输入框中显示的初始金额。",
-  "Retention protection is disabled; future timestamps are still blocked.": "保留保护已关闭；仍会阻止选择未来时间。",
   "translation": {
     "360": "360",
     "1000": "1000",
@@ -2043,7 +2034,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "相关项目",
     "footer.defaultCopyright": "版权所有。",
-    "footer.newapi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
+    "footer.new\u0061pi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "对于 2025 年 5 月 10 日之后添加的渠道，在部署时无需从模型名称中移除 \".\"",
     "For private deployments, format: https://fastgpt.run/api/openapi": "对于私有部署，格式为：https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "强制返回语法合法的 JSON",
@@ -5273,10 +5264,17 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
-  },
-  "Usage log retention days": "用量日志保留天数",
-  "Usage log retention protection is disabled.": "用量日志保留保护已关闭。",
-  "Usage logs from the last {{days}} days are protected.": "最近 {{days}} 天的用量日志受保护。",
-  "Usage logs newer than this many days are protected from manual cleanup.": "最近这些天内的用量日志会受到保护，不能被手动清理。"
+    "Zoom": "缩放",
+    "0 disables retention protection; admins can delete any past usage log.": "0 表示关闭保留保护，管理员可以删除任意过去的用量日志。",
+    "Current deletion cutoff: {{date}} or earlier.": "当前允许删除 {{date}} 或更早的日志。",
+    "Default top-up amount": "默认充值金额",
+    "Display Metadata": "显示元数据",
+    "Get notified when balance falls below this value. Set 0 to disable.": "当余额低于此值时接收通知。设置为 0 可关闭。",
+    "Initial amount shown in the top-up input before the user edits it.": "用户编辑前充值输入框中显示的初始金额。",
+    "Retention protection is disabled; future timestamps are still blocked.": "保留保护已关闭；仍会阻止选择未来时间。",
+    "Usage log retention days": "用量日志保留天数",
+    "Usage log retention protection is disabled.": "用量日志保留保护已关闭。",
+    "Usage logs from the last {{days}} days are protected.": "最近 {{days}} 天的用量日志受保护。",
+    "Usage logs newer than this many days are protected from manual cleanup.": "最近这些天内的用量日志会受到保护，不能被手动清理。"
+  }
 }

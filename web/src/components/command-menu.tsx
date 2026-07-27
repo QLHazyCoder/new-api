@@ -31,7 +31,7 @@ import {
   CommandList,
   CommandSeparator,
 } from '@/components/ui/command'
-import { useSearch } from '@/context/search-provider'
+import { useSearch } from '@/context/search-context'
 import { useTheme } from '@/context/theme-provider'
 import { useSidebarData } from '@/hooks/use-sidebar-data'
 
@@ -68,7 +68,7 @@ export function CommandMenu() {
             {navGroups.map((group) => (
               <CommandGroup key={group.id || group.title} heading={group.title}>
                 {group.items.map((navItem, i) => {
-                  if (navItem.url)
+                  if (navItem.url) {
                     return (
                       <CommandItem
                         key={`${navItem.url}-${i}`}
@@ -83,6 +83,7 @@ export function CommandMenu() {
                         {navItem.title}
                       </CommandItem>
                     )
+                  }
 
                   return navItem.items?.map((subItem, i) => (
                     <CommandItem

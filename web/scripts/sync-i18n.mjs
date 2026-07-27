@@ -21,7 +21,7 @@ import path from 'node:path'
 
 // This script is executed from the web/ package root (see package.json script).
 const LOCALES_DIR = path.resolve('src/i18n/locales')
-const FALLBACK_COMPARE_LOCALE = 'en' // used for "still English" detection only
+const BASE_LOCALE = 'en'
 const OBFUSCATED_KEYS = [
   {
     runtime: ['footer', 'new' + 'api', 'projectAttributionSuffix'].join('.'),
@@ -123,19 +123,25 @@ function stableStringify(obj) {
   for (const key of OBFUSCATED_KEYS) {
     text = text.replaceAll(`"${key.runtime}":`, `"${key.serialized}":`)
   }
-  return text + '\n'
+  return `${text}\n`
 }
 
-function countLeafKeys(obj) {
-  if (Array.isArray(obj)) return obj.length
-  if (!isPlainObject(obj)) return 0
-  let count = 0
-  for (const k of Object.keys(obj)) {
-    const v = obj[k]
-    if (isPlainObject(v) || Array.isArray(v)) count += countLeafKeys(v)
-    else count += 1
+function normalizeLocaleDocument(json) {
+  const translation = isPlainObject(json?.translation)
+    ? { ...json.translation }
+    : {}
+
+  // Older local changes placed translation keys beside the namespace object.
+  // Move them into the active namespace without overwriting an existing value.
+  if (isPlainObject(json)) {
+    for (const [key, value] of Object.entries(json)) {
+      if (key !== 'translation' && !Object.hasOwn(translation, key)) {
+        translation[key] = value
+      }
+    }
   }
-  return count
+
+  return { translation }
 }
 
 function reorderLikeBase(
@@ -154,7 +160,7 @@ function reorderLikeBase(
 
     for (const key of Object.keys(base)) {
       const nextPath = [...currentPath, key]
-      if (Object.prototype.hasOwnProperty.call(t, key)) {
+      if (Object.hasOwn(t, key)) {
         out[key] = reorderLikeBase(
           base[key],
           t[key],
@@ -177,7 +183,7 @@ function reorderLikeBase(
     }
 
     for (const key of Object.keys(t)) {
-      if (!Object.prototype.hasOwnProperty.call(base, key)) {
+      if (!Object.hasOwn(base, key)) {
         const nextPath = [...currentPath, key].join('.')
         extras[nextPath] = t[key]
       }
@@ -210,10 +216,10 @@ function isLikelyUntranslated({ locale, baseValue, value }) {
     /^[\w.-]+@[\w.-]+$/.test(s) ||
     /^smtp\./i.test(s) ||
     /^socks5:/i.test(s) ||
-    /^org-/.test(s) ||
+    s.startsWith('org-') ||
     /^gpt-/i.test(s) ||
-    /^checkout\./.test(s) ||
-    /^footer\./.test(s) ||
+    s.startsWith('checkout.') ||
+    s.startsWith('footer.') ||
     /^[A-Z0-9_ *./:-]+$/.test(s) ||
     s.startsWith('{') ||
     s.startsWith('[') ||
@@ -229,8 +235,9 @@ function isLikelyUntranslated({ locale, baseValue, value }) {
   if (locale === 'ru') return true
 
   // For fr/vi: still useful but noisier; keep it conservative.
-  if (locale === 'fr' || locale === 'vi')
+  if (locale === 'fr' || locale === 'vi') {
     return /\b(the|and|or|to|with|please)\b/i.test(s)
+  }
 
   return false
 }
@@ -242,30 +249,30 @@ async function main() {
     .map((e) => e.name)
     .sort((a, b) => a.localeCompare(b))
 
-  // Auto-pick base locale as the one with the most leaf keys under translation (most "rich").
   const parsedByLocale = {}
   for (const filename of localeFiles) {
     const locale = filename.replace(/\.json$/i, '')
     const raw = await fs.readFile(path.join(LOCALES_DIR, filename), 'utf8')
-    parsedByLocale[locale] = JSON.parse(raw)
+    parsedByLocale[locale] = normalizeLocaleDocument(JSON.parse(raw))
   }
 
-  const baseLocale = Object.keys(parsedByLocale)
-    .map((locale) => {
-      const json = parsedByLocale[locale]
-      const trans = json?.translation ?? {}
-      return { locale, score: countLeafKeys(trans) }
-    })
-    .sort(
-      (a, b) => b.score - a.score || a.locale.localeCompare(b.locale)
-    )[0]?.locale
+  const baseLocale = BASE_LOCALE
+  const baseJson = parsedByLocale[baseLocale]
+  if (!baseJson) throw new Error(`Missing base locale: ${baseLocale}.json`)
 
-  if (!baseLocale) throw new Error('No locale files found.')
+  // The canonical key set is the union of every locale. English remains the
+  // stable base, with the source key itself as the fallback for local keys that
+  // were introduced first in another language.
+  for (const json of Object.values(parsedByLocale)) {
+    for (const key of Object.keys(json.translation)) {
+      if (!Object.hasOwn(baseJson.translation, key)) {
+        baseJson.translation[key] = key
+      }
+    }
+  }
 
   const baseFile = `${baseLocale}.json`
-  const baseJson = parsedByLocale[baseLocale]
-
-  const compareJson = parsedByLocale[FALLBACK_COMPARE_LOCALE] ?? baseJson
+  const compareJson = baseJson
 
   const report = {
     base: baseFile,
@@ -293,7 +300,6 @@ async function main() {
     if (
       isPlainObject(compareTrans) &&
       isPlainObject(trans) &&
-      locale !== FALLBACK_COMPARE_LOCALE &&
       locale !== baseLocale
     ) {
       for (const k of Object.keys(compareTrans)) {

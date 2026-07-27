@@ -243,10 +243,7 @@ export function LogSettingsSection({ defaultValues }: LogSettingsSectionProps) {
     ? Math.min(Math.max(retentionDays, 0), MAX_LOG_RETENTION_DAYS)
     : defaultLogRetentionDays
 
-  const maxPurgeDate = getRetentionCutoffDate(
-    boundedRetentionDays,
-    currentTime
-  )
+  const maxPurgeDate = getRetentionCutoffDate(boundedRetentionDays, currentTime)
 
   useEffect(() => {
     if (purgeDate && purgeDate.getTime() > maxPurgeDate.getTime()) {
@@ -265,11 +262,8 @@ export function LogSettingsSection({ defaultValues }: LogSettingsSectionProps) {
   const clampPurgeDate = (date: Date) =>
     date.getTime() > maxPurgeDate.getTime() ? new Date(maxPurgeDate) : date
 
-  const isQuickSelectDisabled = (
-    option: (typeof quickSelectOptions)[number]
-  ) =>
-    boundedRetentionDays > 0 &&
-    boundedRetentionDays > option.maxRetentionDays
+  const isQuickSelectDisabled = (option: (typeof quickSelectOptions)[number]) =>
+    boundedRetentionDays > 0 && boundedRetentionDays > option.maxRetentionDays
 
   const logCleanupActive = isActiveLogCleanupTask(logCleanupTask)
   const logCleanupState = logCleanupTask?.state
