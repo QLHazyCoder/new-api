@@ -948,9 +948,11 @@ func TestCalculateTextToolCallSurchargeGeminiGoogleSearch(t *testing.T) {
 	assert.Equal(t, 14.0, summary.ToolSurchargeItems[0].Price)
 }
 
-func TestCalculateTextToolCallSurchargeImageGenerationDefaultPrice(t *testing.T) {
+func TestCalculateTextToolCallSurchargeImageGenerationQualitySizeFallback(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("image_generation_call_quality", "low")
+	ctx.Set("image_generation_call_size", "1024x1536")
 	t.Cleanup(func() {
 		operation_setting.DeleteToolPriceForTest(dto.BuildInToolImageGeneration)
 	})
@@ -966,7 +968,7 @@ func TestCalculateTextToolCallSurchargeImageGenerationDefaultPrice(t *testing.T)
 	summary := &textQuotaSummary{ModelName: "gpt-5.1", GroupRatio: 1.5}
 
 	surcharge := calculateTextToolCallSurcharge(ctx, relayInfo, summary)
-	expected := decimal.NewFromFloat(150.0).
+	expected := decimal.NewFromFloat(16.0).
 		Mul(decimal.NewFromInt(2)).
 		Div(decimal.NewFromInt(1000)).
 		Mul(decimal.NewFromFloat(1.5)).
@@ -975,7 +977,7 @@ func TestCalculateTextToolCallSurchargeImageGenerationDefaultPrice(t *testing.T)
 	require.Len(t, summary.ToolSurchargeItems, 1)
 	assert.Equal(t, dto.BuildInToolImageGeneration, summary.ToolSurchargeItems[0].Name)
 	assert.Equal(t, 2, summary.ToolSurchargeItems[0].Count)
-	assert.Equal(t, 150.0, summary.ToolSurchargeItems[0].Price)
+	assert.Equal(t, 16.0, summary.ToolSurchargeItems[0].Price)
 }
 
 func TestCalculateTextToolCallSurchargeImageGenerationExplicitZeroDisables(t *testing.T) {
@@ -1004,6 +1006,8 @@ func TestCalculateTextToolCallSurchargeImageGenerationExplicitZeroDisables(t *te
 func TestCalculateTextQuotaSummaryImageGenerationUsesStructuredSurcharge(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Set("image_generation_call_quality", "medium")
+	ctx.Set("image_generation_call_size", "1024x1536")
 	t.Cleanup(func() {
 		operation_setting.DeleteToolPriceForTest(dto.BuildInToolImageGeneration)
 	})
@@ -1026,9 +1030,9 @@ func TestCalculateTextQuotaSummaryImageGenerationUsesStructuredSurcharge(t *test
 	require.Len(t, summary.ToolSurchargeItems, 1)
 	assert.Equal(t, dto.BuildInToolImageGeneration, summary.ToolSurchargeItems[0].Name)
 	assert.Equal(t, 1, summary.ToolSurchargeItems[0].Count)
-	assert.Equal(t, 150.0, summary.ToolSurchargeItems[0].Price)
+	assert.Equal(t, 63.0, summary.ToolSurchargeItems[0].Price)
 
-	expectedSurcharge := decimal.NewFromFloat(150.0 / 1000).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	expectedSurcharge := decimal.NewFromFloat(63.0 / 1000).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
 	assert.True(t, expectedSurcharge.Equal(summary.ToolCallSurchargeQuota),
 		"got %s want %s", summary.ToolCallSurchargeQuota, expectedSurcharge)
 	assert.Greater(t, summary.Quota, 0)

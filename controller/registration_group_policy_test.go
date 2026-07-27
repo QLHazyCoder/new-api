@@ -13,8 +13,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -59,6 +57,7 @@ func setupRegistrationGroupControllerTestDB(t *testing.T) *gorm.DB {
 	originalWeChatAuthEnabled := common.WeChatAuthEnabled
 	originalWeChatServerAddress := common.WeChatServerAddress
 	originalWeChatServerToken := common.WeChatServerToken
+	originalSessionSecret := common.SessionSecret
 	originalQuotaForNewUser := common.QuotaForNewUser
 	originalQuotaForInviter := common.QuotaForInviter
 	originalQuotaForInvitee := common.QuotaForInvitee
@@ -73,6 +72,7 @@ func setupRegistrationGroupControllerTestDB(t *testing.T) *gorm.DB {
 	common.PasswordRegisterEnabled = true
 	common.EmailVerificationEnabled = false
 	common.WeChatAuthEnabled = true
+	common.SessionSecret = "registration-group-test-session-secret"
 	common.QuotaForNewUser = 0
 	common.QuotaForInviter = 0
 	common.QuotaForInvitee = 0
@@ -83,7 +83,12 @@ func setupRegistrationGroupControllerTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Option{}, &model.Log{}))
+	require.NoError(t, db.AutoMigrate(
+		&model.User{},
+		&model.UserSession{},
+		&model.Option{},
+		&model.Log{},
+	))
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"friend":1,"vip":2}`))
 	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{}`))
 
@@ -98,6 +103,7 @@ func setupRegistrationGroupControllerTestDB(t *testing.T) *gorm.DB {
 		common.WeChatAuthEnabled = originalWeChatAuthEnabled
 		common.WeChatServerAddress = originalWeChatServerAddress
 		common.WeChatServerToken = originalWeChatServerToken
+		common.SessionSecret = originalSessionSecret
 		common.QuotaForNewUser = originalQuotaForNewUser
 		common.QuotaForInviter = originalQuotaForInviter
 		common.QuotaForInvitee = originalQuotaForInvitee
@@ -162,7 +168,6 @@ func TestWeChatRegistrationAppliesSourceOverride(t *testing.T) {
 	common.WeChatServerToken = "test-token"
 
 	router := gin.New()
-	router.Use(sessions.Sessions("registration-group-test", cookie.NewStore([]byte("test-secret"))))
 	router.GET("/api/oauth/wechat", WeChatAuth)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/oauth/wechat?code=test-code", nil)
@@ -188,9 +193,8 @@ func TestOAuthRegistrationAppliesProviderOverride(t *testing.T) {
 	oauthUser := &oauth.OAuthUser{ProviderUserID: "github-policy-user", Username: "oauth_policy_user"}
 
 	router := gin.New()
-	router.Use(sessions.Sessions("registration-group-test", cookie.NewStore([]byte("test-secret"))))
 	router.GET("/oauth-contract", func(c *gin.Context) {
-		user, err := findOrCreateOAuthUser(c, "github", provider, oauthUser, sessions.Default(c))
+		user, err := findOrCreateOAuthUser(c, "github", provider, oauthUser, "")
 		require.NoError(t, err)
 		require.Equal(t, "vip", user.Group)
 		c.Status(http.StatusNoContent)
@@ -223,9 +227,8 @@ func TestExistingOAuthLoginKeepsCurrentGroup(t *testing.T) {
 	provider := &registrationGroupTestProvider{existingUser: existing}
 
 	router := gin.New()
-	router.Use(sessions.Sessions("registration-group-test", cookie.NewStore([]byte("test-secret"))))
 	router.GET("/oauth-existing-contract", func(c *gin.Context) {
-		user, err := findOrCreateOAuthUser(c, "github", provider, &oauth.OAuthUser{ProviderUserID: existing.GitHubId}, sessions.Default(c))
+		user, err := findOrCreateOAuthUser(c, "github", provider, &oauth.OAuthUser{ProviderUserID: existing.GitHubId}, "")
 		require.NoError(t, err)
 		require.Equal(t, "legacy-group", user.Group)
 		c.Status(http.StatusNoContent)

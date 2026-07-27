@@ -32,7 +32,6 @@ const (
 	defaultWebSearchPreviewToolPrice = 10.0
 	defaultFileSearchToolPrice       = 2.5
 	defaultGoogleSearchToolPrice     = 14.0
-	defaultImageGenerationToolPrice  = 150.0
 	defaultSearchPreviewModelPrice   = 25.0
 )
 
@@ -44,7 +43,6 @@ func seedHardcodedToolPrices(prices map[string]float64) {
 	prices["web_search_preview"] = defaultWebSearchPreviewToolPrice
 	prices["file_search"] = defaultFileSearchToolPrice
 	prices["google_search"] = defaultGoogleSearchToolPrice
-	prices["image_generation"] = defaultImageGenerationToolPrice
 	prices["web_search_preview:gpt-4o*"] = defaultSearchPreviewModelPrice
 	prices["web_search_preview:gpt-4.1*"] = defaultSearchPreviewModelPrice
 	prices["web_search_preview:gpt-4o-mini*"] = defaultSearchPreviewModelPrice
@@ -187,30 +185,38 @@ func RebuildToolPriceIndex() {
 	currentIndex.Store(idx)
 }
 
-// GetToolPriceForModel returns the price ($/1K calls) for a tool given a model name.
-// Lookup: longest prefix match → tool default → 0.
-func GetToolPriceForModel(toolName, modelName string) float64 {
+// LookupToolPriceForModel returns the price ($/1K calls) and whether a matching
+// rule exists. Presence is significant for image_generation: an explicit zero
+// disables its surcharge, while no rule falls back to quality/size pricing.
+func LookupToolPriceForModel(toolName, modelName string) (float64, bool) {
 	idx := currentIndex.Load()
 	if idx == nil {
 		RebuildToolPriceIndex()
 		idx = currentIndex.Load()
 		if idx == nil {
-			return 0
+			return 0, false
 		}
 	}
 
 	if entries, ok := idx.prefixes[toolName]; ok && modelName != "" {
 		for _, e := range entries {
 			if strings.HasPrefix(modelName, e.prefix) {
-				return e.price
+				return e.price, true
 			}
 		}
 	}
 
 	if p, ok := idx.defaults[toolName]; ok {
-		return p
+		return p, true
 	}
-	return 0
+	return 0, false
+}
+
+// GetToolPriceForModel returns the price ($/1K calls) for a tool given a model name.
+// Lookup: longest prefix match → tool default → 0.
+func GetToolPriceForModel(toolName, modelName string) float64 {
+	price, _ := LookupToolPriceForModel(toolName, modelName)
+	return price
 }
 
 // GetToolPrice is a convenience wrapper when no model name is needed.
@@ -231,6 +237,52 @@ func SetToolPriceForTest(name string, price float64) {
 func DeleteToolPriceForTest(name string) {
 	delete(toolPriceSetting.Prices, name)
 	RebuildToolPriceIndex()
+}
+
+// ---------------------------------------------------------------------------
+// GPT image per-call fallback pricing (quality + size)
+// ---------------------------------------------------------------------------
+
+const (
+	GPTImage1Low1024x1024    = 0.011
+	GPTImage1Low1024x1536    = 0.016
+	GPTImage1Low1536x1024    = 0.016
+	GPTImage1Medium1024x1024 = 0.042
+	GPTImage1Medium1024x1536 = 0.063
+	GPTImage1Medium1536x1024 = 0.063
+	GPTImage1High1024x1024   = 0.167
+	GPTImage1High1024x1536   = 0.25
+	GPTImage1High1536x1024   = 0.25
+)
+
+// GetGPTImage1PriceOnceCall returns the per-image USD fallback used only when
+// no administrator image_generation tool-price rule matches.
+func GetGPTImage1PriceOnceCall(quality string, size string) float64 {
+	quality = strings.ToLower(strings.TrimSpace(quality))
+	size = strings.ToLower(strings.TrimSpace(size))
+
+	switch quality + ":" + size {
+	case "low:1024x1024":
+		return GPTImage1Low1024x1024
+	case "low:1024x1536":
+		return GPTImage1Low1024x1536
+	case "low:1536x1024":
+		return GPTImage1Low1536x1024
+	case "medium:1024x1024":
+		return GPTImage1Medium1024x1024
+	case "medium:1024x1536":
+		return GPTImage1Medium1024x1536
+	case "medium:1536x1024":
+		return GPTImage1Medium1536x1024
+	case "high:1024x1536":
+		return GPTImage1High1024x1536
+	case "high:1536x1024":
+		return GPTImage1High1536x1024
+	case "high:1024x1024":
+		return GPTImage1High1024x1024
+	default:
+		return GPTImage1High1024x1024
+	}
 }
 
 // ---------------------------------------------------------------------------

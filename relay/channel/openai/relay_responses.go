@@ -17,6 +17,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func observeImageGenerationForBilling(c *gin.Context, counter *relaycommon.ImageGenerationCallCounter, item *dto.ResponsesOutput, outputIndex *int) {
+	counter.Observe(item, outputIndex)
+	if c == nil || item == nil || item.Type != dto.ResponsesOutputTypeImageGenerationCall || strings.TrimSpace(item.Result) == "" {
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(item.Status)) {
+	case "failed", "cancelled", "canceled", "incomplete", "partial":
+		return
+	}
+	if c.GetString("image_generation_call_quality") == "" && strings.TrimSpace(item.Quality) != "" {
+		c.Set("image_generation_call_quality", item.Quality)
+	}
+	if c.GetString("image_generation_call_size") == "" && strings.TrimSpace(item.Size) != "" {
+		c.Set("image_generation_call_size", item.Size)
+	}
+}
+
 func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
@@ -64,7 +81,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	if !relaycommon.IsNonBillableResponsesStatus(responsesResponse.Status) {
 		for i := range responsesResponse.Output {
 			idx := i
-			imageCounter.Observe(&responsesResponse.Output[i], &idx)
+			observeImageGenerationForBilling(c, imageCounter, &responsesResponse.Output[i], &idx)
 		}
 	}
 	imageCounter.Commit(info)
@@ -121,7 +138,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					} else {
 						for i := range streamResponse.Response.Output {
 							idx := i
-							imageCounter.Observe(&streamResponse.Response.Output[i], &idx)
+							observeImageGenerationForBilling(c, imageCounter, &streamResponse.Response.Output[i], &idx)
 						}
 						imageCounter.Commit(info)
 						imageCommitted = true
@@ -151,7 +168,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 					info.CountBillableToolCall(dto.BuildInCallFunctionCall, streamResponse.Item.Name)
 				case dto.ResponsesOutputTypeImageGenerationCall:
 					if !imageCommitted {
-						imageCounter.Observe(streamResponse.Item, streamResponse.OutputIndex)
+						observeImageGenerationForBilling(c, imageCounter, streamResponse.Item, streamResponse.OutputIndex)
 					}
 				}
 			}

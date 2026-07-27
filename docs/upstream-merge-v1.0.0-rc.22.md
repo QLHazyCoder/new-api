@@ -24,7 +24,7 @@
 | --- | --- | --- |
 | 0 | Preservation inventory and audit baseline | Complete |
 | 1 | Two-parent merge, frontend flattening, complete local-code migration | Complete |
-| 2 | Backend semantic audit and regression coverage | Pending |
+| 2 | Backend semantic audit and regression coverage | Complete |
 | 3 | Frontend semantic audit and regression coverage | Pending |
 | 4 | Full validation, encoding audit, Docker build | Pending |
 | Delivery | Fast-forward `main`, push, and successful multi-arch Actions run | Pending |
@@ -236,10 +236,19 @@ This section is updated after each stage. A stage may not be marked complete unt
 
 ### Stage 2
 
-- Commit: pending
-- Backend targeted tests: pending
-- `go build ./...`: pending
-- `go test ./...`: pending
+- Commit: this stage's `fix: preserve backend customizations after rc22 merge` commit.
+- Registration audit: password, OAuth-provider, and WeChat registration all apply the source-aware group policy; existing OAuth users keep their current group. The tests now use rc.22 database Sessions instead of the retired `gin-contrib/sessions` middleware.
+- User deletion audit: hard deletion fences authentication, removes Sessions/AuthFlow/Passkey/OAuth/token data, invalidates caches, decrements the inviter count transactionally, and preserves the append-only affiliate reward ledger.
+- Subscription audit: applicable groups, subscription-first partial consumption, strict-plan wallet fallback, mixed allocations, wallet-first refunds, and cache refresh behavior remain covered and passed.
+- Upstream behavior adopted: ordered auto-group model deduplication, task status CAS before refunds, Sub2API adaptor tests, Responses tool-call deduplication, and model discovery tests all passed.
+- Image tool billing: an explicit administrator model-prefix/default price has priority, including explicit zero; absent configuration uses local quality/size pricing and never the rc.22 implicit `$0.15` charge.
+- Relay billing audit: public Chat Completions automatic Responses rerouting remains disabled; OpenAI cache-write usage, image completion counting, multi-provider image routing, and tool surcharge logging tests passed.
+- Migration audit: standard and fast migration paths contain local business tables plus rc.22 authentication tables. Fast migration was corrected to include `CasbinRule` and `AuthzRole`, with a dedicated parity test.
+- Added file: `model/main_migration_test.go` verifies that fast migration creates the authentication, affiliate, performance, system-task, Playground image, Casbin, and authorization-role tables.
+- Database compatibility: full empty-database startup migration passed on SQLite, MySQL 8.2, and PostgreSQL 18. The configured MySQL/PostgreSQL Session migration tests also passed, and all key custom/authentication tables were confirmed present.
+- `go mod tidy -diff`: passed with no module-file changes.
+- `go build ./...`: passed.
+- `go test ./...`: passed.
 
 ### Stage 3
 

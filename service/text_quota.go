@@ -115,6 +115,35 @@ func collectToolSurchargeItem(items []ToolSurchargeItem, name string, count int,
 	})
 }
 
+func collectImageGenerationSurchargeItem(items []ToolSurchargeItem, count int, modelName string, ctx *gin.Context) []ToolSurchargeItem {
+	if count <= 0 {
+		return items
+	}
+
+	pricePerThousand, configured := operation_setting.LookupToolPriceForModel(
+		dto.BuildInToolImageGeneration,
+		modelName,
+	)
+	if !configured {
+		quality := ""
+		size := ""
+		if ctx != nil {
+			quality = ctx.GetString("image_generation_call_quality")
+			size = ctx.GetString("image_generation_call_size")
+		}
+		pricePerThousand = operation_setting.GetGPTImage1PriceOnceCall(quality, size) * 1000
+	}
+	if pricePerThousand <= 0 || math.IsNaN(pricePerThousand) || math.IsInf(pricePerThousand, 0) {
+		return items
+	}
+
+	return append(items, ToolSurchargeItem{
+		Name:  dto.BuildInToolImageGeneration,
+		Count: count,
+		Price: pricePerThousand,
+	})
+}
+
 func mergeToolSurchargeItems(items []ToolSurchargeItem) []ToolSurchargeItem {
 	if len(items) == 0 {
 		return nil
@@ -154,6 +183,10 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 	if relayInfo.ResponsesUsageInfo != nil {
 		for name, tool := range relayInfo.ResponsesUsageInfo.BuiltInTools {
 			if tool == nil {
+				continue
+			}
+			if name == dto.BuildInToolImageGeneration {
+				items = collectImageGenerationSurchargeItem(items, tool.CallCount, summary.ModelName, ctx)
 				continue
 			}
 			items = collectToolSurchargeItem(items, name, tool.CallCount, summary.ModelName)

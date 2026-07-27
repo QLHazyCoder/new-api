@@ -30,11 +30,13 @@ func TestToolPriceHardcodedFallbacksSurviveMissingOperatorConfig(t *testing.T) {
 		"web_search_preview": 10,
 		"file_search":        2.5,
 		"google_search":      14,
-		"image_generation":   150,
 	}
 	for name, expected := range expectedDefaults {
 		assert.Equal(t, expected, GetToolPrice(name), name)
 	}
+	imagePrice, imageConfigured := LookupToolPriceForModel("image_generation", "gpt-5.1")
+	assert.False(t, imageConfigured)
+	assert.Zero(t, imagePrice)
 	assert.Equal(t, 25.0, GetToolPriceForModel("web_search_preview", "gpt-4o-2024-11-20"))
 	assert.Equal(t, 25.0, GetToolPriceForModel("web_search_preview", "gpt-4.1-mini"))
 }
@@ -51,7 +53,9 @@ func TestToolPriceOperatorOverridePrecedenceAndExplicitZero(t *testing.T) {
 	}
 	RebuildToolPriceIndex()
 
-	assert.Equal(t, 0.0, GetToolPrice("image_generation"))
+	imagePrice, imageConfigured := LookupToolPriceForModel("image_generation", "gpt-5.1")
+	assert.True(t, imageConfigured)
+	assert.Equal(t, 0.0, imagePrice)
 	assert.Equal(t, 12.0, GetToolPrice("web_search"))
 	assert.Equal(t, 0.0, GetToolPriceForModel("web_search_preview", "o1"))
 	assert.Equal(t, 30.0, GetToolPriceForModel("web_search_preview", "gpt-4o"))
@@ -127,7 +131,8 @@ func TestLoadToolPricesFromJSONStringReplacesMapAndKeepsValidSiblings(t *testing
 	assert.Equal(t, 3.0, GetToolPrice("custom_fn"))
 	assert.Equal(t, 2.5, GetToolPrice("file_search"))
 	assert.Equal(t, 14.0, GetToolPrice("google_search"))
-	assert.Equal(t, 150.0, GetToolPrice("image_generation"))
+	_, imageConfigured := LookupToolPriceForModel("image_generation", "gpt-5.1")
+	assert.False(t, imageConfigured)
 
 	LoadToolPricesFromJSONString(`{"image_generation":0}`)
 	require.Len(t, toolPriceSetting.Prices, 1)
@@ -135,7 +140,9 @@ func TestLoadToolPricesFromJSONStringReplacesMapAndKeepsValidSiblings(t *testing
 	assert.NotContains(t, toolPriceSetting.Prices, "custom_fn")
 	assert.Equal(t, 10.0, GetToolPrice("web_search"))
 	assert.Equal(t, 0.0, GetToolPrice("custom_fn"))
-	assert.Equal(t, 0.0, GetToolPrice("image_generation"))
+	imagePrice, imageConfigured := LookupToolPriceForModel("image_generation", "gpt-5.1")
+	assert.True(t, imageConfigured)
+	assert.Equal(t, 0.0, imagePrice)
 }
 
 func TestRebuildToolPriceIndexIgnoresInvalidDirectValues(t *testing.T) {
@@ -150,6 +157,25 @@ func TestRebuildToolPriceIndexIgnoresInvalidDirectValues(t *testing.T) {
 
 	assert.Equal(t, 10.0, GetToolPrice("web_search"))
 	assert.Equal(t, 2.5, GetToolPrice("file_search"))
-	assert.Equal(t, 150.0, GetToolPrice("image_generation"))
+	_, imageConfigured := LookupToolPriceForModel("image_generation", "gpt-5.1")
+	assert.False(t, imageConfigured)
 	assert.Equal(t, 0.0, GetToolPrice("custom_fn"))
+}
+
+func TestGPTImageFallbackPricingUsesQualityAndSize(t *testing.T) {
+	tests := []struct {
+		quality string
+		size    string
+		want    float64
+	}{
+		{quality: "low", size: "1024x1024", want: 0.011},
+		{quality: "low", size: "1024x1536", want: 0.016},
+		{quality: "medium", size: "1536x1024", want: 0.063},
+		{quality: "high", size: "1024x1536", want: 0.25},
+		{quality: "auto", size: "auto", want: 0.167},
+	}
+
+	for _, test := range tests {
+		assert.Equal(t, test.want, GetGPTImage1PriceOnceCall(test.quality, test.size))
+	}
 }
