@@ -30,6 +30,7 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 
 import {
@@ -48,9 +49,14 @@ const drawingSchema = z.object({
   MjForwardUrlEnabled: z.boolean(),
   MjModeClearEnabled: z.boolean(),
   MjActionCheckSuccessEnabled: z.boolean(),
+  PlaygroundImageMaxConcurrency: z.number().int().min(0),
 })
 
 type DrawingFormValues = z.infer<typeof drawingSchema>
+type DrawingSwitchName = Exclude<
+  keyof DrawingFormValues,
+  'PlaygroundImageMaxConcurrency'
+>
 
 type DrawingSettingsSectionProps = {
   defaultValues: DrawingFormValues
@@ -81,7 +87,7 @@ export function DrawingSettingsSection({
   }
 
   const switches: Array<{
-    name: keyof DrawingFormValues
+    name: DrawingSwitchName
     label: string
     description: string
   }> = [
@@ -161,6 +167,41 @@ export function DrawingSettingsSection({
                 )}
               />
             ))}
+            <FormField
+              control={form.control}
+              name='PlaygroundImageMaxConcurrency'
+              render={({ field }) => (
+                <div className='flex min-w-0 flex-col gap-2 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-4'>
+                  <div className='min-w-0 space-y-0.5'>
+                    <FormLabel>{t('Image playground concurrency')}</FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Maximum number of image playground tasks running across the site. Use 0 for unlimited concurrency.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </div>
+                  <FormControl>
+                    <Input
+                      className='w-full sm:w-32'
+                      min={0}
+                      step={1}
+                      type='number'
+                      value={field.value}
+                      onBlur={field.onBlur}
+                      onChange={(event) =>
+                        field.onChange(
+                          Math.max(
+                            0,
+                            Math.floor(Number(event.target.value) || 0)
+                          )
+                        )
+                      }
+                    />
+                  </FormControl>
+                </div>
+              )}
+            />
           </div>
         </SettingsForm>
       </Form>

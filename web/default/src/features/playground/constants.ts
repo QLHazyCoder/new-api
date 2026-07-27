@@ -39,8 +39,10 @@ export const MESSAGE_STATUS = {
 // API endpoints
 export const API_ENDPOINTS = {
   CHAT_COMPLETIONS: '/pg/chat/completions',
-  IMAGE_GENERATIONS: '/pg/images/generations',
-  IMAGE_EDITS: '/pg/images/edits',
+  IMAGE_BATCH_GENERATIONS: '/api/playground/image-batches/generations',
+  IMAGE_BATCH_EDITS: '/api/playground/image-batches/edits',
+  IMAGE_BATCH: '/api/playground/image-batches',
+  IMAGE_TASKS: '/api/playground/image-tasks',
   USER_IMAGE_MODELS: '/api/user/image-models',
   USER_MODELS: '/api/user/models',
   USER_GROUPS: '/api/user/self/groups',

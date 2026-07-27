@@ -31,7 +31,6 @@ import {
   loadImageTasks,
   loadMessages,
   loadPlaygroundMode,
-  persistInterruptedImageTasks,
   saveConfig,
   saveImageConfig,
   saveImageTasks,
@@ -82,28 +81,9 @@ export function usePlaygroundState() {
   const [imageTasks, setImageTasks] = useState<ImageTask[]>(() => {
     return loadImageTasks()
   })
-  const imageTasksRef = useRef(imageTasks)
 
   const [models, setModels] = useState<ModelOption[]>([])
   const [groups, setGroups] = useState<GroupOption[]>([])
-
-  useEffect(() => {
-    imageTasksRef.current = imageTasks
-  }, [imageTasks])
-
-  useEffect(() => {
-    const handlePageExit = () => {
-      persistInterruptedImageTasks(imageTasksRef.current)
-    }
-
-    window.addEventListener('pagehide', handlePageExit)
-    window.addEventListener('beforeunload', handlePageExit)
-
-    return () => {
-      window.removeEventListener('pagehide', handlePageExit)
-      window.removeEventListener('beforeunload', handlePageExit)
-    }
-  }, [])
 
   const persistMessages = useCallback((messagesToSave: Message[]) => {
     latestMessagesRef.current = messagesToSave

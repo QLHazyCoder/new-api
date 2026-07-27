@@ -449,30 +449,56 @@ export function saveImageConfig(config: Partial<ImageGenerationConfig>): void {
   }
 }
 
-function sanitizeImageTasksForStorage(tasks: ImageTask[]): ImageTask[] {
-  return tasks.slice(0, 20).map((task) => ({
-    ...task,
-    referenceImages: task.referenceImages?.map((image) => ({
-      id: image.id,
-      name: image.name,
-      dataUrl: image.dataUrl,
-      type: image.type,
-      size: image.size,
-    })),
-  }))
+function sanitizeImageTasksForStorage(
+  tasks: ImageTask[],
+  now = Date.now()
+): ImageTask[] {
+  const cutoff = now - 7 * 24 * 60 * 60 * 1000
+  return tasks
+    .filter(
+      (task) =>
+        task.origin !== 'server' &&
+        Number.isFinite(task.createdAt) &&
+        task.createdAt >= cutoff
+    )
+    .slice(0, 20)
+    .map((task) => ({
+      ...task,
+      origin: 'legacy',
+      referenceImages: task.referenceImages?.map((image) => ({
+        id: image.id,
+        name: image.name,
+        dataUrl: image.dataUrl,
+        type: image.type,
+        size: image.size,
+      })),
+    }))
 }
 
-export function markRunningImageTasksInterrupted(tasks: ImageTask[]): ImageTask[] {
+export function markRunningImageTasksInterrupted(
+  tasks: ImageTask[],
+  now = Date.now()
+): ImageTask[] {
   return tasks.map((task) => {
-    if (task.status !== 'running') return task
+    if (!['queued', 'running', 'saving'].includes(task.status)) return task
 
     return {
       ...task,
       status: 'interrupted',
       error: task.error || 'Generation was interrupted',
-      finishedAt: task.finishedAt ?? Date.now(),
+      finishedAt: task.finishedAt ?? now,
     }
   })
+}
+
+export function normalizeLegacyImageTasks(
+  tasks: ImageTask[],
+  now = Date.now()
+): ImageTask[] {
+  return markRunningImageTasksInterrupted(
+    sanitizeImageTasksForStorage(tasks, now),
+    now
+  )
 }
 
 export function loadImageTasks(): ImageTask[] {
@@ -483,7 +509,7 @@ export function loadImageTasks(): ImageTask[] {
     const parsed = unwrapStoredValue(saved)
     if (!Array.isArray(parsed)) return []
 
-    const sanitized = sanitizeImageTasksForStorage(parsed as ImageTask[])
+    const sanitized = normalizeLegacyImageTasks(parsed as ImageTask[])
     if (JSON.stringify(sanitized) !== JSON.stringify(parsed)) {
       saveImageTasks(sanitized)
     }

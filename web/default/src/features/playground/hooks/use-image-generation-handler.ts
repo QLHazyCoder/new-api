@@ -17,33 +17,39 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { nanoid } from 'nanoid'
-import { useCallback } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { sendImageEdit, sendImageGeneration } from '../api'
+import {
+  createImageEditBatch,
+  createImageGenerationBatch,
+  deleteImageTask as deleteServerImageTask,
+  getAllImageTasks,
+  retryImageTask as retryServerImageTask,
+} from '../api'
 import { ERROR_MESSAGES } from '../constants'
 import {
   buildImageEditFormData,
   buildImageGenerationPayload,
   findImageModelCapabilities,
-  loadImageTasks,
   normalizePlaygroundImageConfig,
   normalizeImageGenerationCount,
-  saveImageTasks,
 } from '../lib'
 import type {
   ImageGenerationConfig,
   ImageGroupOption,
   ImageReferenceInput,
-  ImageReferencePreview,
-  ImageResult,
   ImageTask,
+  ImageTaskStatus,
+  ServerImageTask,
 } from '../types'
 
 interface UseImageGenerationHandlerOptions {
   config: ImageGenerationConfig
+  enabled: boolean
   groups: ImageGroupOption[]
+  tasks: ImageTask[]
   onTasksUpdate: (
     updater: ImageTask[] | ((prev: ImageTask[]) => ImageTask[])
   ) => void
@@ -93,62 +99,133 @@ function getImageGenerationError(
   }
 }
 
-function toReferencePreview(
-  reference: ImageReferenceInput
-): ImageReferencePreview {
+function mapServerImageTaskStatus(
+  status: ServerImageTask['status']
+): ImageTaskStatus {
+  if (status === 'succeeded') return 'done'
+  if (status === 'failed') return 'error'
+  return status
+}
+
+function mapServerImageTask(task: ServerImageTask): ImageTask {
+  const config = {
+    size: '',
+    aspect_ratio: '',
+    resolution: '',
+    quality: 'auto',
+    ...task.config,
+    model: task.model,
+    group: task.group,
+    n: 1,
+    response_format: 'url',
+  } as ImageGenerationConfig
+
   return {
-    id: reference.id,
-    name: reference.name,
-    dataUrl: reference.dataUrl,
-    type: reference.type,
-    size: reference.size,
+    id: task.id,
+    batchId: task.batch_id,
+    taskIndex: task.task_index,
+    prompt: task.prompt,
+    config,
+    mode: task.mode,
+    status: mapServerImageTaskStatus(task.status),
+    image: task.image
+      ? {
+          url: task.image.url,
+          mime_type: task.image.mime_type,
+        }
+      : undefined,
+    downloadUrl: task.image?.download_url,
+    error: task.error,
+    errorCode: task.error_code,
+    origin: 'server',
+    createdAt: task.created_at * 1000,
+    startedAt: task.started_at ? task.started_at * 1000 : undefined,
+    finishedAt: task.finished_at ? task.finished_at * 1000 : undefined,
+    expiresAt: task.expires_at * 1000,
   }
 }
 
-function prependStoredImageTasks(tasks: ImageTask[]): void {
-  const storedTaskIds = new Set(tasks.map((task) => task.id))
-  const storedTasks = loadImageTasks().filter(
-    (task) => !storedTaskIds.has(task.id)
-  )
-  saveImageTasks([...tasks, ...storedTasks])
-}
-
-function updateStoredImageTask(
-  taskId: string,
-  updater: (task: ImageTask) => ImageTask
-): void {
-  let didUpdate = false
-  const nextTasks = loadImageTasks().map((task) => {
-    if (task.id !== taskId) return task
-    didUpdate = true
-    return updater(task)
-  })
-
-  if (didUpdate) {
-    saveImageTasks(nextTasks)
-  }
+function isActiveImageTask(task: ImageTask): boolean {
+  return ['queued', 'running', 'saving'].includes(task.status)
 }
 
 export function useImageGenerationHandler({
   config,
+  enabled,
   groups,
+  tasks,
   onTasksUpdate,
 }: UseImageGenerationHandlerOptions) {
   const { t } = useTranslation()
+  const refreshRequestRef = useRef<Promise<void> | null>(null)
+  const hasActiveTasksRef = useRef(tasks.some(isActiveImageTask))
+  const hasLoadedTasksRef = useRef(false)
 
-  const updateTask = useCallback(
-    (taskId: string, updater: (task: ImageTask) => ImageTask) => {
-      updateStoredImageTask(taskId, updater)
+  useEffect(() => {
+    hasActiveTasksRef.current = tasks.some(isActiveImageTask)
+  }, [tasks])
 
-      onTasksUpdate((prev) => {
-        const nextTasks = prev.map((task) =>
-          task.id === taskId ? updater(task) : task
-        )
-        return nextTasks
-      })
+  const refreshTasks = useCallback(
+    async (force = false) => {
+      if (refreshRequestRef.current) {
+        if (!force) return refreshRequestRef.current
+        await refreshRequestRef.current
+      }
+
+      const request = (async () => {
+        const serverTasks = (await getAllImageTasks()).map(mapServerImageTask)
+        hasLoadedTasksRef.current = true
+        hasActiveTasksRef.current = serverTasks.some(isActiveImageTask)
+        onTasksUpdate((previous) => {
+          const legacyTasks = previous.filter(
+            (task) => task.origin !== 'server'
+          )
+          return [...serverTasks, ...legacyTasks].sort(
+            (left, right) => right.createdAt - left.createdAt
+          )
+        })
+      })()
+      refreshRequestRef.current = request
+      try {
+        await request
+      } finally {
+        if (refreshRequestRef.current === request) {
+          refreshRequestRef.current = null
+        }
+      }
     },
     [onTasksUpdate]
   )
+
+  useEffect(() => {
+    if (!enabled) return
+    const refreshSilently = (force = false) => {
+      void refreshTasks(force).catch(() => undefined)
+    }
+    hasLoadedTasksRef.current = false
+    refreshSilently()
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshSilently(true)
+      }
+    }
+    const interval = window.setInterval(() => {
+      if (
+        document.visibilityState === 'visible' &&
+        (hasActiveTasksRef.current || !hasLoadedTasksRef.current)
+      ) {
+        refreshSilently()
+      }
+    }, 2000)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    window.addEventListener('focus', refreshWhenVisible)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      window.removeEventListener('focus', refreshWhenVisible)
+    }
+  }, [enabled, refreshTasks])
 
   const generateImage = useCallback(
     async (
@@ -167,10 +244,7 @@ export function useImageGenerationHandler({
         requestedConfig,
         capabilities
       )
-      const requestedCount = normalizeImageGenerationCount(
-        sourceConfig.n,
-        capabilities.max_images
-      )
+      const requestedCount = normalizeImageGenerationCount(sourceConfig.n)
       const effectiveConfig = {
         ...sourceConfig,
         n: requestedCount,
@@ -193,90 +267,32 @@ export function useImageGenerationHandler({
         )
         return
       }
-      const referencePreviews = referenceImages.map(toReferencePreview)
-
-      const nextTasks: ImageTask[] = Array.from(
-        { length: requestedCount },
-        () => ({
-          id: nanoid(),
-          prompt: trimmedPrompt,
-          config: {
-            ...effectiveConfig,
-            n: 1,
-          },
-          mode: isEditMode ? 'edit' : 'generate',
-          referenceImages: isEditMode ? referencePreviews : undefined,
-          status: 'running',
-          createdAt: Date.now(),
-        })
-      )
-
-      prependStoredImageTasks(nextTasks)
-      onTasksUpdate((prev) => [...nextTasks, ...prev])
-
-      const results = await Promise.allSettled(
-        nextTasks.map(async (task) => {
-          try {
-            const response = isEditMode
-              ? await sendImageEdit(
-                  buildImageEditFormData(
-                    trimmedPrompt,
-                    task.config,
-                    referenceImages,
-                    capabilities
-                  )
-                )
-              : await sendImageGeneration(
-                  buildImageGenerationPayload(
-                    trimmedPrompt,
-                    task.config,
-                    capabilities
-                  )
-                )
-            const image = (response.data || []).find(
-              (image): image is ImageResult =>
-                Boolean(image.url || image.b64_json)
-            )
-            if (!image) {
-              throw new Error(t('API did not return image data'))
-            }
-
-            updateTask(task.id, (current) => ({
-              ...current,
-              status: 'done',
-              image,
-              finishedAt: Date.now(),
-            }))
-          } catch (error: unknown) {
-            const parsed = getImageGenerationError(
-              error,
-              isEditMode
-                ? t(
-                    'The selected channel does not support image editing for this model'
-                  )
-                : t(
-                    'The selected channel does not have access to this image model, or the upstream does not support image generation for it'
-                  )
-            )
-            updateTask(task.id, (current) => ({
-              ...current,
-              status: 'error',
-              error: parsed.message,
-              errorCode: parsed.code,
-              finishedAt: Date.now(),
-            }))
-            throw parsed
-          }
-        })
-      )
-
-      const failures = results.filter(
-        (result): result is PromiseRejectedResult =>
-          result.status === 'rejected'
-      )
-      if (failures.length === nextTasks.length) {
+      const clientBatchId = nanoid()
+      try {
+        if (isEditMode) {
+          const formData = buildImageEditFormData(
+            trimmedPrompt,
+            { ...effectiveConfig, n: 1 },
+            referenceImages,
+            capabilities
+          )
+          formData.append('client_batch_id', clientBatchId)
+          formData.append('count', String(requestedCount))
+          await createImageEditBatch(formData)
+        } else {
+          await createImageGenerationBatch({
+            ...buildImageGenerationPayload(
+              trimmedPrompt,
+              { ...effectiveConfig, n: 1 },
+              capabilities
+            ),
+            client_batch_id: clientBatchId,
+            count: requestedCount,
+          })
+        }
+      } catch (error: unknown) {
         const parsed = getImageGenerationError(
-          failures[0]?.reason,
+          error,
           isEditMode
             ? t(
                 'The selected channel does not support image editing for this model'
@@ -286,24 +302,54 @@ export function useImageGenerationHandler({
               )
         )
         toast.error(parsed.message)
+        return
       }
+      hasActiveTasksRef.current = true
+      await refreshTasks(true).catch(() => undefined)
     },
-    [config, groups, onTasksUpdate, t, updateTask]
+    [config, groups, refreshTasks, t]
   )
 
   const retryTask = useCallback(
-    (task: ImageTask) => {
+    async (task: ImageTask) => {
+      if (task.origin !== 'server') return
       if (task.mode === 'edit') {
         toast.error(t('Upload the reference images again to retry this edit'))
         return
       }
-      void generateImage(task.prompt, [], task.config)
+      try {
+        await retryServerImageTask(task.id)
+      } catch (error: unknown) {
+        toast.error(getImageGenerationError(error, t('Request failed')).message)
+        return
+      }
+      hasActiveTasksRef.current = true
+      await refreshTasks(true).catch(() => undefined)
     },
-    [generateImage, t]
+    [refreshTasks, t]
+  )
+
+  const deleteTask = useCallback(
+    async (task: ImageTask) => {
+      if (task.origin !== 'server') return
+      try {
+        await deleteServerImageTask(task.id)
+        onTasksUpdate((previous) =>
+          previous.filter((item) => item.id !== task.id)
+        )
+      } catch (error: unknown) {
+        toast.error(getImageGenerationError(error, t('Request failed')).message)
+        return
+      }
+      await refreshTasks(true).catch(() => undefined)
+    },
+    [onTasksUpdate, refreshTasks, t]
   )
 
   return {
+    deleteTask,
     generateImage,
+    refreshTasks,
     retryTask,
   }
 }

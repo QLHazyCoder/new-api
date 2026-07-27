@@ -1,6 +1,6 @@
 # Playground 生图能力开发方案
 
-> 状态说明（2026-07-15）：本文前半部分保留首次实现 Playground 生图时的历史分析。当前代码已经具备 GPT 生图、图片编辑和本地任务恢复能力。本次重构的现行设计与开发清单以文末“多厂商生图重构”章节为准；该章节覆盖并替代历史方案中“所有供应商共用一套参数”的结论。
+> 状态说明（2026-07-27）：本文前半部分保留 Playground 生图的历史设计。当前实现以文末“游乐场服务器异步任务重构”章节为准；该章节继承多厂商能力设计，并替代浏览器同步等待和本地运行任务方案。
 
 ## 背景与目标
 
@@ -834,7 +834,7 @@ Playground /pg/images/generations
 
 ### 范围边界
 
-本次不同时引入服务端异步任务系统。同步请求仍可能受到边缘代理超时影响，但异步任务涉及任务持久化、幂等、结算和状态查询，应在多厂商协议稳定后独立实施。能力 API 与统一响应结构会为后续异步化保留边界。
+本段只记录 2026-07-15 多厂商协议重构当时的范围。2026-07-26 已在保持外部 `/v1/images/*` 同步兼容的前提下，按文末新章节独立完成游乐场服务器异步任务系统。
 
 ### 本次阶段自检记录
 
@@ -851,3 +851,79 @@ Playground /pg/images/generations
 - Gemini 生图模型名是不可变路由标识。能力识别只能读取模型名，不得截断、改写大小写或回写 `OriginModelName` / `UpstreamModelName`；最终请求 URL 必须保留进入适配器时的完整字符串。
 - 以 `-1k`、`-2k`、`-4k` 结尾的 Gemini 图片模型（`k` 大小写不敏感）由模型名锁定分辨率。能力接口返回空的可选分辨率列表，Playground 隐藏手动选择并不发送 `resolution`，服务端仅从后缀生成请求体 `imageSize`。
 - 对现场模型 `gemini-3.1-flash-image-1k` 增加转换和 URL 回归测试，并覆盖大小写后缀识别、冲突参数拒绝、能力交集及前端 payload 省略行为。
+
+## 游乐场服务器异步任务重构（2026-07-26）
+
+### 项目整体分析
+
+游乐场此前由浏览器并发调用 `/pg/images/generations` 或 `/pg/images/edits`，每个请求一直等待上游完成。页面切换会把仍在执行的本地任务标记为中断，浏览器也无法区分“请求已完成但页面状态丢失”和“上游真的失败”。长耗时生成还会穿过 Cloudflare 同步连接，最终表现为 524。
+
+现有 `controller.Relay`、`middleware.Distribute` 和 `relay.ImageHelper` 已经完整负责分组权限、选渠道、模型映射、重试、预扣、结算与日志。本次不能另写一套计费或供应商调用逻辑，正确边界是：HTTP 提交接口只持久化任务，后台 Worker 再构造内部 `/pg/images/*` 请求复用原 Relay 链。外部兼容接口 `/v1/images/*` 保持同步，不受此次改动影响。
+
+数量属于游乐场批次语义，而不是单次上游请求的 `n`。批次数量不使用模型 `max_images`，服务器始终把一个批次拆成多个 `n=1` 任务，从而统一 GPT、Grok 和 Gemini 的执行方式。模型名称是不可变路由标识，从提交、数据库、任务响应到内部 Relay 均原样保存和传递，不做截断、大小写变换或分辨率后缀改写。
+
+### 重构方案
+
+```text
+Browser
+  -> POST /api/playground/image-batches/*
+  -> batch + N queued tasks (202)
+  -> database lease worker
+  -> internal /pg/images/* request with n=1
+  -> existing Distribute -> Relay -> ImageHelper
+  -> save raster result under shared /data
+  -> signed main-site content URL
+  -> GET task list / 2-second active polling
+```
+
+- 批次以 `(user_id, client_batch_id)` 唯一，网络重试不会重复建任务。
+- 任务状态固定为 `queued/running/saving/succeeded/failed/interrupted/cancelled`。
+- 全局并发 `PlaygroundImageMaxConcurrency=0` 时同轮持续领取全部待执行任务；正整数时用数据库队列锁和租约保证全站上限，溢出任务继续排队。每次领取都在队列锁事务内读取数据库 Option，蓝绿实例的旧进程内值不能突破新配置。
+- Worker 在调用 Relay 前写入 `upstream_started_at`。租约过期时，未开始上游的任务可重新排队；已开始上游的任务只转为 `interrupted`，绝不自动重提。
+- 图生图参考图按批次保存一次，通过 pipe 流式重建 multipart，避免任务数乘以参考图大小形成内存副本；所有子任务终态且文件删除成功后才清数据库元数据，删除失败保留元数据供清理任务重试。
+- 结果图只接受 PNG、JPEG、WebP、GIF，拒绝 SVG、非图片和路径穿越。上游 URL 由服务器下载，前端只收到本站 7 天签名地址；任务错误入库前统一脱敏 HTTP(S) URL。
+- 本地旧历史只保留创建未满 7 天的完成/失败记录；旧活动任务转为 `interrupted`，服务器任务不再写入 localStorage。
+
+### 文件结构设计
+
+- `model/playground_image.go`：独立批次/任务表、幂等创建、状态机、队列锁、租约领取、中断恢复、分页和过期清理元数据。
+- `service/playground_image_worker.go`：动态并发调度、租约心跳、Relay 执行回调、结果校验落盘、参考图与 7 天文件清理。
+- `controller/playground_image_task.go`：批次提交、任务查询/重试/删除、签名内容接口，以及复用现有 Relay 的内部 Gin 请求执行器。
+- `setting/playground_image.go`：原子保存全局图片任务并发配置，供 Worker 每轮实时读取。
+- `router/api-router.go`：注册游乐场异步 API；签名内容路由不依赖登录态，其余接口继续使用 `UserAuth`。
+- `model/main.go`、`model/option.go`、`main.go`：自动迁移、配置默认值/校验/热更新和 Worker 启动接线。
+- `web/default/src/features/playground/api.ts`：异步批次、分页任务、重试和删除 API 客户端。
+- `web/default/src/features/playground/hooks/use-image-generation-handler.ts`：批次提交、服务器任务恢复、可见性控制和活动任务轮询。
+- `web/default/src/features/playground/lib/storage/storage.ts`：仅负责 7 天旧本地历史兼容，不持久化服务器任务。
+- `web/default/src/features/playground/components/playground-image-input.tsx`：无业务最大值的整数数量输入框，失焦和提交时归一化。
+- `web/default/src/features/playground/components/playground-image-task-grid.tsx`：排队、执行、保存、终态展示，以及本站链接预览/下载/复制。
+- `web/default/src/features/system-settings/content/drawing-settings-section.tsx`：管理员实时配置全站图片并发，`0` 表示不限。
+- `web/default/src/i18n/locales/*.json`：同步新增管理配置和任务状态文案。
+- `*_test.go`、`*.test.ts`：覆盖幂等、拆分、并发、租约、文件安全、参考图共享、数量归一化和旧历史迁移。
+
+### 开发清单
+
+| 阶段 | 任务 | 状态 | 验收 |
+| --- | --- | --- | --- |
+| 1 | 数据模型、幂等批次、租约状态机和自动迁移 | 已完成 | 数量 503 分片写入；相同 client id 只生成一批；模型名原样保存 |
+| 2 | Worker、内部 Relay、结果/参考图存储与签名内容 | 已完成 | 每任务 `n=1`；复用既有计费；上游地址不返回；文件删除可重试 |
+| 3 | 全局并发热配置和管理端输入 | 已完成 | `0` 不限；`3` 时全站最多运行 3 个；修改无需重启 |
+| 4 | 前端服务器任务迁移和数量输入框 | 已完成 | 默认 1；允许大于 4；刷新/切页恢复；隐藏页停止轮询 |
+| 5 | 定向测试、全量测试、生产构建与安全审查 | 已完成 | Go、TS、Bun、lint、build、迁移、乱码和敏感地址扫描 |
+
+### 阶段自检记录
+
+- 阶段 1：验证 503 条任务跨插入分片创建，数据库不依赖模型 `max_images`；相同用户和 `client_batch_id` 的不同重试载荷仍返回原批次；租约过期且已开始上游的任务变为 `interrupted`。
+- 阶段 2：验证 `count=10` 生成 10 个任务且持久化请求固定 `n=1`；图生图 3 个任务只保存 1 份参考图；结果仅落本站共享目录，data URL 可保存，SVG 和路径穿越被拒绝。
+- 阶段 3：后端拒绝负并发，OptionMap 和原子值同步更新；管理端 schema、默认值和所有语言文案已接线。
+- 阶段 4：移除页面离开时中断真实任务的逻辑；服务器活动任务每 2 秒轮询，页面隐藏暂停，重新聚焦和切回图片模式立即刷新；旧本地运行任务只读显示为中断。
+- 阶段 5：全仓 `go test ./... -count=1` 通过；新增 model/service/controller 专项 `-race` 和涉及包 `go vet` 通过。前端 9 项 Bun 测试、定向 oxlint/oxfmt、`npm run build:check` 通过；7 份 locale JSON 与新增键、UTF-8、冲突标记、`git diff --check`、模型名改写和敏感上游地址扫描通过。
+- 阶段 5 审查修正：并发配置改为每批动态读取并由数据库 Option 跨实例兜底；首次任务列表加载失败和提交后刷新失败会继续轮询；图生图 multipart 改为流式传输；下载和 Relay 错误中的上游 URL 在用户可见前脱敏。
+
+### 最终审查结论
+
+异步任务主链路、文件生命周期、跨实例并发、前端恢复、模型名不可变约束和上游地址隔离均已完成实现与静态/自动化验收。外部 `/v1/images/*` 未改，游乐场提交接口不再同步等待上游，因此 Cloudflare 不再承载生图长连接。
+
+仓库全量 `go vet ./...` 仍命中既有 `common/custom-event.go` 的锁拷贝和 `common/email_test.go` 的 IPv6 地址格式问题；前端全量 lint/format 也仍有本次范围外的历史问题。本次涉及 Go 包以及全部变更前端文件的定向检查均通过。
+
+未使用真实付费 GPT、Grok、Gemini 渠道执行超过 100 秒的集成生成，避免产生真实扣费；本地验收覆盖了提交与执行解耦、每任务 `n=1`、内部 Relay 接线、结果保存和任务恢复。部署后仍应使用低成本测试账号各执行一次文生图和图生图冒烟验证。

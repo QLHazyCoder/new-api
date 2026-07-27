@@ -55,7 +55,7 @@ interface PlaygroundImageTaskGridProps {
   tasks: ImageTask[]
   onReusePrompt: (prompt: string) => void
   onRetryTask: (task: ImageTask) => void
-  onDeleteTask: (taskId: string) => void
+  onDeleteTask: (task: ImageTask) => void
 }
 
 function IconButton({
@@ -205,7 +205,7 @@ function TaskCard({
   task: ImageTask
   onReusePrompt: (prompt: string) => void
   onRetryTask: (task: ImageTask) => void
-  onDeleteTask: (taskId: string) => void
+  onDeleteTask: (task: ImageTask) => void
   onPreviewImage: (preview: ImagePreviewSelection) => void
 }) {
   const { t } = useTranslation()
@@ -215,6 +215,8 @@ function TaskCard({
   const firstSource = firstImage ? getImageSource(firstImage, task.config) : ''
   const canCopyLink = Boolean(firstImage?.url)
   const canDownload = Boolean(firstSource)
+  const isActiveTask = ['queued', 'running', 'saving'].includes(task.status)
+  const isLegacyTask = task.origin !== 'server'
   const isEditTask = task.mode === 'edit'
   const imageSettingsLabel =
     task.config.size ||
@@ -223,16 +225,23 @@ function TaskCard({
       .join(' / ') ||
     'auto'
   let imageContent: ReactNode
-  if (task.status === 'running') {
+  if (isActiveTask) {
     imageContent = <Skeleton className='aspect-square w-full rounded-md' />
-  } else if (task.status === 'error' || task.status === 'interrupted') {
+  } else if (
+    task.status === 'error' ||
+    task.status === 'interrupted' ||
+    task.status === 'cancelled'
+  ) {
     imageContent = (
       <div
         className={`${imageResultClassName} border-border bg-muted/40 flex-col border border-dashed px-4 py-5 text-center`}
       >
         <AlertCircleIcon className='text-muted-foreground mb-2 size-7 shrink-0' />
         <p className='text-muted-foreground line-clamp-4 max-w-full text-xs leading-5 break-words'>
-          {task.error || t('Generation was interrupted')}
+          {task.error ||
+            (task.status === 'cancelled'
+              ? t('Cancelled')
+              : t('Generation was interrupted'))}
         </p>
       </div>
     )
@@ -245,14 +254,23 @@ function TaskCard({
   }
 
   let statusLabel = task.errorCode || t('Error')
-  if (task.status === 'running') {
+  if (task.status === 'queued') {
+    statusLabel = t('Queued')
+  } else if (task.status === 'running') {
     statusLabel = t('Generating')
+  } else if (task.status === 'saving') {
+    statusLabel = t('Saving image')
   } else if (task.status === 'done') {
     statusLabel = isEditTask ? t('Edited image') : t('Generated image')
+  } else if (task.status === 'cancelled') {
+    statusLabel = t('Cancelled')
+  } else if (task.status === 'interrupted') {
+    statusLabel = t('Generation was interrupted')
   }
   const handleCopyLink = () => {
     if (!firstImage?.url) return
-    void copyText(firstImage.url, t('Image link copied'))
+    const absoluteURL = new URL(firstImage.url, window.location.origin).href
+    void copyText(absoluteURL, t('Image link copied'))
   }
 
   const handleDownload = async () => {
@@ -260,7 +278,7 @@ function TaskCard({
     setIsDownloading(true)
     try {
       await downloadImage(
-        firstSource,
+        task.downloadUrl || firstSource,
         `${task.id}.${task.config.output_format || firstImage?.mime_type?.split('/')[1] || 'png'}`
       )
     } catch {
@@ -314,13 +332,18 @@ function TaskCard({
           >
             <RotateCcwIcon className='size-4' />
           </IconButton>
-          <IconButton label={t('Retry')} onClick={() => onRetryTask(task)}>
+          <IconButton
+            disabled={isActiveTask || isLegacyTask}
+            label={t('Retry')}
+            onClick={() => onRetryTask(task)}
+          >
             <RefreshCwIcon className='size-4' />
           </IconButton>
           <IconButton
             className='text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive/20'
+            disabled={isLegacyTask}
             label={t('Delete')}
-            onClick={() => onDeleteTask(task.id)}
+            onClick={() => onDeleteTask(task)}
           >
             <Trash2Icon className='size-4' />
           </IconButton>

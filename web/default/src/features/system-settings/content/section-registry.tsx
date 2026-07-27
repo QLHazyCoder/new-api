@@ -112,6 +112,7 @@ const CONTENT_SECTIONS = [
           MjForwardUrlEnabled: settings.MjForwardUrlEnabled,
           MjModeClearEnabled: settings.MjModeClearEnabled,
           MjActionCheckSuccessEnabled: settings.MjActionCheckSuccessEnabled,
+          PlaygroundImageMaxConcurrency: settings.PlaygroundImageMaxConcurrency,
         }}
       />
     ),

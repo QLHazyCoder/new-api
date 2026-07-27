@@ -166,7 +166,16 @@ export interface ImageReferenceInput extends ImageReferencePreview {
 
 export type ImageTaskMode = 'generate' | 'edit'
 
-export type ImageTaskStatus = 'running' | 'done' | 'error' | 'interrupted'
+export type ImageTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'saving'
+  | 'done'
+  | 'error'
+  | 'interrupted'
+  | 'cancelled'
+
+export type ImageTaskOrigin = 'server' | 'legacy'
 
 export interface ImageResult {
   url?: string
@@ -177,6 +186,8 @@ export interface ImageResult {
 
 export interface ImageTask {
   id: string
+  batchId?: string
+  taskIndex?: number
   prompt: string
   config: ImageGenerationConfig
   mode?: ImageTaskMode
@@ -185,8 +196,66 @@ export interface ImageTask {
   image?: ImageResult
   error?: string
   errorCode?: string
+  downloadUrl?: string
+  origin?: ImageTaskOrigin
   createdAt: number
+  startedAt?: number
   finishedAt?: number
+  expiresAt?: number
+}
+
+export type ServerImageTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'saving'
+  | 'succeeded'
+  | 'failed'
+  | 'interrupted'
+  | 'cancelled'
+
+export interface ServerImageTask {
+  id: string
+  batch_id: string
+  task_index: number
+  mode: ImageTaskMode
+  prompt: string
+  model: string
+  group: string
+  config: Partial<ImageGenerationConfig> & Record<string, unknown>
+  status: ServerImageTaskStatus
+  error?: string
+  error_code?: string
+  image?: {
+    url: string
+    download_url: string
+    mime_type: string
+    size: number
+  }
+  created_at: number
+  started_at?: number
+  finished_at?: number
+  expires_at: number
+}
+
+export interface ServerImageTaskPage {
+  items: ServerImageTask[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface ImageBatchSummary {
+  batch_id: string
+  total: number
+  queued: number
+  running: number
+  saving: number
+  succeeded: number
+  failed: number
+  interrupted: number
+  cancelled: number
+  created_at: number
+  expires_at: number
 }
 
 // Configuration types

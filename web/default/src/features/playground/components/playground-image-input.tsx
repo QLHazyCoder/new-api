@@ -39,6 +39,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import {
   Tooltip,
@@ -74,7 +75,11 @@ interface PlaygroundImageInputProps {
   onGroupChange: (value: string) => void
   onModelChange: (value: string) => void
   onPromptChange: (value: string) => void
-  onSubmit: (prompt: string, referenceImages: ImageReferenceInput[]) => void
+  onSubmit: (
+    prompt: string,
+    referenceImages: ImageReferenceInput[],
+    count: number
+  ) => void
 }
 
 const MAX_REFERENCE_IMAGE_COUNT = 4
@@ -163,19 +168,14 @@ export function PlaygroundImageInput({
   const [previewImage, setPreviewImage] = useState<ImageReferenceInput | null>(
     null
   )
+  const [countInput, setCountInput] = useState(() =>
+    String(normalizeImageGenerationCount(config.n))
+  )
 
   const hasPrompt = Boolean(prompt.trim())
   const hasImageModels = models.length > 0
   const supportsReferenceImages = capabilities.supports_editing
   const normalizedConfig = normalizePlaygroundImageConfig(config, capabilities)
-  const countValue = normalizeImageGenerationCount(
-    config.n,
-    capabilities.max_images
-  )
-  const countOptions = Array.from(
-    { length: Math.min(4, Math.max(1, capabilities.max_images)) },
-    (_, index) => index + 1
-  )
   const isConfigDisabled = Boolean(disabled)
   const isGroupSelectDisabled = isConfigDisabled || groups.length === 0
   const isReferenceImageDisabled =
@@ -187,6 +187,17 @@ export function PlaygroundImageInput({
     setReferenceImages([])
     setPreviewImage(null)
   }, [supportsReferenceImages])
+
+  useEffect(() => {
+    setCountInput(String(normalizeImageGenerationCount(config.n)))
+  }, [config.n])
+
+  const commitCountInput = () => {
+    const normalized = normalizeImageGenerationCount(Number(countInput))
+    setCountInput(String(normalized))
+    onConfigChange('n', normalized)
+    return normalized
+  }
 
   const addReferenceFiles = async (files: File[]) => {
     if (files.length === 0) return
@@ -266,7 +277,7 @@ export function PlaygroundImageInput({
       )
       return
     }
-    onSubmit(message.text, referenceImages)
+    onSubmit(message.text, referenceImages, commitCountInput())
     onPromptChange('')
   }
 
@@ -452,27 +463,23 @@ export function PlaygroundImageInput({
                 </FieldSelect>
               ) : null}
 
-              <FieldSelect
-                className={`${controlClassName} w-16`}
-                disabled={isConfigDisabled || !hasImageModels}
-                label={t('Count')}
-                value={String(countValue)}
-                onChange={(value) =>
-                  onConfigChange(
-                    'n',
-                    normalizeImageGenerationCount(
-                      Number.parseInt(value, 10) || 1,
-                      capabilities.max_images
-                    )
-                  )
-                }
-              >
-                {countOptions.map((count) => (
-                  <option key={count} value={count}>
-                    {count}
-                  </option>
-                ))}
-              </FieldSelect>
+              <label className='flex min-w-0 items-center gap-1.5 text-xs'>
+                <span className='text-muted-foreground shrink-0'>
+                  {t('Count')}
+                </span>
+                <Input
+                  aria-label={t('Count')}
+                  className={`${controlClassName} w-20`}
+                  disabled={isConfigDisabled || !hasImageModels}
+                  inputMode='numeric'
+                  min={1}
+                  step={1}
+                  type='number'
+                  value={countInput}
+                  onBlur={commitCountInput}
+                  onChange={(event) => setCountInput(event.target.value)}
+                />
+              </label>
 
               {capabilities.output_formats.length > 0 ? (
                 <FieldSelect

@@ -23,8 +23,6 @@ import type {
   ImageModelOption,
 } from '../types'
 
-export const MAX_IMAGE_GENERATION_COUNT = 4
-
 export const EMPTY_IMAGE_MODEL_CAPABILITIES: ImageModelCapabilities = {
   provider: 'other',
   size_mode: 'none',
@@ -105,22 +103,16 @@ export function normalizePlaygroundImageConfig(
     aspect_ratio: aspectRatio,
     resolution,
     quality: (quality || 'auto') as ImageGenerationConfig['quality'],
-    n: normalizeImageGenerationCount(config.n, capabilities.max_images),
+    n: normalizeImageGenerationCount(config.n),
     response_format: 'b64_json',
     output_format:
       (outputFormat as ImageGenerationConfig['output_format']) || undefined,
   }
 }
 
-export function normalizeImageGenerationCount(
-  count: number,
-  modelMaximum: number = MAX_IMAGE_GENERATION_COUNT
-): number {
-  const maximum = Math.min(
-    MAX_IMAGE_GENERATION_COUNT,
-    Math.max(1, modelMaximum)
-  )
-  return Math.min(maximum, Math.max(1, Number.isFinite(count) ? count : 1))
+export function normalizeImageGenerationCount(count: number): number {
+  if (!Number.isFinite(count)) return 1
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.max(1, Math.floor(count)))
 }
 
 export function resolveImageModelSelection(

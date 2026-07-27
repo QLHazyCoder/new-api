@@ -64,6 +64,7 @@ func InitOptionMap() {
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
 	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
+	common.OptionMap["PlaygroundImageMaxConcurrency"] = "0"
 	common.OptionMap["TaskEnabled"] = strconv.FormatBool(common.TaskEnabled)
 	common.OptionMap["DataExportEnabled"] = strconv.FormatBool(common.DataExportEnabled)
 	common.OptionMap["ChannelDisableThreshold"] = strconv.FormatFloat(common.ChannelDisableThreshold, 'f', -1, 64)
@@ -232,6 +233,13 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
+	if key == "PlaygroundImageMaxConcurrency" {
+		normalizedValue, _, err := normalizePlaygroundImageMaxConcurrency(value)
+		if err != nil {
+			return err
+		}
+		value = normalizedValue
+	}
 	if key == "LogRetentionDays" {
 		normalizedValue, _, err := normalizeLogRetentionDaysOptionValue(value)
 		if err != nil {
@@ -273,6 +281,14 @@ func UpdateOptionsBulk(values map[string]string) error {
 	}
 	normalizedValues := make(map[string]string, len(values))
 	for k, v := range values {
+		if k == "PlaygroundImageMaxConcurrency" {
+			normalizedValue, _, err := normalizePlaygroundImageMaxConcurrency(v)
+			if err != nil {
+				return err
+			}
+			normalizedValues[k] = normalizedValue
+			continue
+		}
 		if k == "LogRetentionDays" {
 			normalizedValue, _, err := normalizeLogRetentionDaysOptionValue(v)
 			if err != nil {
@@ -319,6 +335,15 @@ func updateOptionMap(key string, value string) (err error) {
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
 
+	if key == "PlaygroundImageMaxConcurrency" {
+		normalizedValue, intValue, err := normalizePlaygroundImageMaxConcurrency(value)
+		if err != nil {
+			return err
+		}
+		setting.SetPlaygroundImageMaxConcurrency(intValue)
+		common.OptionMap[key] = normalizedValue
+		return nil
+	}
 	if key == "LogRetentionDays" {
 		normalizedValue, intValue, err := normalizeLogRetentionDaysOptionValue(value)
 		if err != nil {
@@ -677,6 +702,15 @@ func normalizeTopUpInviteRewardPercentOptionValue(value string) (string, float64
 		return "", 0, fmt.Errorf("TopUpInviteRewardPercent must be a non-negative finite number")
 	}
 	return strconv.FormatFloat(floatValue, 'f', -1, 64), floatValue, nil
+}
+
+func normalizePlaygroundImageMaxConcurrency(value string) (string, int, error) {
+	normalizedValue := strings.TrimSpace(value)
+	intValue, err := strconv.Atoi(normalizedValue)
+	if err != nil || intValue < 0 {
+		return "", 0, fmt.Errorf("PlaygroundImageMaxConcurrency must be a non-negative integer")
+	}
+	return strconv.Itoa(intValue), intValue, nil
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理

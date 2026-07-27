@@ -22,13 +22,15 @@ import { API_ENDPOINTS } from './constants'
 import type {
   ChatCompletionRequest,
   ChatCompletionResponse,
+  ImageBatchSummary,
   ImageGenerationRequest,
-  ImageGenerationResponse,
   ImageGroupOption,
   ImageModelCapabilities,
   ImageModelOption,
   ModelOption,
   GroupOption,
+  ServerImageTask,
+  ServerImageTaskPage,
 } from './types'
 
 /**
@@ -45,22 +47,86 @@ export async function sendChatCompletion(
   return res.data
 }
 
-export async function sendImageGeneration(
-  payload: ImageGenerationRequest
-): Promise<ImageGenerationResponse> {
-  const res = await api.post(API_ENDPOINTS.IMAGE_GENERATIONS, payload, {
-    skipErrorHandler: true,
-  } as Record<string, unknown>)
-  return res.data
+type ImageGenerationBatchRequest = ImageGenerationRequest & {
+  client_batch_id: string
+  count: number
 }
 
-export async function sendImageEdit(
-  payload: FormData
-): Promise<ImageGenerationResponse> {
-  const res = await api.post(API_ENDPOINTS.IMAGE_EDITS, payload, {
+function unwrapImageAPIData<T>(response: {
+  success: boolean
+  message?: string
+  data?: T
+}): T {
+  if (!response.success || response.data === undefined) {
+    throw new Error(response.message || 'Image task request failed')
+  }
+  return response.data
+}
+
+export async function createImageGenerationBatch(
+  payload: ImageGenerationBatchRequest
+): Promise<ImageBatchSummary> {
+  const res = await api.post(API_ENDPOINTS.IMAGE_BATCH_GENERATIONS, payload, {
     skipErrorHandler: true,
   } as Record<string, unknown>)
-  return res.data
+  return unwrapImageAPIData<ImageBatchSummary>(res.data)
+}
+
+export async function createImageEditBatch(
+  payload: FormData
+): Promise<ImageBatchSummary> {
+  const res = await api.post(API_ENDPOINTS.IMAGE_BATCH_EDITS, payload, {
+    skipErrorHandler: true,
+  } as Record<string, unknown>)
+  return unwrapImageAPIData<ImageBatchSummary>(res.data)
+}
+
+async function getImageTaskPage(
+  page: number,
+  pageSize: number
+): Promise<ServerImageTaskPage> {
+  const res = await api.get(API_ENDPOINTS.IMAGE_TASKS, {
+    params: { page, page_size: pageSize },
+    disableDuplicate: true,
+    skipErrorHandler: true,
+  })
+  return unwrapImageAPIData<ServerImageTaskPage>(res.data)
+}
+
+export async function getAllImageTasks(): Promise<ServerImageTask[]> {
+  const pageSize = 200
+  const firstPage = await getImageTaskPage(1, pageSize)
+  const taskMap = new Map(
+    firstPage.items.map((task) => [task.id, task] as const)
+  )
+  const pageCount = Math.ceil(firstPage.total / pageSize)
+  for (let page = 2; page <= pageCount; page += 1) {
+    const nextPage = await getImageTaskPage(page, pageSize)
+    nextPage.items.forEach((task) => taskMap.set(task.id, task))
+    if (nextPage.items.length === 0) break
+  }
+  return [...taskMap.values()].sort(
+    (left, right) => right.created_at - left.created_at
+  )
+}
+
+export async function retryImageTask(taskId: string): Promise<void> {
+  const res = await api.post(
+    `${API_ENDPOINTS.IMAGE_TASKS}/${encodeURIComponent(taskId)}/retry`,
+    undefined,
+    { skipErrorHandler: true }
+  )
+  unwrapImageAPIData<ImageBatchSummary>(res.data)
+}
+
+export async function deleteImageTask(taskId: string): Promise<void> {
+  const res = await api.delete(
+    `${API_ENDPOINTS.IMAGE_TASKS}/${encodeURIComponent(taskId)}`,
+    { skipErrorHandler: true }
+  )
+  if (!res.data?.success) {
+    throw new Error(res.data?.message || 'Failed to delete image task')
+  }
 }
 
 /**

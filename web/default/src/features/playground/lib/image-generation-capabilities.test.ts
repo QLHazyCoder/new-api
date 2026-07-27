@@ -22,6 +22,7 @@ import { describe, test } from 'node:test'
 import { DEFAULT_IMAGE_CONFIG } from '../constants'
 import type { ImageGroupOption, ImageModelCapabilities } from '../types'
 import {
+  normalizeImageGenerationCount,
   normalizePlaygroundImageConfig,
   resolveImageModelSelection,
 } from './image-generation-capabilities'
@@ -43,6 +44,15 @@ const grokCapabilities: ImageModelCapabilities = {
 }
 
 describe('playground image capabilities', () => {
+  test('normalizes image counts without a product or model maximum', () => {
+    assert.equal(normalizeImageGenerationCount(10), 10)
+    assert.equal(normalizeImageGenerationCount(2.9), 2)
+    assert.equal(normalizeImageGenerationCount(0), 1)
+    assert.equal(normalizeImageGenerationCount(-5), 1)
+    assert.equal(normalizeImageGenerationCount(Number.NaN), 1)
+    assert.equal(normalizeImageGenerationCount(Number.POSITIVE_INFINITY), 1)
+  })
+
   test('falls back atomically to a group that has an image model', () => {
     const groups: ImageGroupOption[] = [
       {

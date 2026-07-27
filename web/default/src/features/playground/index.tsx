@@ -116,9 +116,11 @@ export function Playground() {
     imageSelection?.model.capabilities ?? EMPTY_IMAGE_MODEL_CAPABILITIES
   const [imagePrompt, setImagePrompt] = useState('')
 
-  const { generateImage, retryTask } = useImageGenerationHandler({
+  const { deleteTask, generateImage, retryTask } = useImageGenerationHandler({
     config: effectiveImageConfig,
+    enabled: mode === 'image',
     groups: imageGroups,
+    tasks: imageTasks,
     onTasksUpdate: updateImageTasks,
   })
 
@@ -162,11 +164,11 @@ export function Playground() {
   }
 
   const handleRetryTask = (task: ImageTask) => {
-    retryTask(task)
+    void retryTask(task)
   }
 
-  const handleDeleteImageTask = (taskId: string) => {
-    updateImageTasks((prev) => prev.filter((task) => task.id !== taskId))
+  const handleDeleteImageTask = (task: ImageTask) => {
+    void deleteTask(task)
   }
 
   const handleClearMessages = () => {
@@ -243,8 +245,11 @@ export function Playground() {
             onGroupChange={handleImageGroupChange}
             onModelChange={handleImageModelChange}
             onPromptChange={setImagePrompt}
-            onSubmit={(prompt, referenceImages) =>
-              void generateImage(prompt, referenceImages)
+            onSubmit={(prompt, referenceImages, count) =>
+              void generateImage(prompt, referenceImages, {
+                ...effectiveImageConfig,
+                n: count,
+              })
             }
           />
         )}
