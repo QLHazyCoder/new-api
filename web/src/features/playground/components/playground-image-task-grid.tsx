@@ -59,6 +59,7 @@ import {
 import type { ImageReferencePreview, ImageResult, ImageTask } from '../types'
 
 interface PlaygroundImageTaskGridProps {
+  deletingTaskIds: ReadonlySet<string>
   tasks: ImageTask[]
   onReusePrompt: (prompt: string) => void
   onRetryTask: (task: ImageTask) => void
@@ -203,12 +204,14 @@ function ImagePreview({
 }
 
 function TaskCard({
+  isDeleting,
   task,
   onReusePrompt,
   onRetryTask,
   onDeleteTask,
   onPreviewImage,
 }: {
+  isDeleting: boolean
   task: ImageTask
   onReusePrompt: (prompt: string) => void
   onRetryTask: (task: ImageTask) => void
@@ -339,7 +342,7 @@ function TaskCard({
             <RotateCcwIcon className='size-4' />
           </IconButton>
           <IconButton
-            disabled={isActiveTask}
+            disabled={isActiveTask || isDeleting}
             label={t('Retry')}
             onClick={() => onRetryTask(task)}
           >
@@ -347,10 +350,15 @@ function TaskCard({
           </IconButton>
           <IconButton
             className='text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:ring-destructive/20'
+            disabled={isDeleting}
             label={t('Delete')}
             onClick={() => onDeleteTask(task)}
           >
-            <Trash2Icon className='size-4' />
+            {isDeleting ? (
+              <LoaderCircleIcon className='size-4 animate-spin' />
+            ) : (
+              <Trash2Icon className='size-4' />
+            )}
           </IconButton>
         </div>
       </CardFooter>
@@ -359,6 +367,7 @@ function TaskCard({
 }
 
 export function PlaygroundImageTaskGrid({
+  deletingTaskIds,
   tasks,
   onReusePrompt,
   onRetryTask,
@@ -377,6 +386,7 @@ export function PlaygroundImageTaskGrid({
   ] = useState(false)
 
   const requestDeleteTask = (task: ImageTask) => {
+    if (deletingTaskIds.has(task.id)) return
     const needsConfirmation = task.status === 'done' && Boolean(task.image)
     if (!needsConfirmation || skipImageDeleteConfirmation) {
       onDeleteTask(task)
@@ -414,6 +424,7 @@ export function PlaygroundImageTaskGrid({
         <div className='mx-auto grid w-full max-w-7xl grid-cols-1 items-start gap-4 p-4 pb-28 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4'>
           {tasks.map((task) => (
             <TaskCard
+              isDeleting={deletingTaskIds.has(task.id)}
               key={task.id}
               task={task}
               onReusePrompt={onReusePrompt}

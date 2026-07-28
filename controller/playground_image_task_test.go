@@ -253,6 +253,20 @@ func TestDeletePlaygroundImageTaskHardDeletesCompletedResult(t *testing.T) {
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
 	_, err = os.Stat(fullPath)
 	assert.ErrorIs(t, err, os.ErrNotExist)
+
+	secondRecorder := httptest.NewRecorder()
+	secondContext, _ := gin.CreateTestContext(secondRecorder)
+	secondContext.Set("id", 1)
+	secondContext.Params = gin.Params{{Key: "id", Value: task.TaskID}}
+	secondContext.Request = httptest.NewRequest(http.MethodDelete, "/api/playground/image-tasks/"+task.TaskID, nil)
+	DeletePlaygroundImageTask(secondContext)
+
+	assert.Equal(t, http.StatusOK, secondRecorder.Code)
+	var secondResponse struct {
+		Success bool `json:"success"`
+	}
+	require.NoError(t, common.Unmarshal(secondRecorder.Body.Bytes(), &secondResponse))
+	assert.True(t, secondResponse.Success)
 }
 
 func TestPlaygroundImageSignedContentStaysOnMainSiteAndDownloads(t *testing.T) {

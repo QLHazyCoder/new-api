@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { nanoid } from 'nanoid'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -159,6 +159,12 @@ export function useImageGenerationHandler({
   const refreshRequestRef = useRef<Promise<void> | null>(null)
   const hasActiveTasksRef = useRef(tasks.some(isActiveImageTask))
   const hasLoadedTasksRef = useRef(false)
+  const deletingTaskIdsRef = useRef(new Set<string>())
+  // Successful deletes stay hidden from older polling responses still in flight.
+  const deletedTaskIdsRef = useRef(new Set<string>())
+  const [deletingTaskIds, setDeletingTaskIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
 
   useEffect(() => {
     hasActiveTasksRef.current = tasks.some(isActiveImageTask)
@@ -172,7 +178,9 @@ export function useImageGenerationHandler({
       }
 
       const request = (async () => {
-        const serverTasks = (await getAllImageTasks()).map(mapServerImageTask)
+        const serverTasks = (await getAllImageTasks())
+          .map(mapServerImageTask)
+          .filter((task) => !deletedTaskIdsRef.current.has(task.id))
         hasLoadedTasksRef.current = true
         hasActiveTasksRef.current = serverTasks.some(isActiveImageTask)
         onTasksUpdate(
@@ -324,22 +332,29 @@ export function useImageGenerationHandler({
 
   const deleteTask = useCallback(
     async (task: ImageTask) => {
+      if (deletingTaskIdsRef.current.has(task.id)) return
+      deletingTaskIdsRef.current.add(task.id)
+      setDeletingTaskIds(new Set(deletingTaskIdsRef.current))
       try {
         await deleteServerImageTask(task.id)
+        deletedTaskIdsRef.current.add(task.id)
         onTasksUpdate((previous) =>
           previous.filter((item) => item.id !== task.id)
         )
+        await refreshTasks(true).catch(() => undefined)
       } catch (error: unknown) {
         toast.error(getImageGenerationError(error, t('Request failed')).message)
-        return
+      } finally {
+        deletingTaskIdsRef.current.delete(task.id)
+        setDeletingTaskIds(new Set(deletingTaskIdsRef.current))
       }
-      await refreshTasks(true).catch(() => undefined)
     },
     [onTasksUpdate, refreshTasks, t]
   )
 
   return {
     deleteTask,
+    deletingTaskIds,
     generateImage,
     refreshTasks,
     retryTask,

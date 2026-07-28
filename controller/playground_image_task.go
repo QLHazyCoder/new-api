@@ -467,7 +467,8 @@ func DeletePlaygroundImageTask(c *gin.Context) {
 	result, err := model.DeletePlaygroundImageTask(c.Param("id"), c.GetInt("id"), common.GetTimestamp())
 	if err != nil {
 		if errors.Is(err, model.ErrPlaygroundImageTaskNotFound) {
-			playgroundImageAPIError(c, http.StatusNotFound, "image task not found")
+			// Repeating a completed DELETE must remain successful.
+			common.ApiSuccess(c, nil)
 			return
 		}
 		playgroundImageAPIError(c, http.StatusInternalServerError, "failed to delete image task")

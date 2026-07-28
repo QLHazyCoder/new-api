@@ -664,11 +664,12 @@ func DeletePlaygroundImageTask(taskID string, userID int, now int64) (*Playgroun
 	result := &PlaygroundImageDeleteResult{}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var task PlaygroundImageTask
-		if err := lockForUpdate(tx).Where("task_id = ? AND user_id = ?", taskID, userID).First(&task).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrPlaygroundImageTaskNotFound
-			}
-			return err
+		query := lockForUpdate(tx).Where("task_id = ? AND user_id = ?", taskID, userID).Limit(1).Find(&task)
+		if query.Error != nil {
+			return query.Error
+		}
+		if query.RowsAffected == 0 {
+			return ErrPlaygroundImageTaskNotFound
 		}
 		result.BatchRecordID = task.BatchRecordID
 		result.ResultPath = task.ResultPath
