@@ -33,6 +33,8 @@ import { formatLogQuota } from '@/lib/format'
 import { hasToolSurcharge } from '../lib/format'
 import type { LogOtherData } from '../types'
 
+const SHOW_TOOL_SURCHARGE_MARKER = false
+
 interface LogCostDisplayProps {
   quota: number
   other: LogOtherData | null
@@ -119,7 +121,8 @@ function SubscriptionBadge(props: { quota: number }) {
 
 export function LogCostDisplay(props: LogCostDisplayProps) {
   const isSubscription = props.other?.billing_source === 'subscription'
-  const showToolSurcharge = hasToolSurcharge(props.other)
+  const showToolSurcharge =
+    SHOW_TOOL_SURCHARGE_MARKER && hasToolSurcharge(props.other)
 
   if (!isSubscription && !showToolSurcharge) {
     return (

@@ -109,7 +109,7 @@ describe('log cost display', () => {
     domWindow.close()
   })
 
-  test('keeps the regular cost visible and adds an accessible surcharge marker', async () => {
+  test('keeps the regular cost visible while the surcharge marker is hidden', async () => {
     const rendered = await renderCost({
       quota: 12500,
       other: {
@@ -123,20 +123,15 @@ describe('log cost display', () => {
       ),
       true
     )
-    const marker = rendered.container.querySelector(
-      '[data-tool-surcharge-indicator="true"]'
-    )
-    assert.ok(marker)
     assert.equal(
-      marker.getAttribute('aria-label'),
-      'Includes tool-call surcharge'
+      rendered.container.querySelector('[data-tool-surcharge-indicator="true"]'),
+      null
     )
-    assert.equal(marker.getAttribute('tabindex'), '0')
 
     await unmountCost(rendered)
   })
 
-  test('preserves the subscription badge and adds the same legacy surcharge marker', async () => {
+  test('preserves the subscription badge while the surcharge marker is hidden', async () => {
     const rendered = await renderCost({
       quota: 5000,
       other: {
@@ -148,8 +143,9 @@ describe('log cost display', () => {
     })
 
     assert.equal(rendered.container.textContent?.includes('Subscription'), true)
-    assert.ok(
-      rendered.container.querySelector('[data-tool-surcharge-indicator="true"]')
+    assert.equal(
+      rendered.container.querySelector('[data-tool-surcharge-indicator="true"]'),
+      null
     )
 
     await unmountCost(rendered)
