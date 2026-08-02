@@ -116,7 +116,8 @@
 - 必须保留：公开 Chat Completions 请求不会被自动改写为 Responses；Responses 的
   cache creation/cache write 用量会进入账务和日志；旧音频完成倍率配置继续有效。
 - 当前位置：`relay/chat_completions_via_responses.go`、
-  `service/relayconvert/request_compat.go`、`relay/channel/openai/relay_responses.go`、
+  `service/openai_chat_responses_mode.go`、`service/openai_chat_responses_compat.go`、
+  `relaykit/relayconvert/**`、`relay/channel/openai/relay_responses.go`、
   `service/billing.go`、`service/log_info_generate.go`、相关 `setting` 配置。
 - 合并检查：区分协议转换、上游请求显示用量和实际扣费用量，不能只因上游返回字段
   更少就丢弃 cache-write 计费；不要重新打开公共 Chat-to-Responses 自动转换。
@@ -208,7 +209,7 @@
 - 必须保留：GPT 图片请求按所需规格拆分；参考图编辑、直接预览/灯箱、质量/尺寸
   选项和 `auto` 尺寸都能正确落到请求载荷。`auto` 是新增可选值，默认尺寸仍为
   `1024x1024`，不得被意外改写。
-- 当前位置：`dto/openai_image.go`、`dto/image_capability.go`、
+- 当前位置：`relaykit/dto/openai_image.go`、`dto/image_capability.go`、
   `web/src/features/playground/components/playground-image-input.tsx`、
   `web/src/features/playground/hooks/use-playground-image-options.ts`、
   `web/src/features/playground/lib/image-payload-builder.ts`。
@@ -273,7 +274,7 @@
 
 - 必须保留：IP 日志默认值符合本项目设定；额度预警阈值根据实际余额而不是错误的显示
   口径判断；通知限流器是最终频率控制，不能被上游重复判断替代后造成漏发或刷屏。
-- 当前位置：`service/quota.go`、`service/user_notify.go`、`dto/user_settings.go`、
+- 当前位置：`service/quota.go`、`service/user_notify.go`、`relaykit/dto/user_settings.go`、
   用户通知设置界面。
 - 合并检查：通知逻辑涉及余额、缓存和限流时，必须完整追踪从扣费到通知的链路。
 - 来源提交：`db10c428`、`71bfa129`、`a4a43c99`。
