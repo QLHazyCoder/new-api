@@ -1,5 +1,9 @@
 # Upstream Merge Audit: v1.0.0-rc.22
 
+> 后续上游合并的长期验收入口为
+> [自研功能保护清单](./custom-feature-preservation-checklist.md)。本文件保留 rc.22
+> 的一次性迁移证据；不要只依赖本文件的历史冲突统计来判断当前自研功能是否已保留。
+
 ## Baseline
 
 - Local branch baseline: `main` at `6a978443ec3a91c945b80c11d7be2487d314ff93`.
