@@ -78,7 +78,7 @@ import {
   createUser,
   updateUser,
   getUser,
-  getUserManagementGroups,
+  getGroups,
   getPermissionCatalog,
 } from '../api'
 import { BINDING_FIELDS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
@@ -113,8 +113,8 @@ export function UsersMutateDrawer({
 
   // Fetch groups
   const { data: groupsData } = useQuery({
-    queryKey: ['user-management-groups'],
-    queryFn: getUserManagementGroups,
+    queryKey: ['groups'],
+    queryFn: getGroups,
     staleTime: 5 * 60 * 1000,
   })
 
