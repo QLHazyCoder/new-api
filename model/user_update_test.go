@@ -62,6 +62,44 @@ func TestUserUpdateDoesNotOverwriteAccountingFields(t *testing.T) {
 	assert.Equal(t, 4, got.RequestCount)
 }
 
+func TestUpdateSelfProfilePreservesAccountingFields(t *testing.T) {
+	setupUserUpdateTestState(t)
+
+	user := User{
+		Username:     "self-profile-race-user",
+		Password:     "password",
+		DisplayName:  "before",
+		Status:       common.UserStatusEnabled,
+		Quota:        1000,
+		UsedQuota:    20,
+		RequestCount: 3,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"quota":         gorm.Expr("quota - ?", 400),
+		"used_quota":    gorm.Expr("used_quota + ?", 400),
+		"request_count": gorm.Expr("request_count + ?", 1),
+	}).Error)
+	require.NoError(t, UpdateSelfProfile(user.Id, "", "after", "", false))
+
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"quota":         gorm.Expr("quota - ?", 100),
+		"used_quota":    gorm.Expr("used_quota + ?", 100),
+		"request_count": gorm.Expr("request_count + ?", 1),
+	}).Error)
+	require.NoError(t, UpdateSelfProfile(user.Id, "", "", "new-password", true))
+
+	var got User
+	require.NoError(t, DB.First(&got, user.Id).Error)
+	assert.Equal(t, "after", got.DisplayName)
+	assert.Equal(t, 500, got.Quota)
+	assert.Equal(t, 520, got.UsedQuota)
+	assert.Equal(t, 5, got.RequestCount)
+	assert.Equal(t, int64(2), got.AuthVersion)
+	assert.True(t, common.ValidatePasswordAndHash("new-password", got.Password))
+}
+
 func TestUpdateUserSettingOnlyUpdatesSetting(t *testing.T) {
 	setupUserUpdateTestState(t)
 

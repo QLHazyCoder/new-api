@@ -310,13 +310,17 @@
   覆盖会同时更新数据库、缓存和认证版本，不留下旧额度或旧会话可见状态。
 - 必须保留：管理操作不作用于软删除用户；专用永久删除路径仍可读取目标并完整清理
   认证相关数据、缓存、邀请计数及相关业务数据。不能把软删除与永久删除重新混为一谈。
+- 必须保留：`PUT /api/user/self` 的资料和密码修改只能更新自助字段白名单；
+  `quota`、`used_quota`、`request_count` 等账务字段不得从请求或旧快照写回，侧边栏与
+  语言偏好也只能更新 `setting` 列。
 - 已批准退休：`bca83882` 曾使用户编辑抽屉将 `GroupRatio` 的分组定价和
   `GroupGroupRatio` 的用户分组覆盖键合并为可分配分组。该展示/接口扩展已按用户
   明确决定恢复上游原始行为：抽屉只从 `/api/group/` 读取 `GroupRatio` 分组；
   `GroupGroupRatio` 仍保留为真实计费覆盖配置，但不再作为可分配用户分组来源。
 - 当前位置：`controller/user.go`、`model/user.go`、`model/user_auth_cache.go`、
   `web/src/features/users/**`。
-- 验证入口：`controller/user_manage_test.go`、`model/user_authentication_test.go`、
+- 验证入口：`controller/user_manage_test.go`、`controller/user_self_update_test.go`、
+  `model/user_update_test.go`、`model/user_authentication_test.go`、
   `model/user_cache_auth_version_test.go`。
 - 来源提交：`693494a0`、`8aaede90`、`9773de9e`；`bca83882` 为经用户批准退休项。
 

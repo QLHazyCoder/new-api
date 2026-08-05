@@ -818,6 +818,68 @@ func (user *User) FinalizeCreation() {
 	user.finishInsert()
 }
 
+// UpdateSelfProfile updates only fields exposed by the self-profile endpoint.
+// Accounting columns are intentionally absent from the update map so a stale
+// profile request can never write back quota state from an older snapshot.
+func UpdateSelfProfile(userId int, username, displayName, password string, updatePassword bool) error {
+	if userId <= 0 {
+		return errors.New("id 为空！")
+	}
+
+	updates := make(map[string]interface{}, 3)
+	if username != "" {
+		updates["username"] = username
+	}
+	if displayName != "" {
+		updates["display_name"] = displayName
+	}
+	if updatePassword {
+		if password == "" {
+			return errors.New("password 为空！")
+		}
+		hashedPassword, err := common.Password2Hash(password)
+		if err != nil {
+			return err
+		}
+		updates["password"] = hashedPassword
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+
+	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if updatePassword {
+			if _, err := IncrementUserAuthVersionWithTx(tx, userId); err != nil {
+				return err
+			}
+		}
+		result := tx.Model(&User{}).Where("id = ?", userId).Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			var count int64
+			if err := tx.Model(&User{}).Where("id = ?", userId).Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if updatePassword {
+		return PublishUserAuthCache(userId)
+	}
+	if username != "" {
+		return updateUserNameCache(userId, username)
+	}
+	return nil
+}
+
 func (user *User) Update(updatePassword bool) error {
 	var previousAuthVersion int64
 	if err := DB.Model(&User{}).Where("id = ?", user.Id).Select("auth_version").Find(&previousAuthVersion).Error; err != nil {

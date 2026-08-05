@@ -32,6 +32,13 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
+type updateSelfProfileRequest struct {
+	Username         string `json:"username" validate:"max=20"`
+	Password         string `json:"password" validate:"omitempty,min=8,max=20"`
+	OriginalPassword string `json:"original_password"`
+	DisplayName      string `json:"display_name" validate:"max=20"`
+}
+
 var (
 	errUserPasswordUnset    = errors.New("user password is not set")
 	errOriginalPasswordFail = errors.New("original password is incorrect")
@@ -902,37 +909,23 @@ func UpdateSelf(c *gin.Context) {
 		return
 	}
 
-	// 原有的用户信息更新逻辑
-	var user model.User
+	var profile updateSelfProfileRequest
 	requestDataBytes, err := common.Marshal(requestData)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-	if err = common.Unmarshal(requestDataBytes, &user); err != nil {
+	if err = common.Unmarshal(requestDataBytes, &profile); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
-
-	if user.Password == "" {
-		user.Password = "$I_LOVE_U" // make Validator happy :)
-	}
-	if err := common.Validate.Struct(&user); err != nil {
+	if err := common.Validate.Struct(&profile); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidInput)
 		return
 	}
 
-	cleanUser := model.User{
-		Id:          c.GetInt("id"),
-		Username:    user.Username,
-		Password:    user.Password,
-		DisplayName: user.DisplayName,
-	}
-	if user.Password == "$I_LOVE_U" {
-		user.Password = "" // rollback to what it should be
-		cleanUser.Password = ""
-	}
-	updatePassword, err := checkUpdatePassword(user.OriginalPassword, user.Password, cleanUser.Id)
+	userId := c.GetInt("id")
+	updatePassword, err := checkUpdatePassword(profile.OriginalPassword, profile.Password, userId)
 	if err != nil {
 		if errors.Is(err, errUserPasswordUnset) {
 			common.ApiErrorI18n(c, i18n.MsgUserPasswordUnset)
@@ -951,13 +944,7 @@ func UpdateSelf(c *gin.Context) {
 			common.ApiError(c, errors.New("当前认证方式不支持安全验证"))
 			return
 		}
-		if err := model.DB.Transaction(func(tx *gorm.DB) error {
-			return cleanUser.UpdateWithTx(tx, true)
-		}); err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		if err := model.PublishUserAuthCache(cleanUser.Id); err != nil {
+		if err := model.UpdateSelfProfile(userId, profile.Username, profile.DisplayName, profile.Password, true); err != nil {
 			common.ApiError(c, err)
 			return
 		}
@@ -978,7 +965,7 @@ func UpdateSelf(c *gin.Context) {
 		})
 		return
 	}
-	if err := cleanUser.Update(false); err != nil {
+	if err := model.UpdateSelfProfile(userId, profile.Username, profile.DisplayName, profile.Password, false); err != nil {
 		common.ApiError(c, err)
 		return
 	}
