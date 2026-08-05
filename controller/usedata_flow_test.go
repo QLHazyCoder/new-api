@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -15,6 +16,11 @@ type flowQuotaResponse struct {
 	Success bool                  `json:"success"`
 	Message string                `json:"message"`
 	Data    []model.FlowQuotaData `json:"data"`
+}
+
+type userQuotaResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }
 
 func setupFlowControllerTestDB(t *testing.T) {
@@ -132,4 +138,73 @@ func TestGetUserFlowQuotaDatesRejectsInvalidTimeRange(t *testing.T) {
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.False(t, payload.Success)
 	require.Equal(t, "invalid start_timestamp", payload.Message)
+}
+
+func TestUserQuotaEndpointsAllowThirtyOneDayRange(t *testing.T) {
+	setupFlowControllerTestDB(t)
+
+	const startTimestamp int64 = 1719792000
+	endTimestamp := startTimestamp + 31*24*60*60
+	endpoints := []struct {
+		name    string
+		path    string
+		handler gin.HandlerFunc
+	}{
+		{name: "quota", path: "/api/data/self", handler: GetUserQuotaDates},
+		{name: "flow", path: "/api/data/flow/self", handler: GetUserFlowQuotaDates},
+	}
+
+	for _, endpoint := range endpoints {
+		t.Run(endpoint.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Set("id", 1)
+			ctx.Request = httptest.NewRequest(
+				http.MethodGet,
+				endpoint.path+"?start_timestamp="+strconv.FormatInt(startTimestamp, 10)+"&end_timestamp="+strconv.FormatInt(endTimestamp, 10),
+				nil,
+			)
+
+			endpoint.handler(ctx)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var payload userQuotaResponse
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+			require.True(t, payload.Success, payload.Message)
+		})
+	}
+}
+
+func TestUserQuotaEndpointsRejectRangeLongerThanThirtyOneDays(t *testing.T) {
+	const startTimestamp int64 = 1719792000
+	endTimestamp := startTimestamp + 31*24*60*60 + 1
+	endpoints := []struct {
+		name    string
+		path    string
+		handler gin.HandlerFunc
+	}{
+		{name: "quota", path: "/api/data/self", handler: GetUserQuotaDates},
+		{name: "flow", path: "/api/data/flow/self", handler: GetUserFlowQuotaDates},
+	}
+
+	for _, endpoint := range endpoints {
+		t.Run(endpoint.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Set("id", 1)
+			ctx.Request = httptest.NewRequest(
+				http.MethodGet,
+				endpoint.path+"?start_timestamp="+strconv.FormatInt(startTimestamp, 10)+"&end_timestamp="+strconv.FormatInt(endTimestamp, 10),
+				nil,
+			)
+
+			endpoint.handler(ctx)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var payload userQuotaResponse
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+			require.False(t, payload.Success)
+			require.Equal(t, "时间跨度不能超过 1 个月", payload.Message)
+		})
+	}
 }

@@ -10,7 +10,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func parseFlowQuotaTimeRange(c *gin.Context) (int64, int64, bool) {
+const maxUserQuotaQueryRangeSeconds int64 = 31 * 24 * 60 * 60
+
+func parseQuotaTimeRange(c *gin.Context) (int64, int64, bool) {
 	startTimestamp, err := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	if err != nil || startTimestamp <= 0 {
 		common.ApiErrorMsg(c, "invalid start_timestamp")
@@ -23,6 +25,21 @@ func parseFlowQuotaTimeRange(c *gin.Context) (int64, int64, bool) {
 	}
 	if endTimestamp < startTimestamp {
 		common.ApiErrorMsg(c, "invalid time range")
+		return 0, 0, false
+	}
+	return startTimestamp, endTimestamp, true
+}
+
+func parseUserQuotaTimeRange(c *gin.Context) (int64, int64, bool) {
+	startTimestamp, endTimestamp, ok := parseQuotaTimeRange(c)
+	if !ok {
+		return 0, 0, false
+	}
+	if endTimestamp-startTimestamp > maxUserQuotaQueryRangeSeconds {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "时间跨度不能超过 1 个月",
+		})
 		return 0, 0, false
 	}
 	return startTimestamp, endTimestamp, true
@@ -62,14 +79,8 @@ func GetQuotaDatesByUser(c *gin.Context) {
 
 func GetUserQuotaDates(c *gin.Context) {
 	userId := c.GetInt("id")
-	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
-	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-	// 判断时间跨度是否超过 1 个月
-	if endTimestamp-startTimestamp > 2592000 {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "时间跨度不能超过 1 个月",
-		})
+	startTimestamp, endTimestamp, ok := parseUserQuotaTimeRange(c)
+	if !ok {
 		return
 	}
 	dates, err := model.GetQuotaDataByUserId(userId, startTimestamp, endTimestamp)
@@ -86,7 +97,7 @@ func GetUserQuotaDates(c *gin.Context) {
 }
 
 func GetAllFlowQuotaDates(c *gin.Context) {
-	startTimestamp, endTimestamp, ok := parseFlowQuotaTimeRange(c)
+	startTimestamp, endTimestamp, ok := parseQuotaTimeRange(c)
 	if !ok {
 		return
 	}
@@ -106,15 +117,8 @@ func GetAllFlowQuotaDates(c *gin.Context) {
 
 func GetUserFlowQuotaDates(c *gin.Context) {
 	userId := c.GetInt("id")
-	startTimestamp, endTimestamp, ok := parseFlowQuotaTimeRange(c)
+	startTimestamp, endTimestamp, ok := parseUserQuotaTimeRange(c)
 	if !ok {
-		return
-	}
-	if endTimestamp-startTimestamp > 2592000 {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "时间跨度不能超过 1 个月",
-		})
 		return
 	}
 	dates, err := model.GetFlowQuotaData(startTimestamp, endTimestamp, "", userId, common.RoleCommonUser)
