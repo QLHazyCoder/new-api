@@ -40,3 +40,13 @@ func TestBuildQueryResultIncludesCounters(t *testing.T) {
 	require.Equal(t, int64(5), group.Series[1].RequestCount)
 	require.Equal(t, int64(5), group.Series[1].SuccessCount)
 }
+
+func TestAtomicBucketFailedSampleDoesNotIncreaseSuccessCount(t *testing.T) {
+	bucket := &atomicBucket{}
+	bucket.add(Sample{Success: true})
+	bucket.add(Sample{Success: false})
+
+	snapshot := bucket.snapshot()
+	require.Equal(t, int64(2), snapshot.requestCount)
+	require.Equal(t, int64(1), snapshot.successCount)
+}

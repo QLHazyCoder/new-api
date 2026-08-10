@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"math"
 	"net/http/httptest"
 	"testing"
@@ -21,6 +22,294 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestClassifyTextRequestOutcome(t *testing.T) {
+	clientGone := relaycommon.NewStreamStatus()
+	clientGone.SetEndReason(relaycommon.StreamEndReasonClientGone, errors.New("context canceled"))
+	normalStream := relaycommon.NewStreamStatus()
+	normalStream.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+
+	paidTextRequest := func() *relaycommon.RelayInfo {
+		return &relaycommon.RelayInfo{
+			RelayFormat: types.RelayFormatOpenAI,
+			RelayMode:   relayconstant.RelayModeChatCompletions,
+			PriceData: hosttypes.PriceData{
+				ModelRatio: 1,
+				GroupRatioInfo: hosttypes.GroupRatioInfo{
+					GroupRatio: 1,
+				},
+			},
+		}
+	}
+	freeTextRequest := func() *relaycommon.RelayInfo {
+		return &relaycommon.RelayInfo{
+			RelayFormat: types.RelayFormatOpenAI,
+			RelayMode:   relayconstant.RelayModeChatCompletions,
+			PriceData: hosttypes.PriceData{
+				ModelRatio: 0,
+				GroupRatioInfo: hosttypes.GroupRatioInfo{
+					GroupRatio: 1,
+				},
+			},
+		}
+	}
+
+	testCases := []struct {
+		name              string
+		relayInfo         *relaycommon.RelayInfo
+		summary           textQuotaSummary
+		adminRejectReason string
+		want              textRequestOutcome
+	}{
+		{
+			name: "zero-billed client disconnect is failed",
+			relayInfo: func() *relaycommon.RelayInfo {
+				info := paidTextRequest()
+				info.IsStream = true
+				info.StreamStatus = clientGone
+				return info
+			}(),
+			want: textRequestOutcome{
+				Status: textRequestOutcomeFailed,
+				Reason: textRequestOutcomeNoBillableResult,
+			},
+		},
+		{
+			name: "charged client disconnect remains successful",
+			relayInfo: func() *relaycommon.RelayInfo {
+				info := paidTextRequest()
+				info.IsStream = true
+				info.StreamStatus = clientGone
+				return info
+			}(),
+			summary: textQuotaSummary{Quota: 120},
+			want:    textRequestOutcome{Status: textRequestOutcomeSuccess},
+		},
+		{
+			name:      "zero-token tool surcharge is successful when settled",
+			relayInfo: paidTextRequest(),
+			summary: textQuotaSummary{
+				Quota:                  5000,
+				ToolCallSurchargeQuota: decimal.NewFromInt(5000),
+			},
+			want: textRequestOutcome{Status: textRequestOutcomeSuccess},
+		},
+		{
+			name:      "normal free request is successful",
+			relayInfo: freeTextRequest(),
+			want:      textRequestOutcome{Status: textRequestOutcomeSuccess},
+		},
+		{
+			name: "normal fixed-price zero-cost request is successful",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAI,
+				RelayMode:   relayconstant.RelayModeChatCompletions,
+				PriceData: hosttypes.PriceData{
+					UsePrice:   true,
+					ModelPrice: 0,
+					GroupRatioInfo: hosttypes.GroupRatioInfo{
+						GroupRatio: 1,
+					},
+				},
+			},
+			want: textRequestOutcome{Status: textRequestOutcomeSuccess},
+		},
+		{
+			name: "normal free stream is successful",
+			relayInfo: func() *relaycommon.RelayInfo {
+				info := freeTextRequest()
+				info.IsStream = true
+				info.StreamStatus = normalStream
+				return info
+			}(),
+			want: textRequestOutcome{Status: textRequestOutcomeSuccess},
+		},
+		{
+			name: "free stream client disconnect is failed",
+			relayInfo: func() *relaycommon.RelayInfo {
+				info := freeTextRequest()
+				info.IsStream = true
+				info.StreamStatus = clientGone
+				return info
+			}(),
+			want: textRequestOutcome{
+				Status: textRequestOutcomeFailed,
+				Reason: textRequestOutcomeNoBillableResult,
+			},
+		},
+		{
+			name:              "free request rejected by upstream is failed",
+			relayInfo:         freeTextRequest(),
+			adminRejectReason: "gemini_empty_candidates",
+			want: textRequestOutcome{
+				Status: textRequestOutcomeFailed,
+				Reason: textRequestOutcomeNoBillableResult,
+			},
+		},
+		{
+			name: "tiered zero settlement is not inferred as a free model",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAI,
+				RelayMode:   relayconstant.RelayModeChatCompletions,
+				PriceData: hosttypes.PriceData{
+					GroupRatioInfo: hosttypes.GroupRatioInfo{
+						GroupRatio: 1,
+					},
+				},
+				TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+					BillingMode: "tiered_expr",
+				},
+			},
+			want: textRequestOutcome{
+				Status: textRequestOutcomeFailed,
+				Reason: textRequestOutcomeNoBillableResult,
+			},
+		},
+		{
+			name: "positive final settlement remains successful after later refund",
+			relayInfo: func() *relaycommon.RelayInfo {
+				info := paidTextRequest()
+				info.FinalPreConsumedQuota = 240
+				return info
+			}(),
+			summary: textQuotaSummary{Quota: 120},
+			want:    textRequestOutcome{Status: textRequestOutcomeSuccess},
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, classifyTextRequestOutcome(tt.relayInfo, tt.summary, tt.adminRejectReason))
+		})
+	}
+}
+
+func TestIsPrimaryTextGenerationRequest(t *testing.T) {
+	testCases := []struct {
+		name      string
+		relayInfo *relaycommon.RelayInfo
+		want      bool
+	}{
+		{
+			name: "chat completions",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAI,
+				RelayMode:   relayconstant.RelayModeChatCompletions,
+			},
+			want: true,
+		},
+		{
+			name: "responses compact",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAIResponsesCompaction,
+				RelayMode:   relayconstant.RelayModeResponsesCompact,
+			},
+			want: true,
+		},
+		{
+			name: "responses",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAIResponses,
+				RelayMode:   relayconstant.RelayModeResponses,
+			},
+			want: true,
+		},
+		{
+			name: "completions",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAI,
+				RelayMode:   relayconstant.RelayModeCompletions,
+			},
+			want: true,
+		},
+		{
+			name: "claude messages",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatClaude,
+			},
+			want: true,
+		},
+		{
+			name: "gemini generate content",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat:    types.RelayFormatGemini,
+				RelayMode:      relayconstant.RelayModeGemini,
+				RequestURLPath: "/v1beta/models/gemini-2.5-pro:generateContent",
+			},
+			want: true,
+		},
+		{
+			name: "gemini embedding",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat:    types.RelayFormatGemini,
+				RelayMode:      relayconstant.RelayModeGemini,
+				RequestURLPath: "/v1beta/models/gemini-embedding-001:embedContent",
+			},
+			want: false,
+		},
+		{
+			name: "alpha search",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAIAlphaSearch,
+				RelayMode:   relayconstant.RelayModeAlphaSearch,
+			},
+			want: false,
+		},
+		{
+			name: "image generation",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAIImage,
+				RelayMode:   relayconstant.RelayModeImagesGenerations,
+			},
+			want: false,
+		},
+		{
+			name: "audio",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAIAudio,
+				RelayMode:   relayconstant.RelayModeAudioSpeech,
+			},
+			want: false,
+		},
+		{
+			name: "embedding",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatEmbedding,
+				RelayMode:   relayconstant.RelayModeEmbeddings,
+			},
+			want: false,
+		},
+		{
+			name: "rerank",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatRerank,
+				RelayMode:   relayconstant.RelayModeRerank,
+			},
+			want: false,
+		},
+		{
+			name: "realtime",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatOpenAIRealtime,
+				RelayMode:   relayconstant.RelayModeRealtime,
+			},
+			want: false,
+		},
+		{
+			name: "task",
+			relayInfo: &relaycommon.RelayInfo{
+				RelayFormat: types.RelayFormatTask,
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range testCases {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isPrimaryTextGenerationRequest(tt.relayInfo))
+		})
+	}
+}
 
 func TestCalculateTextQuotaSummaryUnifiedForClaudeSemantic(t *testing.T) {
 	gin.SetMode(gin.TestMode)

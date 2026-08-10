@@ -68,6 +68,95 @@ type textQuotaSummary struct {
 	ToolCallSurchargeQuota decimal.Decimal
 }
 
+const (
+	textRequestOutcomeSuccess = "success"
+	textRequestOutcomeFailed  = "failed"
+
+	textRequestOutcomeNoBillableResult = "no_billable_result"
+)
+
+// textRequestOutcome is persisted in new text consume logs so the log UI and
+// performance counters share the same final-request result.
+type textRequestOutcome struct {
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// isPrimaryTextGenerationRequest limits the new outcome rule to the external
+// text-generation APIs. PostTextConsumeQuota is also shared by non-text relay
+// paths, whose existing performance semantics must remain unchanged.
+func isPrimaryTextGenerationRequest(relayInfo *relaycommon.RelayInfo) bool {
+	if relayInfo == nil {
+		return false
+	}
+
+	switch relayInfo.RelayFormat {
+	case types.RelayFormatOpenAI:
+		return relayInfo.RelayMode == relayconstant.RelayModeChatCompletions ||
+			relayInfo.RelayMode == relayconstant.RelayModeCompletions
+	case types.RelayFormatOpenAIResponses,
+		types.RelayFormatOpenAIResponsesCompaction,
+		types.RelayFormatClaude:
+		return true
+	case types.RelayFormatGemini:
+		requestPath := strings.ToLower(relayInfo.RequestURLPath)
+		return relayInfo.RelayMode == relayconstant.RelayModeGemini &&
+			!relayInfo.IsGeminiBatchEmbedding &&
+			(strings.Contains(requestPath, ":generatecontent") ||
+				strings.Contains(requestPath, ":streamgeneratecontent"))
+	default:
+		return false
+	}
+}
+
+// isExplicitlyZeroPricedTextRequest distinguishes an intentionally free
+// request from a paid request that failed before returning billable usage.
+func isExplicitlyZeroPricedTextRequest(relayInfo *relaycommon.RelayInfo) bool {
+	if relayInfo == nil {
+		return false
+	}
+
+	priceData := relayInfo.PriceData
+	if priceData.GroupRatioInfo.GroupRatio == 0 {
+		return true
+	}
+	// FreeModel describes whether pre-consume was skipped. The final group can
+	// change during a retry, so use the current final pricing fields below.
+	// Tiered PriceData intentionally leaves ModelRatio and ModelPrice at zero.
+	// Its zero settlement is only free when the final group ratio is zero.
+	if relayInfo.TieredBillingSnapshot != nil {
+		return false
+	}
+	if priceData.UsePrice {
+		return priceData.ModelPrice == 0
+	}
+	return priceData.ModelRatio == 0
+}
+
+func isNormalTextRequestCompletion(relayInfo *relaycommon.RelayInfo, adminRejectReason string) bool {
+	if relayInfo == nil || adminRejectReason != "" {
+		return false
+	}
+	if !relayInfo.IsStream {
+		return true
+	}
+	if relayInfo.StreamStatus == nil {
+		return false
+	}
+	return relayInfo.StreamStatus.IsNormalEnd() && !relayInfo.StreamStatus.HasErrors()
+}
+
+func classifyTextRequestOutcome(relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, adminRejectReason string) textRequestOutcome {
+	if summary.Quota > 0 ||
+		(isExplicitlyZeroPricedTextRequest(relayInfo) && isNormalTextRequestCompletion(relayInfo, adminRejectReason)) {
+		return textRequestOutcome{Status: textRequestOutcomeSuccess}
+	}
+	return textRequestOutcome{
+		Status: textRequestOutcomeFailed,
+		Reason: textRequestOutcomeNoBillableResult,
+	}
+}
+
 // hasBillableUsage reports whether this request should incur any charge.
 // A request can carry zero tokens yet still be billable via a tool-call
 // surcharge (e.g. /v1/alpha/search returns no usage but bills one web_search
@@ -485,6 +574,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		logger.LogError(ctx, "error settling billing: "+err.Error())
 	}
 
+	applyTextRequestOutcome := isPrimaryTextGenerationRequest(relayInfo)
+	requestOutcome := textRequestOutcome{Status: textRequestOutcomeSuccess}
+	if applyTextRequestOutcome {
+		requestOutcome = classifyTextRequestOutcome(relayInfo, summary, adminRejectReason)
+	}
+
 	logModel := summary.ModelName
 	if strings.HasPrefix(logModel, "gpt-4-gizmo") {
 		logModel = "gpt-4-gizmo-*"
@@ -512,6 +607,9 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	appendUsageBillingPathForLog(other, common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens), originUsage)
 	if adminRejectReason != "" {
 		other["reject_reason"] = adminRejectReason
+	}
+	if applyTextRequestOutcome {
+		other["request_outcome"] = requestOutcome
 	}
 	if summary.ImageTokens != 0 {
 		other["image"] = true
@@ -571,6 +669,6 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		Other:            other,
 	})
 	gopool.Go(func() {
-		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
+		perfmetrics.RecordRelaySample(relayInfo, requestOutcome.Status == textRequestOutcomeSuccess, int64(summary.CompletionTokens))
 	})
 }

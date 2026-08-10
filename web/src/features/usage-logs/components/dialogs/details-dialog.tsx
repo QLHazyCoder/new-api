@@ -66,6 +66,7 @@ import { cn } from '@/lib/utils'
 import type { UsageLog } from '../../data/schema'
 import {
   parseLogOther,
+  getLogStatusDisplay,
   getParamOverrideActionLabel,
   parseAuditLine,
   decodeBillingExprB64,
@@ -481,7 +482,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
   const details = props.log.content ?? ''
   const other = parseLogOther(props.log.other)
-  const typeConfig = getLogTypeConfig(props.log.type)
+  const status = getLogStatusDisplay(getLogTypeConfig(props.log.type), other)
 
   const isViolation = isViolationFeeLog(other)
   const isRefund = props.log.type === 6
@@ -619,8 +620,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
         <>
           {t('Log Details')}
           <StatusBadge
-            label={t(typeConfig.label)}
-            variant={typeConfig.color as StatusBadgeProps['variant']}
+            label={t(status.label)}
+            variant={status.variant}
             size='sm'
             copyable={false}
           />

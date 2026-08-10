@@ -22,7 +22,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
-import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
+import { StatusBadge } from '@/components/status-badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   Popover,
@@ -44,6 +44,7 @@ import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
   formatModelName,
+  getLogStatusDisplay,
   getTieredBillingSummary,
   hasAnyCacheTokens,
   parseLogOther,
@@ -292,7 +293,10 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       cell: ({ row }) => {
         const log = row.original
         const timestamp = row.getValue('created_at') as number
-        const config = getLogTypeConfig(log.type)
+        const status = getLogStatusDisplay(
+          getLogTypeConfig(log.type),
+          parseLogOther(log.other)
+        )
 
         return (
           <div className='flex min-w-0 flex-col gap-0.5'>
@@ -300,8 +304,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               {formatTimestampToDate(timestamp)}
             </span>
             <StatusBadge
-              label={t(config.label)}
-              variant={config.color as StatusBadgeProps['variant']}
+              label={t(status.label)}
+              variant={status.variant}
               size='sm'
               copyable={false}
               className='-ml-1.5 !text-xs [&_span]:!text-xs'

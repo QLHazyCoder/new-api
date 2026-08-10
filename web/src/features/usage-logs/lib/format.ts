@@ -167,6 +167,28 @@ export function parseLogOther(other: string): LogOtherData | null {
   }
 }
 
+export interface LogStatusDisplay {
+  label: string
+  variant: StatusBadgeProps['variant']
+}
+
+/**
+ * Applies the explicit result carried by new text consume logs. Historical
+ * entries intentionally fall back to the existing type-based status.
+ */
+export function getLogStatusDisplay(
+  typeConfig: { label: string; color: string },
+  other: LogOtherData | null
+): LogStatusDisplay {
+  if (other?.request_outcome?.status === 'failed') {
+    return { label: 'Failed', variant: 'red' }
+  }
+  return {
+    label: typeConfig.label,
+    variant: typeConfig.color as StatusBadgeProps['variant'],
+  }
+}
+
 /**
  * Get time color based on duration (in seconds)
  */

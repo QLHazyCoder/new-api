@@ -221,6 +221,10 @@ export interface LogOtherData {
     end_error?: string
     errors?: string[]
   }
+  request_outcome?: {
+    status?: 'success' | 'failed'
+    reason?: 'no_billable_result' | string
+  }
   // Violation fee fields
   violation_fee?: boolean
   violation_fee_code?: string
