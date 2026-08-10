@@ -150,9 +150,44 @@
   删除列表检查均通过。按用户要求未在本机执行 `go build`/`go test`，待推送后的
   GitHub Actions 进行完整编译与测试验收。
 
-### 阶段 3 至交付：待更新
+### 阶段 3：前端、翻译与表单二次审查
 
-- 阶段 3：前端/翻译/表单复核与修复提交。
-- 阶段 4：最终反向审计与验证记录提交。
-- 交付：快进本地 `main`、推送 `origin/main`，确认 GitHub Actions 的 amd64、arm64 和
-  manifest Job 成功；本次不包含部署授权。
+- 用户管理抽屉仍使用 `/api/group/` 返回的用户可分配分组；`GroupGroupRatio`/分组定价
+  配置没有被误当作用户分组来源。该行为与保护清单中已确认的“恢复 new-api 原生用户
+  分组编辑”决策一致，默认分组不增加额外的隐式可见性规则。
+- P-09/P-10：渠道模型抓取弹窗采用 rc.24 的独立厂商分类库，同时保留本地重定向源模型
+  别名排除、已移除模型页签、已选模型状态和保存行为；`model-categories` 的导出与调用
+  路径已检查，无孤立实现或旧导入。
+- P-03/P-04/P-05：钱包默认充值金额、支付回跳状态恢复和稳定布局仍位于现有 wallet、
+  payment-return 与 operation-setting 路径；rc.24 未改动这些文件。
+- P-13/P-14/P-15/P-16：Playground 多供应商图片、规格/编辑、异步历史与删除竞态保护
+  仍位于原有图片组件和 hook；前端重复删除由任务 ID 锁和删除墓碑阻断，不依赖服务器
+  返回 `image task not found` 来决定界面状态。
+- P-06/P-19/P-20/P-24/P-25/P-27/P-28：性能指标、订阅/混合扣费、排行榜、表格列宽、
+  31 天看板窗口和文本成功率路径均未出现在 rc.24 的前端变更列表中，逐项反查后仍存在。
+- 鉴权：`web/src` 未发现 `New-Api-User` 或旧 Session 前端请求头；请求继续通过上游
+  鉴权客户端。未发现旧 `web/default` 或已跟踪的 Classic 源文件。
+- 翻译：全部 `web/src/i18n/locales/*.json` 可由 JSON 解析器读取，所有 locale 的标量键
+  集与 `en.json` 一致；未发现 Unicode replacement character、冲突标记或明显乱码。
+- 阶段门禁（静态）：前端路径差异、导入/导出、删除列表、UTF-8、翻译 JSON 和冲突标记
+  检查通过。按用户要求未执行 `bun install`、typecheck、测试、lint 或 build；这些检查
+  交由推送后的 GitHub Actions 执行。
+
+本阶段没有需要修改的前端业务代码，审计结果以本记录提交固化。
+
+### 阶段 4：最终反向审计与验证记录
+
+- 从 `custom-feature-preservation-checklist.md` 反查 P-01 至 P-28；每项均有最终实现路径、
+  语义等价的上游替代，或在保护清单中已有用户批准的退休说明，不存在未归类项。
+- `git diff --name-status` 的最终变更未删除受保护源码；未跟踪的本地
+  `web/classic/dist` 是被 `web/.gitignore` 忽略的旧构建产物，不进入提交或 GitHub 干净
+  checkout，本次不删除用户本地回滚资料。
+- 变更文本、Go 格式、差异空白、冲突标记、空文件和 locale JSON 均执行静态检查；没有
+  发现 UTF-8 解码错误、replacement character、无效翻译 JSON 或异常文件删除。
+- 本机不执行 Go/Bun/Docker 构建和测试。交付后以新提交 SHA 为准检查 GitHub Actions，
+  必须确认 `Publish Docker image (Multi-arch)` 的 amd64、arm64 和 manifest Job 全部
+  成功；失败时只提交有实际修复的修复提交，瞬时 Runner/网络失败优先重跑 Job。
+- 本次只发布代码到 `origin/main`，不执行蓝绿部署；安全 Cookie、可信 HTTPS Origin 和
+  `TRUSTED_PROXIES` 仍是正式部署前置条件。
+
+阶段 4 完成后，保留阶段提交和双父合并提交，不 squash、不重写历史。
