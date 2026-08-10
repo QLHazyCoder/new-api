@@ -13,12 +13,17 @@
   93 个非合并提交。
 - rc.22 合并完成后的自研补充：`441ea707`、`9773de9e`、`51cd6ec4`、
   `51e0b058`、`d81c294f`、`504e193f`。
-- 本清单共映射 99 个自研提交。其中 `d81c294f` 是对分组可见性回归测试的泛化
-  修正，不单独增加产品功能；其余提交都对应下列可见行为、账务不变量、数据迁移
-  或发布能力。
+- 本清单共映射 103 个可追踪的本地非合并提交（截至 `main@b44e6971e`）。其中
+  `d81c294f` 是对分组可见性回归测试的泛化修正，不单独增加产品功能；其余提交都
+  对应下列可见行为、账务不变量、数据迁移或发布能力。
 - 已批准退休的本地提交有两个：`cd2f8814` 只服务于已退休的 Classic 前端构建，
   不得恢复 `web/classic` 或 `web/default`；`bca83882` 的用户编辑分组扩展已按用户
   明确决定恢复上游原始行为。现行单前端必须全部位于 `web/src`。
+- 清单创建后补录的功能提交为 `571b38f03`、`3707af0c4` 和 `b44e6971e`；
+  `88ff1c7cd` 是执行已批准退休决定的用户管理维护提交，不新增独立保留功能，
+  但仍在 P-21 中保留可追踪映射。`4b1276d7d`、`45d39a658`、`f8c06ddc5`、
+  `ec15c8e23`、`dd95ab677` 是 rc.22 合并审计/文档维护提交，`7d8eeb44d` 是
+  rc.23 上游合并提交；它们不新增独立产品契约，相关证据保留在对应上游合并审计文档。
 - 本文档与 [upstream-merge-v1.0.0-rc.22.md](./upstream-merge-v1.0.0-rc.22.md)
   配套使用：后者保留 rc.22 的逐提交迁移证据，本文件是以后每次合并的验收入口。
 
@@ -322,7 +327,8 @@
 - 验证入口：`controller/user_manage_test.go`、`controller/user_self_update_test.go`、
   `model/user_update_test.go`、`model/user_authentication_test.go`、
   `model/user_cache_auth_version_test.go`。
-- 来源提交：`693494a0`、`8aaede90`、`9773de9e`；`bca83882` 为经用户批准退休项。
+- 来源提交：`693494a0`、`8aaede90`、`9773de9e`、`3707af0c4`；`bca83882` 为
+  经用户批准退休项，`88ff1c7cd` 为该退休决定的实施提交。
 
 ### P-22 注册来源分组策略
 
@@ -386,7 +392,27 @@
   仅在个人接口参数校验层生效。
 - 当前位置：`controller/usedata.go`。
 - 验证入口：`controller/usedata_flow_test.go`。
-- 来源提交：本项创建提交 `fix: allow 31-day user dashboard ranges`。
+- 来源提交：`571b38f03` (`fix: allow 31-day user dashboard ranges`)。
+
+### P-28 文本请求最终结果与成功率统一口径
+
+- 必须保留：Chat Completions/Completions、Responses/Compact、Claude Messages 和
+  Gemini 文本生成使用同一最终结果判定；最终结算额度大于 0 即成功，即使流有异常；
+  结算为 0 时只有明确免费配置且正常完成才成功，其余为 `failed / no_billable_result`。
+- 必须保留：非文本接口不改变现有统计；渠道重试只按外层用户请求的最终结果计一个
+  性能样本；成功后退款不改原消费日志或成功率。新 `type=2` 消费日志在 `other` 写入
+  `request_outcome`，历史日志、历史性能桶和账务/退款行为不回填或迁移。
+- 当前位置：`service/text_quota.go`、`pkg/perf_metrics/metrics.go`、
+  `web/src/features/usage-logs/types.ts`、`web/src/features/usage-logs/lib/format.ts`、
+  `web/src/features/usage-logs/components/columns/common-logs-columns.tsx`、
+  `web/src/features/usage-logs/components/usage-logs-mobile-card.tsx`、
+  `web/src/features/usage-logs/components/dialogs/details-dialog.tsx`。
+- 验证入口：`service/text_quota_test.go`、`pkg/perf_metrics/metrics_test.go`、
+  `web/src/features/usage-logs/lib/__tests__/request-outcome.test.ts`；已通过
+  `go build ./service ./pkg/perf_metrics`、性能指标测试、前端 typecheck/build/lint/format
+  检查。完整 `go test ./service` 仍受既有 `service/task_billing_test.go` 中
+  `dto.UserSetting` 编译错误阻断。
+- 来源提交：`b44e6971e` (`fix(logs): align text request success rate`)。
 
 ## 5. 提交映射完整性
 
@@ -416,13 +442,14 @@
 | P-18 | `db10c428`, `71bfa129`, `a4a43c99` |
 | P-19 | `3c7df8f5`, `46423a16`, `3219bde1`, `3eb2c6ed` |
 | P-20 | `460b36a8`, `1779060b`, `525ecf72` |
-| P-21 | `693494a0`, `8aaede90`, `9773de9e`; 已批准退休：`bca83882` |
+| P-21 | `693494a0`, `8aaede90`, `9773de9e`, `3707af0c4`; 已批准退休：`bca83882`; 退休实施：`88ff1c7cd` |
 | P-22 | `8ccd7a17`, `393aec79` |
 | P-23 | `5832779f`, `ea08ee94` |
 | P-24 | `f3236ab4`, `705070a8`, `3642fd14` |
 | P-25 | `e079ae13` |
 | P-26 | `271be484`, `4d972671` |
-| P-27 | 本项创建提交 `fix: allow 31-day user dashboard ranges` |
+| P-27 | `571b38f03` |
+| P-28 | `b44e6971e` |
 
 ## 6. 本次及以后维护记录模板
 
@@ -435,3 +462,10 @@
 合并结束前必须满足：没有未填写的 P 编号；没有未解释的本地文件删除；没有丢失的
 `options` 键或业务表；所有当前变更文本可按 UTF-8 解析；工作区干净；推送 `main` 后
 GitHub Actions 的 amd64、arm64 与 manifest 均成功。
+
+## 7. 维护记录
+
+- 2026-08-10：以 `dd95ab677..main@b44e6971e` 的第一父提交链复核历史；确认
+  `88ff1c7cd`、`571b38f03`、`3707af0c4` 已有行为或审计文档但映射不完整，已补齐；
+  新增 P-28 记录文本请求成功率与日志结果契约。合并/审计维护提交已在第 1 节明确
+  标注，不与产品功能提交混计。
