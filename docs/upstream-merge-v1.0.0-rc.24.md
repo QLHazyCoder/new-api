@@ -128,9 +128,30 @@
 - 合并结果没有文件删除；自动合并的认证、Relay、渠道测试、货币格式化和工作流路径
   留待阶段 2/3 逐项复核。
 
-### 阶段 2 至交付：待更新
+### 阶段 2：后端二次审查与修复
 
-- 阶段 2：后端/Relay/数据兼容性复核与修复提交。
+- P-07：`relay/chat_completions_via_responses.go` 仍是显式拒绝入口；同时删除
+  `relay/claude_handler.go` 中残留的自动 Chat-to-Responses 分支，避免未来策略配置
+  误开时重新改变 Claude 公共协议。Responses cache creation/cache write 的解析、计费
+  和日志字段仍位于现有 `relay/channel/openai`、`service/text_quota.go` 与
+  `service/log_info_generate.go` 路径，本次上游文件未覆盖这些实现。
+- P-17/P-21/P-22：复核 `InsertWithTx` 注册奖励事务、`hardDeleteUserTx` 鉴权清理与
+  邀请人数维护、`TransferAffQuotaToQuota` 行锁/原子更新/账本事件、`UpdateWithTx`
+  账务字段白名单、`UpdateUserAccessToken` 单列更新，以及密码/OAuth/微信注册分组入口。
+  现有生产数据和 `affiliate_reward_events` 未执行 SQL 改写。
+- P-12/P-15/P-16/P-18/P-19/P-20/P-24/P-27/P-28：逐路径确认日志期限下沉到异步清理、
+  `PlaygroundImageMaxConcurrency` 缺失时仅在有队列任务时明确报错且迁移只补缺失值、
+  图片删除重复请求幂等、额度预警/订阅混合扣费/排行榜边界/31 天窗口/最终结果统计均
+  仍在原路径；本次 rc.24 没有触及这些模块。
+- 上游 Relay 请求体改造已覆盖 JSON、透传、multipart 和任务请求的独立重放 reader，
+  `Request.GetBody` 与 `ContentLength` 由原始 body 元数据恢复；保留本地缓存写入计费和
+  图片请求语义。自动合并文件未发现删除。
+- 阶段门禁（静态）：`gofmt -d` 无输出、`git diff --check`、UTF-8 解码、冲突标记和
+  删除列表检查均通过。按用户要求未在本机执行 `go build`/`go test`，待推送后的
+  GitHub Actions 进行完整编译与测试验收。
+
+### 阶段 3 至交付：待更新
+
 - 阶段 3：前端/翻译/表单复核与修复提交。
 - 阶段 4：最终反向审计与验证记录提交。
 - 交付：快进本地 `main`、推送 `origin/main`，确认 GitHub Actions 的 amd64、arm64 和
