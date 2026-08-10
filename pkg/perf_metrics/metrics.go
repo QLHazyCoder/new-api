@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 )
 
@@ -52,6 +54,15 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 		OutputTokens: outputTokens,
 		GenerationMs: generationMs,
 	})
+}
+
+// ShouldRecordRelayFailure excludes only provider-rejected image generations
+// from reliability metrics. The caller must have captured the raw upstream
+// status before any local error or channel status-code mapping.
+func ShouldRecordRelayFailure(info *relaycommon.RelayInfo) bool {
+	return info == nil ||
+		info.RelayFormat != types.RelayFormatOpenAIImage ||
+		info.LastUpstreamHTTPStatusCode != http.StatusBadRequest
 }
 
 func Record(sample Sample) {

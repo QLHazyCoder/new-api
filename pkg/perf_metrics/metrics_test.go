@@ -1,8 +1,11 @@
 package perfmetrics
 
 import (
+	"net/http"
 	"testing"
 
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,4 +52,95 @@ func TestAtomicBucketFailedSampleDoesNotIncreaseSuccessCount(t *testing.T) {
 	snapshot := bucket.snapshot()
 	require.Equal(t, int64(2), snapshot.requestCount)
 	require.Equal(t, int64(1), snapshot.successCount)
+}
+
+func TestShouldRecordRelayFailureExcludesOnlyRawImageUpstreamBadRequest(t *testing.T) {
+	tests := []struct {
+		name       string
+		format     types.RelayFormat
+		playground bool
+		rawStatus  int
+		want       bool
+	}{
+		{
+			name:      "regular image upstream 400",
+			format:    types.RelayFormatOpenAIImage,
+			rawStatus: http.StatusBadRequest,
+			want:      false,
+		},
+		{
+			name:       "playground image upstream 400",
+			format:     types.RelayFormatOpenAIImage,
+			playground: true,
+			rawStatus:  http.StatusBadRequest,
+			want:       false,
+		},
+		{
+			name:      "image upstream 500",
+			format:    types.RelayFormatOpenAIImage,
+			rawStatus: http.StatusInternalServerError,
+			want:      true,
+		},
+		{
+			name:      "image upstream 429",
+			format:    types.RelayFormatOpenAIImage,
+			rawStatus: http.StatusTooManyRequests,
+			want:      true,
+		},
+		{
+			name:      "text upstream 400",
+			format:    types.RelayFormatOpenAI,
+			rawStatus: http.StatusBadRequest,
+			want:      true,
+		},
+		{
+			name:      "local return error 400",
+			format:    types.RelayFormatOpenAIImage,
+			rawStatus: 0,
+			want:      true,
+		},
+		{
+			name:      "parameter override 400",
+			format:    types.RelayFormatOpenAIImage,
+			rawStatus: 0,
+			want:      true,
+		},
+		{
+			name:   "response mapping to 400",
+			format: types.RelayFormatOpenAIImage,
+			// A mapped 400 retains the original non-400 upstream status.
+			rawStatus: http.StatusInternalServerError,
+			want:      true,
+		},
+		{
+			name:   "response body conversion to 400",
+			format: types.RelayFormatOpenAIImage,
+			// A 400 returned by local response parsing is not an upstream 400.
+			rawStatus: http.StatusOK,
+			want:      true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{
+				RelayFormat:                test.format,
+				IsPlayground:               test.playground,
+				LastUpstreamHTTPStatusCode: test.rawStatus,
+			}
+			require.Equal(t, test.want, ShouldRecordRelayFailure(info))
+		})
+	}
+}
+
+func TestShouldRecordRelayFailureUsesTheFinalImageAttemptStatus(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		RelayFormat:                types.RelayFormatOpenAIImage,
+		LastUpstreamHTTPStatusCode: http.StatusBadRequest,
+	}
+
+	// ImageHelper clears this request-scoped field at the start of a retry.
+	require.False(t, ShouldRecordRelayFailure(info))
+	info.LastUpstreamHTTPStatusCode = 0
+	require.True(t, ShouldRecordRelayFailure(info))
 }

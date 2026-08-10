@@ -21,6 +21,9 @@ import (
 )
 
 func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
+	// A RelayInfo is reused across channel retries; never let a previous image
+	// attempt's upstream status affect the final performance sample.
+	info.LastUpstreamHTTPStatusCode = 0
 	info.InitChannelMeta(c)
 
 	imageReq, ok := info.Request.(*dto.ImageRequest)
@@ -96,6 +99,9 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 	var httpResp *http.Response
 	if resp != nil {
 		httpResp = resp.(*http.Response)
+		// Keep the provider's actual status before any local error handling or
+		// channel-specific status-code mapping can replace it.
+		info.LastUpstreamHTTPStatusCode = httpResp.StatusCode
 		info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
 		if httpResp.StatusCode != http.StatusOK {
 			if httpResp.StatusCode == http.StatusCreated && info.ApiType == constant.APITypeReplicate {

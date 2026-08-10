@@ -148,9 +148,13 @@ type RelayInfo struct {
 	IsChannelTest                         bool // channel test request
 	RetryIndex                            int
 	LastError                             *types.NewAPIError
-	RuntimeHeadersOverride                map[string]interface{}
-	UseRuntimeHeadersOverride             bool
-	ParamOverrideAudit                    []string
+	// LastUpstreamHTTPStatusCode is the raw status from the most recent image
+	// upstream attempt, captured before channel-specific status mapping. It is
+	// request-scoped and must never be persisted.
+	LastUpstreamHTTPStatusCode int `json:"-"`
+	RuntimeHeadersOverride     map[string]interface{}
+	UseRuntimeHeadersOverride  bool
+	ParamOverrideAudit         []string
 
 	PriceData hosttypes.PriceData
 
