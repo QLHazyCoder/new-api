@@ -178,12 +178,46 @@
 ### 阶段 4：最终反向审计与验证记录
 
 - 从 `custom-feature-preservation-checklist.md` 反查 P-01 至 P-28；每项均有最终实现路径、
-  语义等价的上游替代，或在保护清单中已有用户批准的退休说明，不存在未归类项。
+  语义等价的上游替代，或在保护清单中已有用户批准的退休说明，不存在未归类项。清单中
+  的 109 个历史提交引用均可解析，提交归属没有断链。
+
+| 编号 | 最终状态 | 最终路径及数据/配置契约 | 静态复核 |
+| --- | --- | --- | --- |
+| P-01 | 原样保留 | `.github/workflows/docker-build.yml`；小写 fork owner、amd64、arm64、version/latest manifest | 工作流保持 `main-<sha>` 与多架构发布链路 |
+| P-02 | 经批准退休 | `web/rsbuild.config.ts`、`web/src/**`；Classic/default 不再作为已跟踪源码 | Git tree 无旧目录；本地忽略构建产物未删除 |
+| P-03 | 原样保留 | 支付设置、`controller/topup.go`、`wallet/lib/payment.ts`；`default_topup_amount` 兼容 | 配置读取和安全默认值路径存在 |
+| P-04 | 原样保留 | `controller/service return_path`、`wallet/payment-return.ts` | 统一回跳标记与钱包刷新路径存在 |
+| P-05 | 原样保留 | `web/src/features/wallet/**` | rc.24 未改动钱包布局路径 |
+| P-06 | 原样保留 | `pkg/perf_metrics`、controller、performance-metrics/dashboard | 开关、分组聚合和可见性 hook 仍存在 |
+| P-07 | 融合并加固 | Chat/Claude 协议入口、Responses 账务/日志路径 | 自动 Chat-to-Responses 分支已结构性移除；重放元数据融合 |
+| P-08 | 原样保留 | `service/group.go`、group-ratio 设置与可视化编辑器 | 描述、可用分组和特殊规则均仍由现有配置读取 |
+| P-09 | 融合 | 渠道对话框、CC 切换、自动分组与选择服务 | 上游分类库已接入；本地重定向/移除模型状态保留 |
+| P-10 | 原样保留 | 模型元数据、pricing 组件/价格格式化 | `selectedGroup` 继续传入价格显示逻辑 |
+| P-11 | 原样保留 | 分组服务、pricing controller、使用日志筛选 | 没有按 `default` 名称硬编码公开性 |
+| P-12 | 原样保留 | option/log/system task、日志前端 | 保留期上限和异步清理路径仍在 |
+| P-13 | 原样保留 | `pkg/imagecapability`、图片服务/controller/Relay/Playground | 能力注册、可见性和路由链路仍完整 |
+| P-14 | 原样保留 | 图片 DTO、payload builder、Playground 选项 | `auto`、默认规格和参考图构造路径仍在 |
+| P-15 | 原样保留 | required option、标准/快速迁移、持久任务/worker | 缺失 option 只补值；有队列时才解析并发配置 |
+| P-16 | 原样保留 | 图片任务 model/controller、Playground 删除 hook | 后端幂等删除和前端任务 ID 锁/墓碑仍在 |
+| P-17 | 融合 | 邀请奖励账本、用户事务、钱包奖励卡 | 行锁、原子额度转移、追加式账本和硬删除维护保留 |
+| P-18 | 原样保留 | 配额/通知服务、用户设置 DTO/UI | 余额阈值与通知限流路径仍在 |
+| P-19 | 原样保留 | 订阅 model/controller/管理抽屉 | `applicable_group` 字段、校验和界面仍在 |
+| P-20 | 原样保留 | funding source、billing session、task billing | `subscription_first` 与 mixed funding 分摊仍在 |
+| P-21 | 原样保留；一项已批准退休 | 用户 controller/model/cache/UI；用户分组抽屉只读 `/api/group/` | 硬删除、自助更新边界、缓存更新保留；定价分组混入抽屉的旧扩展未恢复 |
+| P-22 | 原样保留 | 注册策略 model、密码/OAuth/微信 controller | 现有 `RegistrationGroupPolicy` option 实时读取路径保留 |
+| P-23 | 原样保留 | i18n config/languages/format/locales | JSON 可解析且 locale 标量键集合与英文一致 |
+| P-24 | 原样保留 | rankings service/model/UI/route | 本地自然日边界与管理员访问路径仍在 |
+| P-25 | 原样保留 | data-table colgroup/table sizing | 可用宽度填充和固定列边界路径仍在 |
+| P-26 | 原样保留 | affinity 与 Relay 测试初始化 | 测试隔离文件未删除；Gin mode 恢复路径仍在 |
+| P-27 | 原样保留 | `controller/usedata.go` | 两个个人接口共用 31 天秒数上限 |
+| P-28 | 原样保留 | text quota、perf metrics、usage logs | `request_outcome`、无可计费用量和最终结果口径仍在 |
+
 - `git diff --name-status` 的最终变更未删除受保护源码；未跟踪的本地
   `web/classic/dist` 是被 `web/.gitignore` 忽略的旧构建产物，不进入提交或 GitHub 干净
   checkout，本次不删除用户本地回滚资料。
-- 变更文本、Go 格式、差异空白、冲突标记、空文件和 locale JSON 均执行静态检查；没有
-  发现 UTF-8 解码错误、replacement character、无效翻译 JSON 或异常文件删除。
+- 静态验证结果：`git diff --check`、变更 Go 文件 `gofmt -d`、UTF-8 解码、Unicode
+  replacement character、精确冲突标记、空文件、locale JSON 解析与 locale 标量键集合
+  全部通过；rc.24 合并提交 `437240189` 保持两个父提交。
 - 本机不执行 Go/Bun/Docker 构建和测试。交付后以新提交 SHA 为准检查 GitHub Actions，
   必须确认 `Publish Docker image (Multi-arch)` 的 amd64、arm64 和 manifest Job 全部
   成功；失败时只提交有实际修复的修复提交，瞬时 Runner/网络失败优先重跑 Job。
