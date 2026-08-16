@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -79,4 +80,9 @@ func TestAmountDiscountPolicyEmptyGroupsDisableConfiguredDiscounts(t *testing.T)
 	assert.Equal(t, 1.0, rate)
 	assert.False(t, eligible)
 	assert.False(t, applied)
+
+	serializedGroups, err := common.Marshal(paymentSetting.AmountDiscountEligibleGroups)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[]`, string(serializedGroups))
+	assert.NotNil(t, GetAmountDiscountPolicy().EligibleGroups)
 }

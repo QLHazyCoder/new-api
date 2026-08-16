@@ -174,8 +174,11 @@ Legacy orders keep an empty snapshot and are displayed as legacy records.
 ### Stage 6 - Source Delivery
 
 - Status: completed by the feature commit containing this record.
-- Delivery contract: one commit named
-  `feat(payment): scope amount discounts by user group` is pushed directly to
-  `origin/main`; the local and remote SHA are verified equal afterward.
+- Delivery record: the feature commit
+  `feat(payment): scope amount discounts by user group` was pushed directly to
+  `origin/main`. Production readback then exposed that an empty cloned group
+  slice serialized as `null`; a narrow follow-up fix keeps the public contract
+  at `[]` and adds a regression assertion. The follow-up was used instead of a
+  destructive force-push of the already published feature commit.
 - Runtime rollout and production policy selection are operational follow-up
   work and do not add source changes to this commit.

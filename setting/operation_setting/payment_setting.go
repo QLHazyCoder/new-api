@@ -118,10 +118,10 @@ func RefreshAmountDiscountPolicy() error {
 		eligibleSet[group] = struct{}{}
 	}
 	paymentSetting.AmountDiscount = cloneAmountDiscounts(discounts)
-	paymentSetting.AmountDiscountEligibleGroups = append([]string(nil), groups...)
+	paymentSetting.AmountDiscountEligibleGroups = cloneEligibleGroups(groups)
 	amountDiscountPolicy.Store(&AmountDiscountPolicy{
 		Discounts:      discounts,
-		EligibleGroups: groups,
+		EligibleGroups: cloneEligibleGroups(groups),
 		eligibleSet:    eligibleSet,
 	})
 	return nil
@@ -142,7 +142,7 @@ func GetAmountDiscountPolicy() AmountDiscountPolicy {
 	}
 	return AmountDiscountPolicy{
 		Discounts:      cloneAmountDiscounts(policy.Discounts),
-		EligibleGroups: append([]string(nil), policy.EligibleGroups...),
+		EligibleGroups: cloneEligibleGroups(policy.EligibleGroups),
 		eligibleSet:    eligibleSet,
 	}
 }
@@ -179,6 +179,12 @@ func cloneAmountDiscounts(discounts map[int]float64) map[int]float64 {
 	for amount, rate := range discounts {
 		cloned[amount] = rate
 	}
+	return cloned
+}
+
+func cloneEligibleGroups(groups []string) []string {
+	cloned := make([]string, len(groups))
+	copy(cloned, groups)
 	return cloned
 }
 
