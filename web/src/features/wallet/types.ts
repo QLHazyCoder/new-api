@@ -253,6 +253,24 @@ export interface UserWalletData {
  */
 export type TopupStatus = 'success' | 'pending' | 'expired'
 
+/** Server-side pricing inputs captured when a topup order is created. */
+export interface TopupPricingSnapshot {
+  version: number
+  payment_provider: string
+  user_group: string
+  quota_display_type: string
+  requested_amount: number
+  normalized_amount: number
+  stored_amount: number
+  quota_per_unit: number
+  unit_price: number
+  topup_group_ratio: number
+  amount_discount_eligible: boolean
+  amount_discount_applied: boolean
+  amount_discount_rate: number
+  pay_money: number
+}
+
 /**
  * Topup billing record
  */
@@ -269,6 +287,10 @@ export interface TopupRecord {
   trade_no: string
   /** Payment method type */
   payment_method: string
+  /** Payment provider used to create the order */
+  payment_provider?: string
+  /** Admin-only immutable pricing audit data */
+  pricing_snapshot?: TopupPricingSnapshot
   /** Creation timestamp */
   create_time: number
   /** Completion timestamp */

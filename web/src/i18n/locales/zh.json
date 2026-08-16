@@ -1400,7 +1400,6 @@
     "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.": "免责声明：仅限个人使用，请勿分发或共享任何凭证。该渠道存在前置条件与使用门槛，请在充分了解流程与风险后使用，并遵守 OpenAI 的相关条款与政策。相关凭证与配置仅限接入 Codex CLI 使用，不适用于其他客户端、平台或渠道。",
     "Discord": "Discord",
     "Discount": "优惠",
-    "Discount map by recharge amount (JSON object)": "按充值金额的折扣映射 (JSON 对象)",
     "Discount Rate": "折扣率",
     "Discount rate must be ≤ 1": "折扣率必须 ≤ 1",
     "Discount rate must be greater than 0": "折扣率必须大于 0",
@@ -5308,6 +5307,23 @@
     "Usage log retention days": "用量日志保留天数",
     "Usage log retention protection is disabled.": "用量日志保留保护已关闭。",
     "Usage logs from the last {{days}} days are protected.": "最近 {{days}} 天的用量日志受保护。",
-    "Usage logs newer than this many days are protected from manual cleanup.": "最近这些天内的用量日志会受到保护，不能被手动清理。"
+    "Usage logs newer than this many days are protected from manual cleanup.": "最近这些天内的用量日志会受到保护，不能被手动清理。",
+    "Available groups:": "可用分组：",
+    "Modify available groups": "修改可用分组",
+    "Finish editing available groups": "完成修改",
+    "Loading available groups...": "正在加载可用分组...",
+    "Failed to load available groups": "加载可用分组失败",
+    "No groups with users": "没有包含用户的分组",
+    "Select available groups...": "选择可用分组...",
+    "Amount discount policy saved": "金额折扣策略已保存",
+    "Failed to save amount discount policy": "保存金额折扣策略失败",
+    "Pricing snapshot": "计价快照",
+    "Requested amount": "请求金额",
+    "Stored amount": "订单存储金额",
+    "Quota per unit": "单位额度",
+    "Eligible, amount not matched": "符合资格，但金额未命中",
+    "Not eligible": "不符合资格",
+    "Legacy order, no pricing snapshot": "旧订单，无计价快照",
+    "Applied": "已应用"
   }
 }

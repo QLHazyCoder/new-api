@@ -34,6 +34,11 @@ func isPaymentComplianceOptionKey(key string) bool {
 	return strings.HasPrefix(key, "payment_setting.compliance_")
 }
 
+func isAmountDiscountPolicyOptionKey(key string) bool {
+	return key == operation_setting.AmountDiscountOptionKey ||
+		key == operation_setting.AmountDiscountEligibleGroupsOptionKey
+}
+
 func isPositiveOptionValue(value string) bool {
 	intValue, err := strconv.Atoi(strings.TrimSpace(value))
 	if err == nil {
@@ -170,6 +175,10 @@ func UpdateOption(c *gin.Context) {
 	default:
 		if isPaymentComplianceOptionKey(option.Key) {
 			common.ApiErrorMsg(c, "合规确认字段不允许通过通用设置接口修改")
+			return
+		}
+		if isAmountDiscountPolicyOptionKey(option.Key) {
+			common.ApiErrorMsg(c, "金额折扣与可用分组必须通过专用接口一起保存")
 			return
 		}
 	}

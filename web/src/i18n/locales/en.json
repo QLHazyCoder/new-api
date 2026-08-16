@@ -1400,7 +1400,6 @@
     "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.": "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.",
     "Discord": "Discord",
     "Discount": "Discount",
-    "Discount map by recharge amount (JSON object)": "Discount map by recharge amount (JSON object)",
     "Discount Rate": "Discount Rate",
     "Discount rate must be ≤ 1": "Discount rate must be ≤ 1",
     "Discount rate must be greater than 0": "Discount rate must be greater than 0",
@@ -5308,6 +5307,23 @@
     "Usage log retention days": "Usage log retention days",
     "Usage log retention protection is disabled.": "Usage log retention protection is disabled.",
     "Usage logs from the last {{days}} days are protected.": "Usage logs from the last {{days}} days are protected.",
-    "Usage logs newer than this many days are protected from manual cleanup.": "Usage logs newer than this many days are protected from manual cleanup."
+    "Usage logs newer than this many days are protected from manual cleanup.": "Usage logs newer than this many days are protected from manual cleanup.",
+    "Available groups:": "Available groups:",
+    "Modify available groups": "Modify available groups",
+    "Finish editing available groups": "Finish editing available groups",
+    "Loading available groups...": "Loading available groups...",
+    "Failed to load available groups": "Failed to load available groups",
+    "No groups with users": "No groups with users",
+    "Select available groups...": "Select available groups...",
+    "Amount discount policy saved": "Amount discount policy saved",
+    "Failed to save amount discount policy": "Failed to save amount discount policy",
+    "Pricing snapshot": "Pricing snapshot",
+    "Requested amount": "Requested amount",
+    "Stored amount": "Stored amount",
+    "Quota per unit": "Quota per unit",
+    "Eligible, amount not matched": "Eligible, amount not matched",
+    "Not eligible": "Not eligible",
+    "Legacy order, no pricing snapshot": "Legacy order, no pricing snapshot",
+    "Applied": "Applied"
   }
 }

@@ -228,6 +228,9 @@ func loadOptionsFromDatabase() {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
 	}
+	if err := operation_setting.RefreshAmountDiscountPolicy(); err != nil {
+		common.SysError("failed to refresh amount discount policy: " + err.Error())
+	}
 }
 
 func SyncOptions(frequency int) {
@@ -241,6 +244,12 @@ func SyncOptions(frequency int) {
 func validateOptionValue(key string, value string) error {
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
+	}
+	if key == operation_setting.AmountDiscountOptionKey {
+		return operation_setting.ValidateAmountDiscountJSON(value)
+	}
+	if key == operation_setting.AmountDiscountEligibleGroupsOptionKey {
+		return operation_setting.ValidateAmountDiscountEligibleGroupsJSON(value)
 	}
 	if key == "MaxTokenAutoGroups" {
 		return setting.ValidateMaxTokenAutoGroups(value)

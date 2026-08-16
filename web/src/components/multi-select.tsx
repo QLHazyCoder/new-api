@@ -77,6 +77,14 @@ interface MultiSelectProps {
    * instead of being inert. The remove (×) button keeps its own behaviour.
    */
   copyChipOnClick?: boolean
+  /** Preferred side for the portalled dropdown. */
+  contentSide?:
+    | 'top'
+    | 'bottom'
+    | 'left'
+    | 'right'
+    | 'inline-start'
+    | 'inline-end'
 }
 
 const COMMA_REGEX = /[,，\n]/
@@ -345,12 +353,14 @@ export function MultiSelect(props: MultiSelectProps) {
               ? placeholder
               : undefined
           }
+          onFocus={() => setOpen(true)}
+          onClick={() => setOpen(true)}
           onKeyDown={handleKeyDown}
           aria-label={placeholder}
         />
       </ComboboxChips>
 
-      <ComboboxContent anchor={chipsAnchorRef}>
+      <ComboboxContent anchor={chipsAnchorRef} side={props.contentSide}>
         <ComboboxList>
           <ComboboxCollection>
             {(item: string) => {

@@ -1400,7 +1400,6 @@
     "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.": "免責聲明：僅限個人使用，請勿分發或共享任何憑證。該渠道存在前置條件與使用門檻，請在充分了解流程與風險後使用，並遵守 OpenAI 的相關條款與政策。相關憑證與設定僅限接入 Codex CLI 使用，不適用於其他用戶端、平台或渠道。",
     "Discord": "Discord",
     "Discount": "優惠",
-    "Discount map by recharge amount (JSON object)": "按儲值金額的折扣映射 (JSON 物件)",
     "Discount Rate": "折扣率",
     "Discount rate must be ≤ 1": "折扣率必須 ≤ 1",
     "Discount rate must be greater than 0": "折扣率必須大於 0",
@@ -5308,6 +5307,23 @@
     "Usage log retention days": "Usage log retention days",
     "Usage log retention protection is disabled.": "Usage log retention protection is disabled.",
     "Usage logs from the last {{days}} days are protected.": "Usage logs from the last {{days}} days are protected.",
-    "Usage logs newer than this many days are protected from manual cleanup.": "Usage logs newer than this many days are protected from manual cleanup."
+    "Usage logs newer than this many days are protected from manual cleanup.": "Usage logs newer than this many days are protected from manual cleanup.",
+    "Available groups:": "可用分組：",
+    "Modify available groups": "修改可用分組",
+    "Finish editing available groups": "完成修改",
+    "Loading available groups...": "正在載入可用分組...",
+    "Failed to load available groups": "載入可用分組失敗",
+    "No groups with users": "沒有包含使用者的分組",
+    "Select available groups...": "選擇可用分組...",
+    "Amount discount policy saved": "金額折扣策略已儲存",
+    "Failed to save amount discount policy": "儲存金額折扣策略失敗",
+    "Pricing snapshot": "計價快照",
+    "Requested amount": "請求金額",
+    "Stored amount": "訂單儲存金額",
+    "Quota per unit": "單位額度",
+    "Eligible, amount not matched": "符合資格，但金額未命中",
+    "Not eligible": "不符合資格",
+    "Legacy order, no pricing snapshot": "舊訂單，無計價快照",
+    "Applied": "已套用"
   }
 }

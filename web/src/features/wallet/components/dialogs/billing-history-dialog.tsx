@@ -54,6 +54,75 @@ import {
   getPaymentMethodName,
   formatTimestamp,
 } from '../../lib/billing'
+import type { TopupPricingSnapshot } from '../../types'
+
+const SNAPSHOT_PAYMENT_PROVIDERS = new Set(['epay', 'waffo', 'waffo_pancake'])
+
+type TopUpPricingAuditProps = {
+  snapshot?: TopupPricingSnapshot
+  showLegacy: boolean
+}
+
+export function TopUpPricingAudit({
+  snapshot,
+  showLegacy,
+}: TopUpPricingAuditProps) {
+  const { t } = useTranslation()
+
+  if (!snapshot && !showLegacy) return null
+
+  let discountStatus = t('Not eligible')
+  if (snapshot?.amount_discount_applied) {
+    discountStatus = t('Applied')
+  } else if (snapshot?.amount_discount_eligible) {
+    discountStatus = t('Eligible, amount not matched')
+  }
+
+  return (
+    <div className='mt-3 space-y-2 border-t pt-3 sm:mt-4'>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <Label className='text-muted-foreground text-xs'>
+          {t('Pricing snapshot')}
+        </Label>
+        {snapshot && (
+          <span className='text-muted-foreground font-mono text-xs'>
+            v{snapshot.version} / {snapshot.payment_provider} /{' '}
+            {snapshot.user_group || '-'} / {snapshot.quota_display_type}
+          </span>
+        )}
+      </div>
+      {snapshot ? (
+        <>
+          <code className='bg-muted block overflow-x-auto rounded px-2 py-1.5 font-mono text-xs whitespace-nowrap'>
+            {formatNumber(snapshot.normalized_amount)} x{' '}
+            {formatNumber(snapshot.unit_price)} x{' '}
+            {formatNumber(snapshot.topup_group_ratio)} x{' '}
+            {formatNumber(snapshot.amount_discount_rate)} ={' '}
+            {formatNumber(snapshot.pay_money)}
+          </code>
+          <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs'>
+            <span>
+              {t('Requested amount')}: {formatNumber(snapshot.requested_amount)}
+            </span>
+            <span>
+              {t('Stored amount')}: {formatNumber(snapshot.stored_amount)}
+            </span>
+            <span>
+              {t('Quota per unit')}: {formatNumber(snapshot.quota_per_unit)}
+            </span>
+            <span>
+              {t('Amount discount')}: {discountStatus}
+            </span>
+          </div>
+        </>
+      ) : (
+        <p className='text-muted-foreground text-xs'>
+          {t('Legacy order, no pricing snapshot')}
+        </p>
+      )}
+    </div>
+  )
+}
 
 interface BillingHistoryDialogProps {
   open: boolean
@@ -181,6 +250,10 @@ export function BillingHistoryDialog({
               <div className='space-y-3'>
                 {records.map((record) => {
                   const statusConfig = getStatusConfig(record.status)
+                  const showLegacySnapshot =
+                    !record.pricing_snapshot &&
+                    (!record.payment_provider ||
+                      SNAPSHOT_PAYMENT_PROVIDERS.has(record.payment_provider))
                   return (
                     <div
                       key={record.id}
@@ -257,6 +330,13 @@ export function BillingHistoryDialog({
                           </div>
                         </div>
                       </div>
+
+                      {isAdmin && (
+                        <TopUpPricingAudit
+                          snapshot={record.pricing_snapshot}
+                          showLegacy={showLegacySnapshot}
+                        />
+                      )}
 
                       {/* Admin Actions */}
                       {isAdmin && record.status === 'pending' && (

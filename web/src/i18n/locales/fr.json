@@ -1400,7 +1400,6 @@
     "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.": "Avertissement : usage personnel uniquement. Ne distribuez ni ne partagez aucun identifiant. Ce canal a des prerequis et necessite une configuration prealable ; utilisez-le uniquement si vous comprenez la procedure et les risques, et respectez les conditions et politiques d'OpenAI. Les identifiants et la configuration sont reserves a l'integration Codex CLI et ne sont pas destines a d'autres clients, plateformes ou canaux.",
     "Discord": "Discord",
     "Discount": "Remise",
-    "Discount map by recharge amount (JSON object)": "Mappage des réductions par montant de recharge (objet JSON)",
     "Discount Rate": "Taux de réduction",
     "Discount rate must be ≤ 1": "Le taux de remise doit être ≤ 1",
     "Discount rate must be greater than 0": "Le taux de remise doit être supérieur à 0",
@@ -5308,6 +5307,23 @@
     "Usage log retention days": "Usage log retention days",
     "Usage log retention protection is disabled.": "Usage log retention protection is disabled.",
     "Usage logs from the last {{days}} days are protected.": "Les journaux d’utilisation des {{days}} derniers jours sont protégés.",
-    "Usage logs newer than this many days are protected from manual cleanup.": "Usage logs newer than this many days are protected from manual cleanup."
+    "Usage logs newer than this many days are protected from manual cleanup.": "Usage logs newer than this many days are protected from manual cleanup.",
+    "Available groups:": "Groupes disponibles :",
+    "Modify available groups": "Modifier les groupes disponibles",
+    "Finish editing available groups": "Terminer la modification",
+    "Loading available groups...": "Chargement des groupes disponibles...",
+    "Failed to load available groups": "Échec du chargement des groupes disponibles",
+    "No groups with users": "Aucun groupe avec des utilisateurs",
+    "Select available groups...": "Sélectionner les groupes disponibles...",
+    "Amount discount policy saved": "Politique de remise par montant enregistrée",
+    "Failed to save amount discount policy": "Échec de l’enregistrement de la politique de remise par montant",
+    "Pricing snapshot": "Instantané de tarification",
+    "Requested amount": "Montant demandé",
+    "Stored amount": "Montant enregistré",
+    "Quota per unit": "Quota par unité",
+    "Eligible, amount not matched": "Éligible, montant non correspondant",
+    "Not eligible": "Non éligible",
+    "Legacy order, no pricing snapshot": "Ancienne commande, aucun instantané de tarification",
+    "Applied": "Appliquée"
   }
 }

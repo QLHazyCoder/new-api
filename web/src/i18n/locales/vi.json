@@ -1400,7 +1400,6 @@
     "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.": "Tuyên bố miễn trừ: Chỉ dùng cho mục đích cá nhân. Không phân phối hoặc chia sẻ bất kỳ thông tin xác thực nào. Kênh này có điều kiện tiên quyết và yêu cầu thiết lập trước; chỉ sử dụng khi bạn hiểu rõ quy trình và rủi ro, và tuân thủ điều khoản và chính sách của OpenAI. Thông tin xác thực và cấu hình chỉ dành cho tích hợp Codex CLI, không áp dụng cho các client, nền tảng hoặc kênh khác.",
     "Discord": "Discord",
     "Discount": "Giảm giá",
-    "Discount map by recharge amount (JSON object)": "Ánh xạ giảm giá theo số tiền nạp (đối tượng JSON)",
     "Discount Rate": "Tỷ lệ chiết khấu",
     "Discount rate must be ≤ 1": "Tỷ lệ giảm giá phải ≤ 1",
     "Discount rate must be greater than 0": "Tỷ lệ giảm giá phải lớn hơn 0",
@@ -5308,6 +5307,23 @@
     "Usage log retention days": "Usage log retention days",
     "Usage log retention protection is disabled.": "Usage log retention protection is disabled.",
     "Usage logs from the last {{days}} days are protected.": "Nhật ký sử dụng trong {{days}} ngày gần nhất được bảo vệ.",
-    "Usage logs newer than this many days are protected from manual cleanup.": "Usage logs newer than this many days are protected from manual cleanup."
+    "Usage logs newer than this many days are protected from manual cleanup.": "Usage logs newer than this many days are protected from manual cleanup.",
+    "Available groups:": "Nhóm khả dụng:",
+    "Modify available groups": "Chỉnh sửa nhóm khả dụng",
+    "Finish editing available groups": "Hoàn tất chỉnh sửa",
+    "Loading available groups...": "Đang tải nhóm khả dụng...",
+    "Failed to load available groups": "Không thể tải nhóm khả dụng",
+    "No groups with users": "Không có nhóm nào có người dùng",
+    "Select available groups...": "Chọn nhóm khả dụng...",
+    "Amount discount policy saved": "Đã lưu chính sách giảm giá theo số tiền",
+    "Failed to save amount discount policy": "Không thể lưu chính sách giảm giá theo số tiền",
+    "Pricing snapshot": "Ảnh chụp định giá",
+    "Requested amount": "Số tiền yêu cầu",
+    "Stored amount": "Số tiền đã lưu",
+    "Quota per unit": "Hạn mức mỗi đơn vị",
+    "Eligible, amount not matched": "Đủ điều kiện, số tiền không khớp",
+    "Not eligible": "Không đủ điều kiện",
+    "Legacy order, no pricing snapshot": "Đơn hàng cũ, không có ảnh chụp định giá",
+    "Applied": "Đã áp dụng"
   }
 }

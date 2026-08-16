@@ -39,6 +39,25 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type AmountDiscountGroupsResponse = {
+  success: boolean
+  message: string
+  data?: {
+    groups: string[]
+  }
+}
+
+export type UpdateAmountDiscountPolicyRequest = {
+  amount_discount: Record<string, number>
+  eligible_groups: string[]
+}
+
+export type UpdateAmountDiscountPolicyResponse = {
+  success: boolean
+  message: string
+  data?: UpdateAmountDiscountPolicyRequest
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -294,6 +313,7 @@ export type BillingSettings = {
   PayMethods: string
   'payment_setting.amount_options': string
   'payment_setting.amount_discount': string
+  'payment_setting.amount_discount_eligible_groups': string
   'payment_setting.default_topup_amount': number
   'payment_setting.compliance_confirmed': boolean
   'payment_setting.compliance_terms_version': string

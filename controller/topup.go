@@ -23,6 +23,11 @@ import (
 
 func GetTopUpInfo(c *gin.Context) {
 	complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
+	group, err := model.GetUserGroup(c.GetInt("id"), true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
 	// 获取支付方式
 	payMethods := operation_setting.PayMethods
@@ -117,7 +122,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"waffo_min_topup":         setting.WaffoMinTopUp,
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
-		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
+		"discount":                operation_setting.GetAmountDiscountsForGroup(group),
 		"default_topup_amount":    operation_setting.GetPaymentSetting().DefaultTopUpAmount,
 		"topup_link":              common.TopUpLink,
 		"topup_invite_reward_percent": func() float64 {
@@ -153,36 +158,6 @@ func GetEpayClient() *epay.Client {
 	return withUrl
 }
 
-func getPayMoney(amount int64, group string) float64 {
-	dAmount := decimal.NewFromInt(amount)
-	// 充值金额以“展示类型”为准：
-	// - USD/CNY: 前端传 amount 为金额单位；TOKENS: 前端传 tokens，需要换成 USD 金额
-	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
-		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-		dAmount = dAmount.Div(dQuotaPerUnit)
-	}
-
-	topupGroupRatio := common.GetTopupGroupRatio(group)
-	if topupGroupRatio == 0 {
-		topupGroupRatio = 1
-	}
-
-	dTopupGroupRatio := decimal.NewFromFloat(topupGroupRatio)
-	dPrice := decimal.NewFromFloat(operation_setting.Price)
-	// apply optional preset discount by the original request amount (if configured), default 1.0
-	discount := 1.0
-	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(amount)]; ok {
-		if ds > 0 {
-			discount = ds
-		}
-	}
-	dDiscount := decimal.NewFromFloat(discount)
-
-	payMoney := dAmount.Mul(dPrice).Mul(dTopupGroupRatio).Mul(dDiscount)
-
-	return payMoney.InexactFloat64()
-}
-
 func getMinTopup() int64 {
 	minTopup := operation_setting.MinTopUp
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
@@ -211,7 +186,8 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
-	payMoney := getPayMoney(req.Amount, group)
+	pricing := getEpayTopUpPricing(req.Amount, group)
+	payMoney := pricing.PayMoney
 	if payMoney < 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -252,6 +228,13 @@ func RequestEpay(c *gin.Context) {
 		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 		amount = dAmount.Div(dQuotaPerUnit).IntPart()
 	}
+	pricing.Snapshot.StoredAmount = amount
+	snapshot, err := marshalTopUpPricingSnapshot(pricing)
+	if err != nil {
+		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 创建充值订单快照失败 user_id=%d amount=%d error=%q", id, req.Amount, err.Error()))
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
+		return
+	}
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          amount,
@@ -259,6 +242,7 @@ func RequestEpay(c *gin.Context) {
 		TradeNo:         tradeNo,
 		PaymentMethod:   req.PaymentMethod,
 		PaymentProvider: model.PaymentProviderEpay,
+		PricingSnapshot: snapshot,
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
@@ -419,7 +403,7 @@ func RequestAmount(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
-	payMoney := getPayMoney(req.Amount, group)
+	payMoney := getEpayTopUpPricing(req.Amount, group).PayMoney
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -472,9 +456,37 @@ func GetAllTopUps(c *gin.Context) {
 		return
 	}
 
+	adminTopUps := make([]adminTopUpRecord, 0, len(topups))
+	for _, topUp := range topups {
+		record, err := newAdminTopUpRecord(topUp)
+		if err != nil {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("充值订单计价快照解析失败 trade_no=%s error=%q", topUp.TradeNo, err.Error()))
+		}
+		adminTopUps = append(adminTopUps, record)
+	}
+
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(topups)
+	pageInfo.SetItems(adminTopUps)
 	common.ApiSuccess(c, pageInfo)
+}
+
+type adminTopUpRecord struct {
+	*model.TopUp
+	PricingSnapshot *model.TopUpPricingSnapshot `json:"pricing_snapshot,omitempty"`
+}
+
+func newAdminTopUpRecord(topUp *model.TopUp) (adminTopUpRecord, error) {
+	record := adminTopUpRecord{TopUp: topUp}
+	if topUp == nil {
+		return record, nil
+	}
+
+	snapshot, err := model.ParseTopUpPricingSnapshot(topUp.PricingSnapshot)
+	if err != nil {
+		return record, err
+	}
+	record.PricingSnapshot = snapshot
+	return record, nil
 }
 
 type AdminCompleteTopupRequest struct {

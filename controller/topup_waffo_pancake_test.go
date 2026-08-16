@@ -35,11 +35,14 @@ func TestGetWaffoPancakePayMoney(t *testing.T) {
 		originalDiscounts[k] = v
 	}
 	originalTopupGroupRatio := common.TopupGroupRatio2JSONString()
+	originalEligibleGroups := append([]string(nil), operation_setting.GetPaymentSetting().AmountDiscountEligibleGroups...)
 
 	t.Cleanup(func() {
 		setting.WaffoPancakeUnitPrice = originalUnitPrice
 		operation_setting.GetGeneralSetting().QuotaDisplayType = originalQuotaDisplayType
 		operation_setting.GetPaymentSetting().AmountDiscount = originalDiscounts
+		operation_setting.GetPaymentSetting().AmountDiscountEligibleGroups = originalEligibleGroups
+		require.NoError(t, operation_setting.RefreshAmountDiscountPolicy())
 		require.NoError(t, common.UpdateTopupGroupRatioByJSONString(originalTopupGroupRatio))
 	})
 
@@ -47,8 +50,9 @@ func TestGetWaffoPancakePayMoney(t *testing.T) {
 	operation_setting.GetPaymentSetting().AmountDiscount = map[int]float64{
 		10:                           0.8,
 		int(common.QuotaPerUnit * 3): 0.5,
-		20:                           0,
 	}
+	operation_setting.GetPaymentSetting().AmountDiscountEligibleGroups = []string{"default", "vip"}
+	require.NoError(t, operation_setting.RefreshAmountDiscountPolicy())
 	require.NoError(t, common.UpdateTopupGroupRatioByJSONString(`{"default":1,"vip":1.2}`))
 
 	testCases := []struct {
@@ -73,7 +77,7 @@ func TestGetWaffoPancakePayMoney(t *testing.T) {
 			expected:         4.5,
 		},
 		{
-			name:             "non-positive discount falls back to no discount",
+			name:             "unconfigured amount falls back to no discount",
 			amount:           20,
 			group:            "default",
 			quotaDisplayType: operation_setting.QuotaDisplayTypeUSD,

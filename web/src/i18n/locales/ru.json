@@ -1400,7 +1400,6 @@
     "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.": "Предупреждение: только для личного использования. Не распространяйте и не передавайте учетные данные. Для этого канала требуются предварительные условия и начальная настройка; используйте его только если понимаете процедуру и риски, и соблюдайте условия и политики OpenAI. Учетные данные и конфигурация предназначены только для интеграции с Codex CLI и не предназначены для других клиентов, платформ или каналов.",
     "Discord": "Discord",
     "Discount": "Скидка",
-    "Discount map by recharge amount (JSON object)": "Карта скидок по сумме пополнения (объект JSON)",
     "Discount Rate": "Ставка скидки",
     "Discount rate must be ≤ 1": "Ставка скидки должна быть ≤ 1",
     "Discount rate must be greater than 0": "Ставка скидки должна быть больше 0",
@@ -5308,6 +5307,23 @@
     "Usage log retention days": "Срок хранения журналов использования (дни)",
     "Usage log retention protection is disabled.": "Защита срока хранения журналов использования отключена.",
     "Usage logs from the last {{days}} days are protected.": "Журналы использования за последние {{days}} дн. защищены.",
-    "Usage logs newer than this many days are protected from manual cleanup.": "Журналы использования новее указанного количества дней защищены от ручного удаления."
+    "Usage logs newer than this many days are protected from manual cleanup.": "Журналы использования новее указанного количества дней защищены от ручного удаления.",
+    "Available groups:": "Доступные группы:",
+    "Modify available groups": "Изменить доступные группы",
+    "Finish editing available groups": "Завершить редактирование",
+    "Loading available groups...": "Загрузка доступных групп...",
+    "Failed to load available groups": "Не удалось загрузить доступные группы",
+    "No groups with users": "Нет групп с пользователями",
+    "Select available groups...": "Выберите доступные группы...",
+    "Amount discount policy saved": "Политика скидок по сумме сохранена",
+    "Failed to save amount discount policy": "Не удалось сохранить политику скидок по сумме",
+    "Pricing snapshot": "Снимок расчета цены",
+    "Requested amount": "Запрошенная сумма",
+    "Stored amount": "Сохраненная сумма",
+    "Quota per unit": "Квота на единицу",
+    "Eligible, amount not matched": "Доступно, но сумма не совпала",
+    "Not eligible": "Недоступно",
+    "Legacy order, no pricing snapshot": "Старый заказ, снимок расчета цены отсутствует",
+    "Applied": "Применено"
   }
 }

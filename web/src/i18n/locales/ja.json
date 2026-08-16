@@ -1400,7 +1400,6 @@
     "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.": "免責事項：個人利用に限ります。認証情報を配布・共有しないでください。このチャネルには前提条件があり、事前の設定が必要です。手順とリスクを理解した上で利用し、OpenAI の利用規約および関連ポリシーを遵守してください。認証情報と設定は Codex CLI 連携専用であり、他のクライアント、プラットフォーム、またはチャネルでは利用できません。",
     "Discord": "Discord",
     "Discount": "特典",
-    "Discount map by recharge amount (JSON object)": "リチャージ額による割引マップ（JSONオブジェクト）",
     "Discount Rate": "割引率",
     "Discount rate must be ≤ 1": "割引率は 1 以下でなければなりません",
     "Discount rate must be greater than 0": "割引率は 0 より大きくなければなりません",
@@ -5308,6 +5307,23 @@
     "Usage log retention days": "使用状況ログの保持日数",
     "Usage log retention protection is disabled.": "使用状況ログの保持期間保護は無効です。",
     "Usage logs from the last {{days}} days are protected.": "過去{{days}}日間の使用状況ログは保護されています。",
-    "Usage logs newer than this many days are protected from manual cleanup.": "この日数より新しい使用状況ログは手動削除から保護されます。"
+    "Usage logs newer than this many days are protected from manual cleanup.": "この日数より新しい使用状況ログは手動削除から保護されます。",
+    "Available groups:": "利用可能なグループ:",
+    "Modify available groups": "利用可能なグループを変更",
+    "Finish editing available groups": "編集を完了",
+    "Loading available groups...": "利用可能なグループを読み込み中...",
+    "Failed to load available groups": "利用可能なグループの読み込みに失敗しました",
+    "No groups with users": "ユーザーが存在するグループはありません",
+    "Select available groups...": "利用可能なグループを選択...",
+    "Amount discount policy saved": "金額割引ポリシーを保存しました",
+    "Failed to save amount discount policy": "金額割引ポリシーの保存に失敗しました",
+    "Pricing snapshot": "価格計算スナップショット",
+    "Requested amount": "リクエスト金額",
+    "Stored amount": "保存金額",
+    "Quota per unit": "単位あたりクォータ",
+    "Eligible, amount not matched": "対象ですが、金額が一致しません",
+    "Not eligible": "対象外",
+    "Legacy order, no pricing snapshot": "旧注文のため、価格計算スナップショットはありません",
+    "Applied": "適用済み"
   }
 }

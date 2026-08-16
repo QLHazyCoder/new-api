@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 
 import type {
+  AmountDiscountGroupsResponse,
   ConfirmPaymentComplianceResponse,
   FetchUpstreamRatiosRequest,
   LogCleanupTask,
@@ -27,6 +28,8 @@ import type {
   SystemTaskResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
+  UpdateAmountDiscountPolicyRequest,
+  UpdateAmountDiscountPolicyResponse,
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
 } from './types'
@@ -45,6 +48,23 @@ export async function confirmPaymentCompliance() {
   const res = await api.post<ConfirmPaymentComplianceResponse>(
     '/api/option/payment_compliance',
     { confirmed: true }
+  )
+  return res.data
+}
+
+export async function getAmountDiscountGroups() {
+  const res = await api.get<AmountDiscountGroupsResponse>(
+    '/api/option/payment/amount-discount-groups'
+  )
+  return res.data
+}
+
+export async function updateAmountDiscountPolicy(
+  request: UpdateAmountDiscountPolicyRequest
+) {
+  const res = await api.put<UpdateAmountDiscountPolicyResponse>(
+    '/api/option/payment/amount-discount-policy',
+    request
   )
   return res.data
 }

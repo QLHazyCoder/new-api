@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Code2, Eye, ShieldAlert } from 'lucide-react'
 import * as React from 'react'
 import { useForm, type Resolver } from 'react-hook-form'
@@ -48,7 +48,11 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 
-import { confirmPaymentCompliance } from '../api'
+import {
+  confirmPaymentCompliance,
+  getAmountDiscountGroups,
+  updateAmountDiscountPolicy,
+} from '../api'
 import {
   SettingsForm,
   SettingsSwitchContent,
@@ -94,6 +98,49 @@ function isHttpOriginUrl(value: string) {
   }
 }
 
+function isAmountDiscountRecord(parsed: unknown) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return false
+  }
+
+  return Object.entries(parsed).every(([amount, rate]) => {
+    const parsedAmount = Number(amount)
+    return (
+      Number.isInteger(parsedAmount) &&
+      parsedAmount > 0 &&
+      typeof rate === 'number' &&
+      Number.isFinite(rate) &&
+      rate > 0 &&
+      rate <= 1
+    )
+  })
+}
+
+function parseEligibleGroups(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value || '[]')
+    if (!Array.isArray(parsed)) return []
+    return [
+      ...new Set(
+        parsed
+          .filter((group): group is string => typeof group === 'string')
+          .map((group) => group.trim())
+          .filter(Boolean)
+      ),
+    ].sort((left, right) => left.localeCompare(right))
+  } catch {
+    return []
+  }
+}
+
+function serializeEligibleGroups(groups: string[]) {
+  return JSON.stringify(
+    [...new Set(groups.map((group) => group.trim()).filter(Boolean))].sort(
+      (left, right) => left.localeCompare(right)
+    )
+  )
+}
+
 const paymentSchema = z.object({
   PayAddress: z.string().refine((value) => {
     const trimmed = value.trim()
@@ -130,10 +177,20 @@ const paymentSchema = z.object({
     }
   }),
   AmountDiscount: z.string().superRefine((value, ctx) => {
+    const error = getJsonError(value, isAmountDiscountRecord)
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+      })
+    }
+  }),
+  AmountDiscountEligibleGroups: z.string().superRefine((value, ctx) => {
     const error = getJsonError(
       value,
       (parsed) =>
-        !!parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        Array.isArray(parsed) &&
+        parsed.every((group) => typeof group === 'string')
     )
     if (error) {
       ctx.addIssue({
@@ -244,6 +301,8 @@ export function PaymentSettingsSection({
     React.useState(true)
   const [amountDiscountVisualMode, setAmountDiscountVisualMode] =
     React.useState(true)
+  const [amountDiscountSaveRevision, setAmountDiscountSaveRevision] =
+    React.useState(0)
   const [creemProductsVisualMode, setCreemProductsVisualMode] =
     React.useState(true)
   const [showComplianceDialog, setShowComplianceDialog] = React.useState(false)
@@ -273,6 +332,41 @@ export function PaymentSettingsSection({
     setWaffoPancakeSelection(nextBinding)
     setWaffoPancakeSavedBinding(nextBinding)
   }, [waffoPancakeProvisionedProductID, waffoPancakeProvisionedStoreID])
+
+  const amountDiscountGroupsQuery = useQuery({
+    queryKey: ['amount-discount-groups'],
+    queryFn: async () => {
+      const response = await getAmountDiscountGroups()
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to load available groups')
+      }
+      return response.data?.groups ?? []
+    },
+    staleTime: 60 * 1000,
+  })
+
+  const amountDiscountPolicyMutation = useMutation({
+    mutationFn: async (request: {
+      amount_discount: Record<string, number>
+      eligible_groups: string[]
+    }) => {
+      const response = await updateAmountDiscountPolicy(request)
+      if (!response.success) {
+        throw new Error(
+          response.message || 'Failed to save amount discount policy'
+        )
+      }
+      return response
+    },
+    onSuccess: () => {
+      setAmountDiscountSaveRevision((revision) => revision + 1)
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      toast.success(t('Amount discount policy saved'))
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || t('Failed to save amount discount policy'))
+    },
+  })
 
   const complianceStatements = React.useMemo(
     () => [
@@ -356,6 +450,9 @@ export function PaymentSettingsSection({
       PayMethods: formatJsonForEditor(initialFormValues.PayMethods),
       AmountOptions: formatJsonForEditor(initialFormValues.AmountOptions),
       AmountDiscount: formatJsonForEditor(initialFormValues.AmountDiscount),
+      AmountDiscountEligibleGroups: formatJsonForEditor(
+        initialFormValues.AmountDiscountEligibleGroups
+      ),
       CreemProducts: formatJsonForEditor(initialFormValues.CreemProducts),
     },
   })
@@ -413,6 +510,9 @@ export function PaymentSettingsSection({
       PayMethods: formatJsonForEditor(parsedDefaults.PayMethods),
       AmountOptions: formatJsonForEditor(parsedDefaults.AmountOptions),
       AmountDiscount: formatJsonForEditor(parsedDefaults.AmountDiscount),
+      AmountDiscountEligibleGroups: formatJsonForEditor(
+        parsedDefaults.AmountDiscountEligibleGroups
+      ),
       CreemProducts: formatJsonForEditor(parsedDefaults.CreemProducts),
     })
   }, [defaultsSignature, form])
@@ -429,6 +529,9 @@ export function PaymentSettingsSection({
       PayMethods: values.PayMethods.trim(),
       AmountOptions: values.AmountOptions.trim(),
       AmountDiscount: values.AmountDiscount.trim(),
+      AmountDiscountEligibleGroups: serializeEligibleGroups(
+        parseEligibleGroups(values.AmountDiscountEligibleGroups)
+      ),
       StripeApiSecret: values.StripeApiSecret.trim(),
       StripeWebhookSecret: values.StripeWebhookSecret.trim(),
       StripePriceId: values.StripePriceId.trim(),
@@ -474,6 +577,9 @@ export function PaymentSettingsSection({
       PayMethods: initialRef.current.PayMethods.trim(),
       AmountOptions: initialRef.current.AmountOptions.trim(),
       AmountDiscount: initialRef.current.AmountDiscount.trim(),
+      AmountDiscountEligibleGroups: serializeEligibleGroups(
+        parseEligibleGroups(initialRef.current.AmountDiscountEligibleGroups)
+      ),
       StripeApiSecret: initialRef.current.StripeApiSecret.trim(),
       StripeWebhookSecret: initialRef.current.StripeWebhookSecret.trim(),
       StripePriceId: initialRef.current.StripePriceId.trim(),
@@ -562,15 +668,11 @@ export function PaymentSettingsSection({
       })
     }
 
-    if (
+    const hasAmountDiscountPolicyChanges =
       normalizeJsonForComparison(sanitized.AmountDiscount) !==
-      normalizeJsonForComparison(initial.AmountDiscount)
-    ) {
-      updates.push({
-        key: 'payment_setting.amount_discount',
-        value: sanitized.AmountDiscount,
-      })
-    }
+        normalizeJsonForComparison(initial.AmountDiscount) ||
+      sanitized.AmountDiscountEligibleGroups !==
+        initial.AmountDiscountEligibleGroups
 
     if (
       sanitized.StripeApiSecret &&
@@ -718,13 +820,32 @@ export function PaymentSettingsSection({
       waffoPancakeSelection.storeID !== waffoPancakeSavedBinding.storeID ||
       waffoPancakeSelection.productID !== waffoPancakeSavedBinding.productID
 
-    if (updates.length === 0 && !hasWaffoPancakeChanges) {
+    if (
+      updates.length === 0 &&
+      !hasAmountDiscountPolicyChanges &&
+      !hasWaffoPancakeChanges
+    ) {
       toast.info(t('No changes to save'))
       return
     }
 
     for (const update of updates) {
       await updateOption.mutateAsync(update)
+    }
+
+    if (hasAmountDiscountPolicyChanges) {
+      try {
+        await amountDiscountPolicyMutation.mutateAsync({
+          amount_discount: JSON.parse(
+            sanitized.AmountDiscount || '{}'
+          ) as Record<string, number>,
+          eligible_groups: parseEligibleGroups(
+            sanitized.AmountDiscountEligibleGroups
+          ),
+        })
+      } catch {
+        return
+      }
     }
 
     if (!hasWaffoPancakeChanges) {
@@ -783,6 +904,9 @@ export function PaymentSettingsSection({
   }
 
   const currentFormValues = form.watch()
+  const amountDiscountEligibleGroups = parseEligibleGroups(
+    currentFormValues.AmountDiscountEligibleGroups
+  )
   const waffoValues: WaffoSettingsValues = {
     WaffoEnabled: currentFormValues.WaffoEnabled,
     WaffoApiKey: currentFormValues.WaffoApiKey,
@@ -882,7 +1006,11 @@ export function PaymentSettingsSection({
         >
           <SettingsPageFormActions
             onSave={form.handleSubmit(onSubmit)}
-            isSaving={updateOption.isPending || isSubmitting}
+            isSaving={
+              updateOption.isPending ||
+              amountDiscountPolicyMutation.isPending ||
+              isSubmitting
+            }
             saveLabel='Save all settings'
           />
           <Tabs defaultValue='general' className='min-w-0'>
@@ -1141,6 +1269,24 @@ export function PaymentSettingsSection({
                             <AmountDiscountVisualEditor
                               value={field.value}
                               onChange={field.onChange}
+                              eligibleGroups={amountDiscountEligibleGroups}
+                              availableGroups={
+                                amountDiscountGroupsQuery.data ?? []
+                              }
+                              onEligibleGroupsChange={(groups) =>
+                                setPaymentValue(
+                                  'AmountDiscountEligibleGroups',
+                                  serializeEligibleGroups(groups)
+                                )
+                              }
+                              groupsLoading={
+                                amountDiscountGroupsQuery.isLoading
+                              }
+                              groupsError={amountDiscountGroupsQuery.isError}
+                              onRetryGroups={() =>
+                                void amountDiscountGroupsQuery.refetch()
+                              }
+                              saveRevision={amountDiscountSaveRevision}
                             />
                           ) : (
                             <JsonCodeEditor
@@ -1157,9 +1303,14 @@ export function PaymentSettingsSection({
                             />
                           )}
                         </FormControl>
-                        <FormDescription>
-                          {t('Discount map by recharge amount (JSON object)')}
-                        </FormDescription>
+                        {!amountDiscountVisualMode && (
+                          <FormDescription>
+                            {t('Available groups:')}{' '}
+                            {amountDiscountEligibleGroups.length > 0
+                              ? amountDiscountEligibleGroups.join(', ')
+                              : t('Not set')}
+                          </FormDescription>
+                        )}
                         <FormMessage />
                       </FormItem>
                     )}

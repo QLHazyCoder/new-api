@@ -16,12 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Pencil, Plus, Trash2 } from 'lucide-react'
-import { useState, useMemo } from 'react'
+import { Check, Pencil, Plus, Trash2, Users } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StaticDataTable } from '@/components/data-table/static/static-data-table'
 import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
+import { MultiSelect } from '@/components/multi-select'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 
@@ -35,15 +36,34 @@ import {
 type AmountDiscountVisualEditorProps = {
   value: string
   onChange: (value: string) => void
+  eligibleGroups: string[]
+  availableGroups: string[]
+  onEligibleGroupsChange: (groups: string[]) => void
+  groupsLoading?: boolean
+  groupsError?: boolean
+  onRetryGroups?: () => void
+  saveRevision?: number
 }
 
 export function AmountDiscountVisualEditor({
   value,
   onChange,
+  eligibleGroups,
+  availableGroups,
+  onEligibleGroupsChange,
+  groupsLoading = false,
+  groupsError = false,
+  onRetryGroups,
+  saveRevision = 0,
 }: AmountDiscountVisualEditorProps) {
   const { t } = useTranslation()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editData, setEditData] = useState<AmountDiscountData | null>(null)
+  const [editingGroups, setEditingGroups] = useState(false)
+
+  useEffect(() => {
+    setEditingGroups(false)
+  }, [saveRevision])
 
   const discounts = useMemo(() => {
     const parsed = safeJsonParseWithValidation<Record<string, unknown>>(value, {
@@ -59,7 +79,9 @@ export function AmountDiscountVisualEditor({
         discountRate:
           typeof rate === 'number' ? rate : Number.parseFloat(String(rate)),
       }))
-      .filter((item) => !isNaN(item.amount) && !isNaN(item.discountRate))
+      .filter(
+        (item) => !Number.isNaN(item.amount) && !Number.isNaN(item.discountRate)
+      )
       .sort((a, b) => a.amount - b.amount)
   }, [value])
 
@@ -113,25 +135,53 @@ export function AmountDiscountVisualEditor({
     return `${discount}%`
   }
 
+  let groupButtonLabel = t('Modify available groups')
+  if (editingGroups) {
+    groupButtonLabel = t('Finish editing available groups')
+  } else if (groupsLoading) {
+    groupButtonLabel = t('Loading available groups...')
+  }
+
   return (
     <div className='space-y-4'>
       <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
         <p className='text-muted-foreground text-sm'>
           {t('Configure discount rates based on recharge amounts')}
         </p>
-        <Button
-          type='button'
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            handleAdd()
-          }}
-          size='sm'
-          className='w-full sm:w-auto'
-        >
-          <Plus className='h-4 w-4 sm:mr-2' />
-          <span className='sm:inline'>{t('Add discount tier')}</span>
-        </Button>
+        <div className='flex w-full flex-col gap-2 sm:w-auto sm:flex-row'>
+          <Button
+            type='button'
+            variant='outline'
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              setEditingGroups((current) => !current)
+            }}
+            size='sm'
+            className='w-full sm:w-auto'
+            disabled={!editingGroups && (groupsLoading || groupsError)}
+          >
+            {editingGroups ? (
+              <Check className='h-4 w-4 sm:mr-2' />
+            ) : (
+              <Users className='h-4 w-4 sm:mr-2' />
+            )}
+            <span>{groupButtonLabel}</span>
+          </Button>
+          <Button
+            type='button'
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              handleAdd()
+            }}
+            size='sm'
+            className='w-full sm:w-auto'
+          >
+            <Plus className='h-4 w-4 sm:mr-2' />
+            <span>{t('Add discount tier')}</span>
+          </Button>
+        </div>
       </div>
 
       {discounts.length === 0 ? (
@@ -252,6 +302,51 @@ export function AmountDiscountVisualEditor({
           </div>
         </div>
       )}
+
+      <div className='space-y-2 border-t pt-3'>
+        {editingGroups ? (
+          <MultiSelect
+            id='amount-discount-eligible-groups'
+            options={availableGroups.map((group) => ({
+              label: group,
+              value: group,
+            }))}
+            selected={eligibleGroups}
+            onChange={onEligibleGroupsChange}
+            placeholder={t('Select available groups...')}
+            emptyText={t('No groups with users')}
+            maxVisibleChips={3}
+            contentSide='top'
+          />
+        ) : (
+          <p className='text-sm'>
+            <span className='text-muted-foreground'>
+              {t('Available groups:')}{' '}
+            </span>
+            <span className='font-medium'>
+              {eligibleGroups.length > 0
+                ? eligibleGroups.join(', ')
+                : t('Not set')}
+            </span>
+          </p>
+        )}
+        {groupsError && (
+          <div className='flex flex-wrap items-center gap-2 text-sm text-red-600'>
+            <span>{t('Failed to load available groups')}</span>
+            {onRetryGroups && (
+              <Button
+                type='button'
+                variant='link'
+                size='sm'
+                className='h-auto p-0 text-sm'
+                onClick={onRetryGroups}
+              >
+                {t('Retry')}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
 
       <AmountDiscountDialog
         open={dialogOpen}

@@ -60,7 +60,7 @@ func TestUpdateSelfBranchesNeverOverwriteAccountingFields(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			ctx, _ := gin.CreateTestContext(recorder)
 			ctx.Set("id", user.Id)
-			ctx.Request = httptest.NewRequest(http.MethodPut, "/api/user/self", strings.NewReader(testCase.body), nil)
+			ctx.Request = httptest.NewRequest(http.MethodPut, "/api/user/self", strings.NewReader(testCase.body))
 			ctx.Request.Header.Set("Content-Type", "application/json")
 
 			UpdateSelf(ctx)

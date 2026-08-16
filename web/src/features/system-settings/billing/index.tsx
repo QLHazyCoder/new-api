@@ -70,6 +70,7 @@ const defaultBillingSettings: BillingSettings = {
   PayMethods: '',
   'payment_setting.amount_options': '',
   'payment_setting.amount_discount': '',
+  'payment_setting.amount_discount_eligible_groups': '[]',
   'payment_setting.default_topup_amount': 100,
   'payment_setting.compliance_confirmed': false,
   'payment_setting.compliance_terms_version': '',
