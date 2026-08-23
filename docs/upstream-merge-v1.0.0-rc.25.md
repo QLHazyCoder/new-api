@@ -104,12 +104,13 @@
   不涉及数据库数据迁移或旧订单改写。
 - 阶段静态门禁：`git diff --check`、变更 Go 文件 `gofmt -d`、保护路径删除扫描和
   变更 locale JSON 解析均通过；按用户要求未执行本地 Go/Bun/Docker 构建或测试。
-- 阶段提交：`fix: preserve backend customizations after rc25 merge`（待提交）。
+- 阶段提交：`fc10fde91 fix: preserve backend customizations after rc25 merge`。
 
 ### 阶段 3：前端二次审查与修复
 
-- 单前端路径完整保留在 `web/src`，`web/default` 和 `web/classic` 均不存在；阶段 1
-  的前端变更没有产生未解释删除。Playground 图片能力、异步历史、任务重试/下载/预览、
+- 单前端路径完整保留在 `web/src`；Git 跟踪树中没有 `web/default` 或 `web/classic`，阶段 1
+  的前端变更没有产生未解释删除。工作区中若存在同名 ignored 构建产物，不属于提交内容，
+  不作为旧前端残留。Playground 图片能力、异步历史、任务重试/下载/预览、
   快速重复删除锁和成功 tombstone 均仍有对应组件与 hook。
 - 用户管理编辑抽屉继续通过 `/api/group/` 使用 `GroupRatio` 分组，保持已批准的上游
   原始行为；`GroupGroupRatio` 仍只在系统倍率设置中作为真实计费覆盖配置，不被误当作
@@ -123,10 +124,27 @@
   5393 个）；本地 locale 标准化和既有中文/区域翻译值保留，上游新增键已同步。
 - 阶段静态门禁：前端保护路径删除扫描、旧鉴权依赖扫描、locale JSON 解析/键数检查和
   `git diff --check` 通过；按用户要求未执行 `bun install`、typecheck、test、lint 或
-  build。阶段提交：`fix: preserve frontend customizations after rc25 merge`（待提交）。
+  build。阶段提交：`cb565a84b fix: preserve frontend customizations after rc25 merge`。
 
 ### 阶段 4：最终审查与交付
 
-- 待完成：反向核对 P-01 至 P-29、UTF-8/乱码/空文件/冲突标记/i18n 检查，记录完整自动
-  检查应由 GitHub Actions 执行的结果；随后快进本地 `main`、推送 `origin/main`，只监控
-  最新提交的 `Publish Docker image (Multi-arch)`，不执行蓝绿部署。
+- 保护清单反向核对完成：P-01 至 P-29 均有最终路径、数据/配置说明和验证证据；清单中
+  的 118 个提交引用全部可解析，106 个产品提交均已归属保护项，rc.24 维护提交和本轮
+  文档/阶段提交均有明确的审计归属。没有发现未解释的本地产品提交或受保护功能删除。
+- 变更集静态检查完成：`git diff --check` 通过；所有变更 Go 文件 `gofmt -d` 无输出；
+  变更文本均可按 UTF-8 解析；跟踪文件无真正的 `<<<<<<<`/`=======`/`>>>>>>>` 冲突标记，
+  无 Unicode replacement character；7 个 locale JSON 均可解析且与英文基准各有 5393 个
+  标量键，键集合一致。跟踪树没有 `web/default`、`web/classic` 或阶段 1 未解释删除。
+- 跟踪树中的空文件仅有上游长期保留的 `VERSION` 占位文件（提交 `f4450040b` 明确说明
+  其由构建/发布流程写入版本）；没有因本次合并产生的空文件。未删除工作区中可能存在的
+  ignored `web/classic`、`web/dist` 或 `web/node_modules` 构建产物，它们不在 Git 跟踪树内。
+- 按用户要求，本地未执行 Go、Bun、Docker 构建或测试，也未启动开发/预览服务器；这些
+  自动检查以推送后 GitHub Actions 为准。密码登录、GitHub OAuth、Passkey、支付回跳和
+  Playground 图片操作不做人工/线上回归，仓库内自动测试仍随工作流执行。
+- 当前阶段提交序列为：`eb9c43244`（清单先行更新）、`7770d42f8`（阶段 0 审计）、
+  `4ef332374`（保留上游 ancestry 的双父合并）、`fc10fde91`（后端复核修复）、
+  `cb565a84b`（前端复核修复）；本节记录提交为 `docs: record rc25 merge validation`。
+- 下一步按交付门禁以 `--ff-only` 快进本地 `main` 并直接推送 `origin/main`，以最新 SHA
+  监控 `Publish Docker image (Multi-arch)` 的 amd64、arm64 和 manifest Job，直到全部成功。
+  本轮不执行蓝绿部署；正式部署前仍需配置安全 Cookie、可信 HTTPS Origin 和
+  `TRUSTED_PROXIES`。
