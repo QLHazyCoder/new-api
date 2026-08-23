@@ -78,7 +78,33 @@
   的严格额度转换与原子额度上限保护；Epay 保留验证错误分类但不绕过统一事务。
 - 模型映射采用公共链式解析器，保留 Compact 后缀还原；日志状态、工具加价隐藏策略和
   7 个 locale 的本地键值均保留并合并上游新增键。
-- 待门禁：暂存差异、自动合并高风险文件、格式/编码/JSON/冲突标记静态检查。
+- 阶段 1 静态门禁已通过：16 个冲突路径均已解决，无文件删除、无旧前端目录、无真实
+  冲突标记；变更 Go 文件已格式化，locale JSON 可解析，`git diff --check` 通过。
+
+### 阶段 2：后端二次审查与修复
+
+- 用户与认证：`hardDeleteUserTx` 继续在同一事务中清理外部身份、2FA、Session、AuthFlow、
+  Passkey、Token 和 OAuth 绑定；认证版本栅栏、用户/Token 缓存失效、邀请人数原子维护
+  和追加式奖励账本均保留。注册分组策略仍只作用于新建用户，用户自身分组和特殊可见
+  规则仍由 `service/group.go` 实时计算，不对 `default` 等名称硬编码公开性。
+- 额度与账务：`TryReserveUserQuota`/`TryReserveTokenQuota` 的缓存 Lua 原子预扣、数据库
+  条件落库和失败补偿保留；钱包、订阅优先和混合扣费的 allocation/退款路径未被上游
+  覆盖。充值完成继续使用 `CompleteTopUp`，保留历史订单金额、分组定价快照、邀请奖励
+  事务和 Redis 额度同步；rc.25 的严格额度换算及 int32 上限 CAS 已接入，旧订单不重算。
+- 图片与配置：`PlaygroundImageMaxConcurrency` 通过标准/快速迁移的幂等 seed 保留已有值；
+  空队列不读取该 option，有任务时缺失/非法值明确报错，持久队列、租约、重试和硬删除
+  路径仍存在。日志保留期限在 option 校验和异步清理服务两层执行，性能指标原始图片
+  上游 400 排除规则及文本最终结果/cache-write 计费字段仍存在。
+- Relay 与路由：公共 Chat-to-Responses 自动转换仍关闭；Responses/Claude/Gemini 的
+  用量语义、缓存写入结算、图片能力注册、模型映射链解析和自动分组过滤均保留。没有
+  发现 `web/default`、`web/classic` 或受保护后端文件的未解释删除。
+- 本阶段发现并修复 1 个合并回归：`controller/topup.go` 的 Epay 验签和
+  `CompleteTopUp` 成功后提前 `return`，遗漏向支付网关写回 `success`，会导致重复回调。
+  现在成功结算、重复幂等结算和非成功交易都统一返回 `success`，失败路径仍返回 `fail`；
+  不涉及数据库数据迁移或旧订单改写。
+- 阶段静态门禁：`git diff --check`、变更 Go 文件 `gofmt -d`、保护路径删除扫描和
+  变更 locale JSON 解析均通过；按用户要求未执行本地 Go/Bun/Docker 构建或测试。
+- 阶段提交：`fix: preserve backend customizations after rc25 merge`（待提交）。
 
 ### 阶段 2 至交付：待更新
 

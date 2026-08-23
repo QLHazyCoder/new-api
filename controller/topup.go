@@ -466,6 +466,9 @@ func EpayNotify(c *gin.Context) {
 			logger.LogInfo(c.Request.Context(), fmt.Sprintf("Epay topup completed trade_no=%s user_id=%d client_ip=%s quota_to_add=%d money=%.2f", result.TradeNo, result.UserId, c.ClientIP(), result.QuotaToAdd, result.PayMoney))
 			model.RecordTopupLog(result.UserId, fmt.Sprintf("Epay topup succeeded, quota: %v, amount: %.2f", logger.LogQuota(result.QuotaToAdd), result.PayMoney), c.ClientIP(), result.PaymentMethod, "epay")
 		}
+		if _, writeErr := c.Writer.Write([]byte("success")); writeErr != nil {
+			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 webhook 响应写入失败 trade_no=%s client_ip=%s error=%q", verifyInfo.ServiceTradeNo, c.ClientIP(), writeErr.Error()))
+		}
 		return
 
 	} else {
