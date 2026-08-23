@@ -16,88 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { after, describe, test } from 'node:test'
-
-import { Window } from 'happy-dom'
+import { render } from '@testing-library/react'
+import i18next from 'i18next'
 import type React from 'react'
+import { beforeAll, describe, expect, test } from 'vitest'
 
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'CustomEvent',
-  'MutationObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
+import { formatLogQuota } from '@/lib/format'
 
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
+import { LogCostDisplay } from '../log-cost-display'
 
-const { act } = await import('react')
-const { createRoot } = await import('react-dom/client')
-const { createInstance } = await import('i18next')
-const { I18nextProvider, initReactI18next } = await import('react-i18next')
-
-const i18n = createInstance()
-await i18n.use(initReactI18next).init({
-  lng: 'en',
-  resources: {
-    en: {
-      translation: {
-        Subscription: 'Subscription',
-        'Deducted by subscription': 'Deducted by subscription',
-        'Includes tool-call surcharge': 'Includes tool-call surcharge',
-      },
-    },
-  },
-})
-
-const { LogCostDisplay } = await import('../log-cost-display')
-const { formatLogQuota } = await import('@/lib/format')
-const reactTestGlobals = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean
-}
-reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
-
-type RenderedCost = {
-  container: HTMLDivElement
-  root: ReturnType<typeof createRoot>
-}
-
-async function renderCost(
+function renderCost(
   props: React.ComponentProps<typeof LogCostDisplay>
-): Promise<RenderedCost> {
-  const container = document.createElement('div')
-  document.body.append(container)
-  const root = createRoot(container)
-
-  await act(async () => {
-    root.render(
-      <I18nextProvider i18n={i18n}>
-        <LogCostDisplay {...props} />
-      </I18nextProvider>
-    )
-  })
-
-  return { container, root }
-}
-
-async function unmountCost(rendered: RenderedCost) {
-  await act(async () => rendered.root.unmount())
-  rendered.container.remove()
+): ReturnType<typeof render> {
+  return render(<LogCostDisplay {...props} />)
 }
 
 function normalizedText(value: string | null): string {
@@ -105,34 +36,34 @@ function normalizedText(value: string | null): string {
 }
 
 describe('log cost display', () => {
-  after(() => {
-    domWindow.close()
+  beforeAll(() => {
+    i18next.addResourceBundle('en', 'translation', {
+      Subscription: 'Subscription',
+      'Deducted by subscription': 'Deducted by subscription',
+      'Includes tool-call surcharge': 'Includes tool-call surcharge',
+    })
   })
 
-  test('keeps the regular cost visible while the surcharge marker is hidden', async () => {
-    const rendered = await renderCost({
+  test('keeps the regular cost visible while the surcharge marker is hidden', () => {
+    const rendered = renderCost({
       quota: 12500,
       other: {
         tool_surcharges: [{ name: 'lookup_customer', count: 1, price: 5 }],
       },
     })
 
-    assert.equal(
+    expect(
       normalizedText(rendered.container.textContent).includes(
         normalizedText(formatLogQuota(12500))
-      ),
-      true
-    )
-    assert.equal(
-      rendered.container.querySelector('[data-tool-surcharge-indicator="true"]'),
-      null
-    )
-
-    await unmountCost(rendered)
+      )
+    ).toBe(true)
+    expect(
+      rendered.container.querySelector('[data-tool-surcharge-indicator="true"]')
+    ).toBeNull()
   })
 
-  test('preserves the subscription badge while the surcharge marker is hidden', async () => {
-    const rendered = await renderCost({
+  test('preserves the subscription badge while the surcharge marker is hidden', () => {
+    const rendered = renderCost({
       quota: 5000,
       other: {
         billing_source: 'subscription',
@@ -142,12 +73,9 @@ describe('log cost display', () => {
       },
     })
 
-    assert.equal(rendered.container.textContent?.includes('Subscription'), true)
-    assert.equal(
-      rendered.container.querySelector('[data-tool-surcharge-indicator="true"]'),
-      null
-    )
-
-    await unmountCost(rendered)
+    expect(rendered.container.textContent?.includes('Subscription')).toBe(true)
+    expect(
+      rendered.container.querySelector('[data-tool-surcharge-indicator="true"]')
+    ).toBeNull()
   })
 })
