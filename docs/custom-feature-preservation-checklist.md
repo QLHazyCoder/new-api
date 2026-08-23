@@ -13,19 +13,21 @@
   93 个非合并提交。
 - rc.22 合并完成后的自研补充：`441ea707`、`9773de9e`、`51cd6ec4`、
   `51e0b058`、`d81c294f`、`504e193f`。
-- 本清单共映射 103 个可追踪的本地非合并提交（截至 `main@b44e6971e`）。其中
+- 本清单共映射 106 个可追踪的本地非合并提交（截至 `main@4173af597`）。其中
   `d81c294f` 是对分组可见性回归测试的泛化修正，不单独增加产品功能；其余提交都
   对应下列可见行为、账务不变量、数据迁移或发布能力。
 - 已批准退休的本地提交有两个：`cd2f8814` 只服务于已退休的 Classic 前端构建，
   不得恢复 `web/classic` 或 `web/default`；`bca83882` 的用户编辑分组扩展已按用户
   明确决定恢复上游原始行为。现行单前端必须全部位于 `web/src`。
-- 清单创建后补录的功能提交为 `571b38f03`、`3707af0c4` 和 `b44e6971e`；
+- 清单创建后补录的功能提交为 `571b38f03`、`3707af0c4`、`b44e6971e`、
+  `cc70f2c3c`、`e1765fd8e` 和 `4173af597`；
   `88ff1c7cd` 是执行已批准退休决定的用户管理维护提交，不新增独立保留功能，
   但仍在 P-21 中保留可追踪映射。`4b1276d7d`、`45d39a658`、`f8c06ddc5`、
   `ec15c8e23`、`dd95ab677` 是 rc.22 合并审计/文档维护提交，`7d8eeb44d` 是
   rc.23 上游合并提交；它们不新增独立产品契约，相关证据保留在对应上游合并审计文档。
-- 本文档与 [upstream-merge-v1.0.0-rc.22.md](./upstream-merge-v1.0.0-rc.22.md)
-  配套使用：后者保留 rc.22 的逐提交迁移证据，本文件是以后每次合并的验收入口。
+- 本文档与 [upstream-merge-v1.0.0-rc.22.md](./upstream-merge-v1.0.0-rc.22.md)、
+  `upstream-merge-v1.0.0-rc.23.md`、`upstream-merge-v1.0.0-rc.24.md` 配套使用：
+  各审计文件保留对应上游标签的逐提交迁移证据，本文件是以后每次合并的验收入口。
 
 ## 2. 合并时的硬性规则
 
@@ -118,7 +120,7 @@
 - 数据/配置：性能统计依赖现有日志/统计数据，不得因合并清空或改写历史聚合数据。
 - 验证入口：`controller/perf_metrics_test.go`、`pkg/perf_metrics/metrics_test.go`。
 - 维护记录：2026-08-10 修正图片上游拒绝的成功率统计口径，保留错误日志、计费/退款和重试行为。
-- 来源提交：`ab1d7995`、`2d8a8fde`、`7cf40dba`、`250bde67`。
+- 来源提交：`ab1d7995`、`2d8a8fde`、`7cf40dba`、`250bde67`、`cc70f2c3c`。
 
 ### P-07 Relay 协议兼容与缓存写入计费
 
@@ -418,6 +420,32 @@
   `dto.UserSetting` 编译错误阻断。
 - 来源提交：`b44e6971e` (`fix(logs): align text request success rate`)。
 
+### P-29 按用户分组的支付金额折扣与充值定价快照
+
+- 必须保留：精确充值金额折扣仍使用正整数金额到 `0 < rate <= 1` 的映射；只有管理员
+  选择的可用分组才能获得折扣。可用分组来自未软删除用户（启用和禁用用户都计入），
+  新增选择必须在保存时有用户，历史已选分组即使后来无人仍可保留并移除；空分组数组
+  表示不向任何分组发放折扣，并且 API/运行时序列化为 `[]` 而不是 `null`。
+- 必须保留：定价时服务端读取数据库中的当前用户分组，客户端不能提交用于计价的分组；
+  Epay、Waffo、Waffo Pancake 使用统一金额/分组倍率/折扣公式和充值定价快照。Stripe、
+  Creem、订阅和兑换码不纳入该折扣策略；已有待支付订单使用创建时保存的金额和快照，
+  不因策略变更重新计价。
+- 当前位置：`setting/operation_setting/payment_setting.go`、`model/payment_group.go`、
+  `model/topup_pricing_snapshot.go`、`controller/payment_discount_policy.go`、
+  `controller/topup_pricing.go`、`controller/topup*.go`、
+  `web/src/features/system-settings/integrations/amount-discount-visual-editor.tsx`、
+  `web/src/features/wallet/components/dialogs/billing-history-dialog.tsx`。
+- 数据/配置：保留 `payment_setting.amount_discount`、
+  `payment_setting.amount_discount_eligible_groups`、既有 `top_up` 订单金额/状态和
+  定价快照字段；不回写或重算历史订单，不直接修改生产 MySQL 数据。
+- 验证入口：`setting/operation_setting/payment_setting_test.go`、
+  `model/payment_group_test.go`、`model/topup_pricing_snapshot_test.go`、
+  `controller/payment_discount_policy_test.go`、`controller/topup_pricing_test.go`、
+  `web/src/features/system-settings/integrations/__tests__/amount-discount-visual-editor.test.tsx`、
+  `web/src/features/wallet/components/dialogs/__tests__/billing-history-pricing-audit.test.tsx`。
+- 设计与阶段记录：[payment-amount-discount-group-policy.md](./payment-amount-discount-group-policy.md)。
+- 来源提交：`e1765fd8e`、`4173af597`。
+
 ## 5. 提交映射完整性
 
 以下映射用于机械核对。未来合并前，应从历史基线列出本地非合并提交并与本节比较；
@@ -431,7 +459,7 @@
 | P-03 | `711a0315`, `bf162983`, `1a704ad1` |
 | P-04 | `50f25187`, `ade4551d` |
 | P-05 | `b415a3f1`, `9a3826d4`, `6be657a2` |
-| P-06 | `ab1d7995`, `2d8a8fde`, `7cf40dba`, `250bde67` |
+| P-06 | `ab1d7995`, `2d8a8fde`, `7cf40dba`, `250bde67`, `cc70f2c3c` |
 | P-07 | `c54a1d55`, `cb7ad647`, `4066e54f`, `fc08d7e5` |
 | P-08 | `bbdeb35d`, `057f635e` |
 | P-09 | `38d6e277`, `b365401a`, `2d08cd1f` |
@@ -454,6 +482,7 @@
 | P-26 | `271be484`, `4d972671` |
 | P-27 | `571b38f03` |
 | P-28 | `b44e6971e` |
+| P-29 | `e1765fd8e`, `4173af597` |
 
 ## 6. 本次及以后维护记录模板
 
@@ -473,3 +502,6 @@ GitHub Actions 的 amd64、arm64 与 manifest 均成功。
   `88ff1c7cd`、`571b38f03`、`3707af0c4` 已有行为或审计文档但映射不完整，已补齐；
   新增 P-28 记录文本请求成功率与日志结果契约。合并/审计维护提交已在第 1 节明确
   标注，不与产品功能提交混计。
+- 2026-08-23：以 `main@4173af597` 对比保护清单；补齐 P-06 的图片上游 400 统计修复
+  来源 `cc70f2c3c`，新增 P-29 记录按用户分组的支付金额折扣、空数组序列化、统一
+  充值定价和订单快照契约，并将映射计数从 103 更新为 106。
