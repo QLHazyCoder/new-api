@@ -144,7 +144,10 @@
 - 当前阶段提交序列为：`eb9c43244`（清单先行更新）、`7770d42f8`（阶段 0 审计）、
   `4ef332374`（保留上游 ancestry 的双父合并）、`fc10fde91`（后端复核修复）、
   `cb565a84b`（前端复核修复）；本节记录提交为 `docs: record rc25 merge validation`。
-- 下一步按交付门禁以 `--ff-only` 快进本地 `main` 并直接推送 `origin/main`，以最新 SHA
-  监控 `Publish Docker image (Multi-arch)` 的 amd64、arm64 和 manifest Job，直到全部成功。
-  本轮不执行蓝绿部署；正式部署前仍需配置安全 Cookie、可信 HTTPS Origin 和
-  `TRUSTED_PROXIES`。
+- 代码交付推送 SHA 为 `aec217f1a27f3664845b19f6c2919a5f11c3ea72`。GitHub Actions Run
+  [`32661826254`](https://github.com/QLHazyCoder/new-api/actions/runs/32661826254)
+  于 2026-08-23 19:43:51 UTC 结束并为 `success`：`Build & push (amd64)`、
+  `Build & push (arm64)`、`Create multi-arch manifests` 三个 Job 全部成功，GHCR 版本和
+  `latest` manifest 均创建并签名；从 19:37:30 UTC 推送起观察至 19:47:41 UTC 未出现延迟失败。
+- 本轮不执行蓝绿部署；正式部署前仍需配置安全 Cookie、可信 HTTPS Origin 和
+  `TRUSTED_PROXIES`。后续仅文档提交不会改变已验证的代码合并内容。
