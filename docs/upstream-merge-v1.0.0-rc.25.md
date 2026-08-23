@@ -106,9 +106,27 @@
   变更 locale JSON 解析均通过；按用户要求未执行本地 Go/Bun/Docker 构建或测试。
 - 阶段提交：`fix: preserve backend customizations after rc25 merge`（待提交）。
 
-### 阶段 2 至交付：待更新
+### 阶段 3：前端二次审查与修复
 
-- 阶段 1：正式标签合并与全部冲突/自动合并文件审查。
-- 阶段 2：后端、Relay、充值、额度和数据兼容二次审查。
-- 阶段 3：前端、Playground、i18n、测试基础设施和用户分组二次审查。
-- 阶段 4：最终 P-01 至 P-29 反向审计、静态验证、快进 `main`、推送和 Actions 闭环。
+- 单前端路径完整保留在 `web/src`，`web/default` 和 `web/classic` 均不存在；阶段 1
+  的前端变更没有产生未解释删除。Playground 图片能力、异步历史、任务重试/下载/预览、
+  快速重复删除锁和成功 tombstone 均仍有对应组件与 hook。
+- 用户管理编辑抽屉继续通过 `/api/group/` 使用 `GroupRatio` 分组，保持已批准的上游
+  原始行为；`GroupGroupRatio` 仍只在系统倍率设置中作为真实计费覆盖配置，不被误当作
+  用户可分配分组。钱包充值表单、按用户分组金额折扣、订单定价快照、支付回跳刷新和
+  订阅/邀请奖励面板均仍位于现行组件路径。
+- 性能指标开关和分组过滤、排行榜管理员访问控制、日志分组筛选/错误日志权限、搜索
+  防抖、表格宽度和充值默认金额逻辑均保留。所有业务 API 使用 `@/lib/http-client`
+  的新鉴权客户端；未发现 `New-Api-User`、旧 dashboard session 或旧 token 依赖。仅有
+  外部延迟探测、GitHub 发布查询和图片下载使用原生 `fetch`，不属于面板鉴权请求。
+- 7 个 `web/src/i18n/locales/*.json` 文件均可由 JSON 解析器读取，扁平键数量一致（每个
+  5393 个）；本地 locale 标准化和既有中文/区域翻译值保留，上游新增键已同步。
+- 阶段静态门禁：前端保护路径删除扫描、旧鉴权依赖扫描、locale JSON 解析/键数检查和
+  `git diff --check` 通过；按用户要求未执行 `bun install`、typecheck、test、lint 或
+  build。阶段提交：`fix: preserve frontend customizations after rc25 merge`（待提交）。
+
+### 阶段 4：最终审查与交付
+
+- 待完成：反向核对 P-01 至 P-29、UTF-8/乱码/空文件/冲突标记/i18n 检查，记录完整自动
+  检查应由 GitHub Actions 执行的结果；随后快进本地 `main`、推送 `origin/main`，只监控
+  最新提交的 `Publish Docker image (Multi-arch)`，不执行蓝绿部署。
