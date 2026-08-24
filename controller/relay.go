@@ -126,7 +126,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
+	needSensitiveCheck := setting.ShouldCheckPromptSensitive() || model.GetSensitiveWordConfig().Enabled
 	needCountToken := constant.CountToken
 	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.
 	var meta *types.TokenCountMeta
@@ -137,11 +137,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	if needSensitiveCheck && meta != nil {
-		contains, words := service.CheckSensitiveText(meta.CombineText)
-		if contains {
-			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
-			newAPIError = types.NewError(err, types.ErrorCodeSensitiveWordsDetected)
-			return
+		result, checkErr := model.CheckSensitiveRequest(model.SensitiveCheckInput{
+			RequestID: c.GetString(common.RequestIdKey), UserID: relayInfo.UserId, Username: c.GetString("username"),
+			TokenID: relayInfo.TokenId, GroupName: relayInfo.UsingGroup, ModelName: relayInfo.OriginModelName,
+			Endpoint: relayInfo.RequestURLPath, Protocol: string(relayInfo.RelayFormat), Prompt: meta.CombineText,
+		})
+		if checkErr != nil {
+			logger.LogWarn(c, "sensitive word audit failed: "+checkErr.Error())
+		} else if result != nil && result.Matched {
+			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(result.MatchedWords, ", ")))
+			if result.Blocked {
+				newAPIError = types.NewError(errors.New(result.Message), types.ErrorCodeSensitiveWordsDetected, types.ErrOptionWithStatusCode(http.StatusForbidden))
+				return
+			}
 		}
 	}
 

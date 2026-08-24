@@ -4249,6 +4249,7 @@
     "Sending...": "发送中...",
     "Sensitive channel settings are read-only for your account.": "你的账号只能查看敏感渠道设置。",
     "Sensitive Words": "敏感词",
+    "Sensitive word block": "关键词拦截",
     "Sent the API key to FluentRead.": "API 密钥已发送至 FluentRead。",
     "Separate image/audio prices are enabled.": "已启用图像/音频单独定价。",
     "Separate multiple rules with English commas. For regex patterns that need commas, switch to JSON Text.": "多个规则用英文逗号分隔。正则里需要逗号时，请切换到 JSON 文本。",

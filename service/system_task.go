@@ -135,11 +135,18 @@ func StartSystemTaskRunner() {
 
 			var lastScheduler time.Time
 			var lastStaleLockCleanup time.Time
+			var lastSensitiveWordCleanup time.Time
 			runPass := func() {
 				// The scheduler/stale-lock pass is throttled independently of the
 				// claim pass: wakeups (e.g. a manual log cleanup) should claim
 				// immediately without re-running the scheduler every time.
 				now := time.Now()
+				if now.Sub(lastSensitiveWordCleanup) >= time.Hour {
+					lastSensitiveWordCleanup = now
+					if err := model.CleanupSensitiveWordAudits(); err != nil {
+						logger.LogWarn(context.Background(), fmt.Sprintf("sensitive word audit cleanup failed: %v", err))
+					}
+				}
 				if now.Sub(lastStaleLockCleanup) >= systemTaskStaleLockInterval {
 					lastStaleLockCleanup = now
 					if err := model.ExpireStaleSystemTaskLocks(common.GetTimestamp()); err != nil {

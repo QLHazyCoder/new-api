@@ -282,6 +282,26 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 
+		sensitiveWordRoute := apiRouter.Group("/sensitive-words")
+		sensitiveWordRoute.Use(middleware.AdminAuth())
+		{
+			sensitiveWordRoute.GET("/config", controller.GetSensitiveWordConfig)
+			sensitiveWordRoute.PUT("/config", controller.UpdateSensitiveWordConfig)
+			sensitiveWordRoute.GET("/stats", controller.GetSensitiveWordStats)
+			sensitiveWordRoute.GET("/groups", controller.GetSensitiveWordGroups)
+			sensitiveWordRoute.GET("/rules", controller.GetSensitiveWordRules)
+			sensitiveWordRoute.POST("/rules", controller.CreateSensitiveWordRule)
+			sensitiveWordRoute.PUT("/rules/:id", controller.UpdateSensitiveWordRule)
+			sensitiveWordRoute.DELETE("/rules/:id", controller.DeleteSensitiveWordRule)
+			sensitiveWordRoute.GET("/whitelist", controller.GetSensitiveWordWhitelist)
+			sensitiveWordRoute.POST("/whitelist", controller.CreateSensitiveWordWhitelist)
+			sensitiveWordRoute.DELETE("/whitelist/:user_id", controller.DeleteSensitiveWordWhitelist)
+			sensitiveWordRoute.GET("/audits", controller.GetSensitiveWordAudits)
+			sensitiveWordRoute.GET("/audits/:id", controller.GetSensitiveWordAudit)
+			sensitiveWordRoute.POST("/users/:id/clear-violations", controller.ClearSensitiveWordViolations)
+			sensitiveWordRoute.POST("/users/:id/unban", controller.UnbanSensitiveWordUser)
+		}
+
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())
 		{
