@@ -75,7 +75,7 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
         <Button onClick={() => void saveConfig()}>保存配置</Button>
       </div>
       <div className='space-y-3 rounded-md border p-4'>
-        <div className='flex items-center justify-between'><h3 className='font-semibold'>添加敏感词</h3><span className='text-xs text-muted-foreground'>第五次非白名单命中自动封号并清零余额</span></div>
+        <div className='flex items-center justify-between'><h3 className='font-semibold'>添加敏感词</h3><span className='text-xs text-muted-foreground'>第五次非白名单命中自动封号，但不清理余额</span></div>
         <div className='grid gap-3 md:grid-cols-[1fr_180px_1fr_auto]'>
           <Textarea value={word} onChange={(e) => setWord(e.target.value)} placeholder='每行一个敏感词，可批量粘贴' rows={2} />
           <Select value={scope} onValueChange={(value) => setScope(value ?? 'global')}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value='global'>全局规则</SelectItem><SelectItem value='group'>指定分组</SelectItem></SelectContent></Select>
