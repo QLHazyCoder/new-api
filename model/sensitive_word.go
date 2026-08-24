@@ -169,7 +169,7 @@ func validSensitiveGroups(groups []string) ([]string, error) {
 func GetSensitiveWordConfig() SensitiveWordConfig {
 	cfg := SensitiveWordConfig{Enabled: setting.ShouldCheckPromptSensitive(), AuditEnabled: true, BlockMessage: "你的请求因命中敏感词已被拦截，已记录 1 次；累计超过 5 次将立即封号并清空余额。请勿使用当前分组进行违规对话；如有误判，请联系群主审核并清理你的记录。", BanThreshold: SensitiveWordBanThreshold, FullPromptRetentionDays: 180, MaxPromptRunes: SensitiveWordMaxPromptRunes}
 	var option Option
-	if DB.Where("key = ?", "SensitiveWordConfig").First(&option).Error == nil {
+	if DB.Where("`key` = ?", "SensitiveWordConfig").First(&option).Error == nil {
 		_ = json.Unmarshal([]byte(option.Value), &cfg)
 	}
 	if cfg.BanThreshold <= 0 {
