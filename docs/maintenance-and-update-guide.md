@@ -47,13 +47,27 @@ Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检�
 
 审计详情没有完整提示词通常有两种原因：管理员关闭了“保存完整审计证据”，或证据已超过保留期被清理任务清空。清理只清空 full_prompt 和 redacted_preview，不删除审计元数据。
 
-### 2.4 旧配置与迁移
+### 2.4 封禁后启用的边界
+
+用户列表的“启用”和敏感词兼容接口的“解封”必须走同一个行锁事务：
+
+- 无论是自动封禁后、人工禁用后，还是已启用但仍有记录，启用都会把当前
+  `sensitive_word_violation_count` 清零；下一次命中从第 1 次开始。
+- 从禁用到启用才递增 `auth_version`、刷新认证缓存并撤销旧会话；已经启用的用户重复
+  启用不会重复撤销会话或递增认证版本。
+- 事务只更新 `status`、违规次数和必要的认证版本，不更新 `quota`、`used_quota`、钱包/订阅
+  余额、历史消费、使用日志或审计事件。管理审计动作固定为
+  `sensitive_word.enable_reset`，并应包含 `balance_changed:false`。
+- 用户当前次数大于 0 时，前端启用动作必须先确认：启用会清零当前次数，但历史审计、余额
+  和消费记录不会删除。确认取消时不得发起请求。
+
+### 2.5 旧配置与迁移
 
 旧 SensitiveWords Option 在第一次启动时导入独立规则表。成功后写 SensitiveWordRulesMigrationVersion=1，新的规则表成为权威来源，删除导入规则不会重新回退旧词库。
 
 若旧 Option 含有超过新限制的词条，迁移会保留兼容匹配、不写完成标记并在系统日志提示；这不会阻断服务，但管理员必须在规则编辑器中修正旧数据。不要手工删除迁移标记或旧 Option，除非已按架构文档完成迁移复核。
 
-### 2.5 数据库和日志库
+### 2.6 数据库和日志库
 
 审计事件表始终位于主数据库，支持 SQLite、MySQL 和 PostgreSQL。类型 8 使用日志仍位于 LOG_DB；当 LOG_DB 是 ClickHouse 时，日志表不需要额外列迁移，因为类型是整数。
 
@@ -79,7 +93,7 @@ Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检�
 
     gofmt -w <changed-go-files>
     go test ./model -run 'Test(MigrateSensitiveWordData|SaveSensitiveWordConfig|SensitiveWord)' -count=1
-    go test ./controller -run 'Test(SensitiveWordAuditListRedactsFullPrompt|RelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery|UpdateUserPersistsSensitiveWordControlsWithoutChangingQuota)' -count=1
+    go test ./controller -run 'Test(SensitiveWordAuditListRedactsFullPrompt|RelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery|UpdateUserPersistsSensitiveWordControlsWithoutChangingQuota|ManageUserEnableResets|SensitiveWordUnbanEndpoint)' -count=1
     go test ./...
     go build ./...
 
@@ -132,7 +146,9 @@ Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检�
 2. 创建临时本地测试用户和临时规则，在非生产流量环境验证一次观察模式日志。
 3. 确认类型 8 日志详情能读取审计事件，普通用户日志不显示完整词条。
 4. 确认用户抽屉能编辑违规次数和白名单，且修改后 quota 不变。
-5. 删除临时规则和测试用户时保留必要操作审计。
+5. 对测试用户设置非零违规次数后点击用户列表“启用”，确认框文案正确；确认后次数为 0，
+   再次启用不增加 auth_version，历史审计和 quota 均不变。
+6. 删除临时规则和测试用户时保留必要操作审计。
 
 生产环境若无法安全创建临时测试数据，只做只读检查：页面加载、路由鉴权、数据库表存在、日志详情权限和容器健康。
 

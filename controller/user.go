@@ -1187,6 +1187,7 @@ func ManageUser(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserNoPermissionHigherLevel)
 		return
 	}
+	var enableReset *model.SensitiveWordEnableResetResult
 	switch req.Action {
 	case "disable":
 		user.Status = common.UserStatusDisabled
@@ -1195,7 +1196,14 @@ func ManageUser(c *gin.Context) {
 			return
 		}
 	case "enable":
-		user.Status = common.UserStatusEnabled
+		enableReset, err = model.EnableUserAndResetSensitiveWordViolations(user.Id)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		user.Status = enableReset.StatusAfter
+		user.SensitiveWordViolationCount = enableReset.ViolationCountAfter
+		user.AuthVersion = enableReset.AuthVersionAfter
 	case "delete":
 		if user.Role == common.RoleRootUser {
 			common.ApiErrorI18n(c, i18n.MsgUserCannotDeleteRootUser)
@@ -1294,6 +1302,22 @@ func ManageUser(c *gin.Context) {
 		return
 	default:
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+
+	if req.Action == "enable" {
+		recordManageAuditFor(c, user.Id, "user.manage", map[string]interface{}{
+			"action":   req.Action,
+			"username": user.Username,
+			"id":       user.Id,
+		})
+		recordManageAuditFor(c, user.Id, "sensitive_word.enable_reset", sensitiveWordEnableResetAuditParams(enableReset, "user_manage_enable"))
+		clearUser := model.User{Role: user.Role, Status: user.Status}
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data":    clearUser,
+		})
 		return
 	}
 

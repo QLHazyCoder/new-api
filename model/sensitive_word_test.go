@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -386,6 +387,215 @@ func TestSensitiveWordFifthViolationBansWithoutChangingBalance(t *testing.T) {
 	fifthLog := getSensitiveWordTestLog(t, "violation-5")
 	require.Contains(t, fifthLog.Other, fmt.Sprintf("\"audit_id\":%d", fifthEvent.ID))
 	require.Contains(t, fifthLog.Other, "\"balance_changed\":false")
+}
+
+func TestSensitiveWordEnableResetsCounterIdempotentlyAndPreservesEvidence(t *testing.T) {
+	setupSensitiveWordTest(t)
+	saveSensitiveWordTestConfig(t, "block", true, SensitiveWordBanThreshold)
+	addSensitiveWordTestRule(t, "启用重置规则", []string{"启用重置命中词"}, SensitiveWordScopeGlobal, nil)
+	user := createSensitiveWordTestUser(t, 91827364, false)
+	user.UsedQuota = 123456
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("used_quota", user.UsedQuota).Error)
+
+	for count := 1; count <= SensitiveWordBanThreshold; count++ {
+		result, err := CheckSensitiveRequest(sensitiveWordTestInput(user, fmt.Sprintf("enable-reset-hit-%d", count), "启用重置命中词"))
+		require.NoError(t, err)
+		require.True(t, result.Blocked)
+	}
+
+	var before User
+	require.NoError(t, DB.First(&before, user.Id).Error)
+	require.Equal(t, common.UserStatusDisabled, before.Status)
+	require.Equal(t, SensitiveWordBanThreshold, before.SensitiveWordViolationCount)
+	require.Equal(t, 91827364, before.Quota)
+	require.Equal(t, 123456, before.UsedQuota)
+	var evidenceBefore int64
+	require.NoError(t, DB.Model(&SensitiveWordAuditEvent{}).Where("user_id = ?", user.Id).Count(&evidenceBefore).Error)
+
+	// A session created while the account is disabled still has to be revoked
+	// when an administrator enables the account and advances auth_version.
+	now := time.Now().Unix()
+	staleSession := UserSession{
+		SID: fmt.Sprintf("enable-reset-stale-%d", user.Id), UserID: user.Id, Version: 1,
+		UserAuthVersion: before.AuthVersion, Status: UserSessionStatusActive,
+		RefreshHash: "enable-reset-stale-refresh", LoginMethod: "password",
+		CreatedAt: now, LastActiveAt: now, ExpiresAt: now + 3600,
+	}
+	require.NoError(t, DB.Create(&staleSession).Error)
+
+	reset, err := EnableUserAndResetSensitiveWordViolations(user.Id)
+	require.NoError(t, err)
+	require.Equal(t, common.UserStatusDisabled, reset.StatusBefore)
+	require.Equal(t, common.UserStatusEnabled, reset.StatusAfter)
+	require.Equal(t, SensitiveWordBanThreshold, reset.ViolationCountBefore)
+	require.Zero(t, reset.ViolationCountAfter)
+	require.True(t, reset.StatusChanged)
+	require.True(t, reset.ViolationCountReset)
+	require.Equal(t, before.AuthVersion+1, reset.AuthVersionAfter)
+	require.Equal(t, before.Quota, reset.QuotaAfter)
+	require.Equal(t, before.UsedQuota, reset.UsedQuotaAfter)
+	require.Equal(t, int64(1), reset.SessionsRevoked)
+
+	var enabled User
+	require.NoError(t, DB.First(&enabled, user.Id).Error)
+	require.Equal(t, common.UserStatusEnabled, enabled.Status)
+	require.Zero(t, enabled.SensitiveWordViolationCount)
+	require.Equal(t, before.Quota, enabled.Quota)
+	require.Equal(t, before.UsedQuota, enabled.UsedQuota)
+	var staleAfter UserSession
+	require.NoError(t, DB.First(&staleAfter, "sid = ?", staleSession.SID).Error)
+	require.Equal(t, UserSessionStatusRevoked, staleAfter.Status)
+
+	var evidenceAfter int64
+	require.NoError(t, DB.Model(&SensitiveWordAuditEvent{}).Where("user_id = ?", user.Id).Count(&evidenceAfter).Error)
+	require.Equal(t, evidenceBefore, evidenceAfter, "启用清零不得删除历史审计证据")
+	historyEvent := getSensitiveWordTestAudit(t, "enable-reset-hit-1")
+	require.Contains(t, historyEvent.FullPrompt, "启用重置命中词")
+
+	// Repeated enable is idempotent: it must not advance auth_version or
+	// revoke a session that was created after the first successful enable.
+	var activeSession UserSession
+	activeSession = UserSession{
+		SID: fmt.Sprintf("enable-reset-active-%d", user.Id), UserID: user.Id, Version: 1,
+		UserAuthVersion: enabled.AuthVersion, Status: UserSessionStatusActive,
+		RefreshHash: "enable-reset-active-refresh", LoginMethod: "password",
+		CreatedAt: now, LastActiveAt: now, ExpiresAt: now + 3600,
+	}
+	require.NoError(t, DB.Create(&activeSession).Error)
+	second, err := EnableUserAndResetSensitiveWordViolations(user.Id)
+	require.NoError(t, err)
+	require.False(t, second.StatusChanged)
+	require.False(t, second.ViolationCountReset)
+	require.Equal(t, enabled.AuthVersion, second.AuthVersionAfter)
+	require.Zero(t, second.SessionsRevoked)
+	var activeAfter UserSession
+	require.NoError(t, DB.First(&activeAfter, "sid = ?", activeSession.SID).Error)
+	require.Equal(t, UserSessionStatusActive, activeAfter.Status)
+
+	// The next effective hit starts a fresh sequence at one instead of
+	// immediately re-banning the account.
+	next, err := CheckSensitiveRequest(sensitiveWordTestInput(user, "enable-reset-next-hit", "启用重置命中词"))
+	require.NoError(t, err)
+	require.True(t, next.Blocked)
+	require.Equal(t, 1, next.ViolationCount)
+	require.False(t, next.AutoBanned)
+	require.NoError(t, DB.First(&enabled, user.Id).Error)
+	require.Equal(t, common.UserStatusEnabled, enabled.Status)
+	require.Equal(t, 1, enabled.SensitiveWordViolationCount)
+	require.Equal(t, before.Quota, enabled.Quota)
+	require.Equal(t, before.UsedQuota, enabled.UsedQuota)
+}
+
+func TestSensitiveWordEnableResetsManuallyDisabledUserAndPreservesWhitelist(t *testing.T) {
+	setupSensitiveWordTest(t)
+	user := createSensitiveWordTestUser(t, 456789, true)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"status":                         common.UserStatusDisabled,
+		"sensitive_word_violation_count": 2,
+	}).Error)
+
+	result, err := EnableUserAndResetSensitiveWordViolations(user.Id)
+	require.NoError(t, err)
+	require.True(t, result.StatusChanged)
+	require.True(t, result.ViolationCountReset)
+	var updated User
+	require.NoError(t, DB.First(&updated, user.Id).Error)
+	require.Equal(t, common.UserStatusEnabled, updated.Status)
+	require.Zero(t, updated.SensitiveWordViolationCount)
+	require.True(t, updated.SensitiveWordWhitelist, "启用操作不得改变白名单状态")
+	require.Equal(t, 456789, updated.Quota)
+}
+
+func TestSensitiveWordEnableOnlyClearsAlreadyEnabledUserWithoutRevokingSession(t *testing.T) {
+	setupSensitiveWordTest(t)
+	user := createSensitiveWordTestUser(t, 13579, false)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("sensitive_word_violation_count", 3).Error)
+	now := time.Now().Unix()
+	require.NoError(t, DB.Create(&UserSession{
+		SID: "enabled-reset-session", UserID: user.Id, Version: 1, UserAuthVersion: user.AuthVersion,
+		Status: UserSessionStatusActive, RefreshHash: "enabled-reset-refresh", LoginMethod: "password",
+		CreatedAt: now, LastActiveAt: now, ExpiresAt: now + 3600,
+	}).Error)
+
+	result, err := EnableUserAndResetSensitiveWordViolations(user.Id)
+	require.NoError(t, err)
+	require.False(t, result.StatusChanged)
+	require.True(t, result.ViolationCountReset)
+	require.Equal(t, int64(1), result.AuthVersionAfter)
+	require.Zero(t, result.SessionsRevoked)
+
+	var updated User
+	require.NoError(t, DB.First(&updated, user.Id).Error)
+	require.Equal(t, common.UserStatusEnabled, updated.Status)
+	require.Zero(t, updated.SensitiveWordViolationCount)
+	require.EqualValues(t, 1, updated.AuthVersion)
+	var session UserSession
+	require.NoError(t, DB.First(&session, "sid = ?", "enabled-reset-session").Error)
+	require.Equal(t, UserSessionStatusActive, session.Status)
+}
+
+func TestSensitiveWordConcurrentEnableAndHitDoNotWriteBackStaleCount(t *testing.T) {
+	setupSensitiveWordTest(t)
+	saveSensitiveWordTestConfig(t, "block", true, SensitiveWordBanThreshold)
+	addSensitiveWordTestRule(t, "并发边界规则", []string{"并发边界命中词"}, SensitiveWordScopeGlobal, nil)
+	user := createSensitiveWordTestUser(t, 987654, false)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"status":                         common.UserStatusEnabled,
+		"sensitive_word_violation_count": SensitiveWordBanThreshold - 1,
+	}).Error)
+
+	// SQLite has no FOR UPDATE clause and may return a transient table-lock
+	// error when the two writers overlap. Retry only that driver-level error;
+	// the final assertions still exercise the row-locked production path on
+	// MySQL/PostgreSQL.
+	retryLocked := func(operation func() error) error {
+		var err error
+		for attempt := 0; attempt < 10; attempt++ {
+			err = operation()
+			if err == nil || !strings.Contains(strings.ToLower(err.Error()), "locked") {
+				return err
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		return err
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var enableErr, hitErr error
+	var hitResult *SensitiveCheckResult
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		enableErr = retryLocked(func() error {
+			_, err := EnableUserAndResetSensitiveWordViolations(user.Id)
+			return err
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		hitErr = retryLocked(func() error {
+			var err error
+			hitResult, err = CheckSensitiveRequest(sensitiveWordTestInput(user, "concurrent-enable-hit", "并发边界命中词"))
+			return err
+		})
+	}()
+	close(start)
+	wg.Wait()
+	require.NoError(t, enableErr)
+	require.NoError(t, hitErr)
+	require.NotNil(t, hitResult)
+
+	var final User
+	require.NoError(t, DB.First(&final, user.Id).Error)
+	require.Equal(t, common.UserStatusEnabled, final.Status)
+	// Either the enable commits first (the hit becomes count 1) or the hit
+	// commits first (the enable clears its fifth hit). A stale count of five
+	// with a disabled account is not an admissible outcome.
+	require.LessOrEqual(t, final.SensitiveWordViolationCount, 1)
+	require.Equal(t, user.Quota, final.Quota)
 }
 
 func TestSensitiveWordRuntimeRefreshAndUserLogRedaction(t *testing.T) {

@@ -57,7 +57,23 @@
 
 第 5 次之后的请求仍会记录和递增违规次数，但不会重复执行封禁或重复增加认证版本。
 
-### 2.3 协议与错误响应
+### 2.3 启用/解封边界
+
+普通用户管理接口 `POST /api/user/manage` 的 `action=enable` 和专用
+`POST /api/sensitive-words/users/:id/unban` 共享同一个行锁事务服务。两条入口的结果完全一致：
+
+| 启用前状态 | 启用前次数 | 状态/次数结果 | 认证与会话 | 余额与证据 |
+| --- | ---: | --- | --- | --- |
+| 已禁用 | 任意值 | `status=enabled`，次数清零 | 递增一次 `auth_version`，刷新认证缓存并撤销旧会话 | `quota`、`used_quota`、历史审计和使用日志不变 |
+| 已启用 | 大于 0 | 保持启用，次数清零 | 不递增认证版本，不撤销新会话 | 同上 |
+| 已启用 | 0 | 保持原样 | 不产生认证状态刷新 | 同上 |
+
+清零使用显式 `Updates(map)`，避免 GORM 结构体更新忽略零值。启用操作本身会写一条
+`sensitive_word.enable_reset` 管理审计，记录目标用户、状态/次数前后值、入口来源以及
+`balance_changed=false`。它只清零当前计数，不删除任何历史证据；下一次有效命中从第 1 次重新计数。
+用户列表在次数大于 0 时必须先显示确认文案，避免管理员误以为启用会删除历史记录或余额。
+
+### 2.4 协议与错误响应
 
 `request.GetTokenCountMeta().CombineText` 是统一的提示词快照来源，覆盖 OpenAI Chat、Responses、Claude Messages、Gemini GenerateContent 和图片生成的文本 prompt。
 
@@ -157,6 +173,8 @@
 | `DELETE /api/sensitive-words/rules/:id` | 永久删除规则。 |
 | `GET /api/sensitive-words/audits/:id` | 管理员日志详情读取完整审计证据。 |
 | `PUT /api/user/` | 管理员同时更新用户信息、违规次数和白名单。 |
+| `POST /api/user/manage` (`action=enable`) | 启用用户并按统一事务清零当前违规次数。 |
+| `POST /api/sensitive-words/users/:id/unban` | 与普通启用完全一致，兼容旧管理入口。 |
 
 `/stats`、`/whitelist`、`/audits`、`/users/:id/clear-violations` 和 `/users/:id/unban` 保留给已有管理员集成，不在新页面提供入口。使用它们仍会产生管理审计；新页面应优先通过用户编辑抽屉维护计数和白名单。
 
@@ -166,9 +184,10 @@
 2. 管理员打开日志详情，核对命中词、规则 ID/名称、分组、白名单状态、模式、次数和自动封禁结果。
 3. 核对 `sensitive_word_audit_events` 是否有相同 `request_id`，以及 `audit_id` 是否与日志 `Other` 一致。
 4. 误判时先修正规则或分组绑定，再在用户抽屉清零违规次数；不要删除历史日志或审计事件。
-5. 若用户在第 5 次后仍可访问，检查 `users.status`、`auth_version`、`user_sessions` 的撤销状态和用户认证缓存。
-6. 若规则未生效，确认策略已启用、模式不是关闭、规则已启用、局部规则分组存在于分组定价，并确认请求实际使用的分组。
-7. 若审计详情为空，检查“保存完整审计证据”是否关闭，或是否已经超过提示词保留天数。清理任务只清空完整提示词和摘要，不删除命中元数据。
+5. 用户被封禁后，使用用户列表“启用”或专用解封入口会清零当前次数，但不会删除历史证据、余额或消费记录；下一次命中应显示第 1 次。
+6. 若用户在第 5 次后仍可访问，检查 `users.status`、`auth_version`、`user_sessions` 的撤销状态和用户认证缓存。
+7. 若规则未生效，确认策略已启用、模式不是关闭、规则已启用、局部规则分组存在于分组定价，并确认请求实际使用的分组。
+8. 若审计详情为空，检查“保存完整审计证据”是否关闭，或是否已经超过提示词保留天数。清理任务只清空完整提示词和摘要，不删除命中元数据。
 
 ## 8. 文件职责映射
 
@@ -193,7 +212,7 @@
 
 ```bash
 go test ./model -run 'Test(MigrateSensitiveWordData|SaveSensitiveWordConfig|SensitiveWord)' -count=1
-go test ./controller -run 'Test(SensitiveWordAuditListRedactsFullPrompt|RelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery|UpdateUserPersistsSensitiveWordControlsWithoutChangingQuota)' -count=1
+go test ./controller -run 'Test(SensitiveWordAuditListRedactsFullPrompt|RelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery|UpdateUserPersistsSensitiveWordControlsWithoutChangingQuota|ManageUserEnableResets|SensitiveWordUnbanEndpoint)' -count=1
 go test ./...
 go build ./...
 ```

@@ -460,6 +460,9 @@ export function UsersMutateDrawer({
                   <p className='text-muted-foreground text-xs'>
                     违规次数可由管理员修正或清零；白名单用户命中后放行，但仍会写入关键词拦截日志。
                   </p>
+                  <p className='text-muted-foreground text-xs'>
+                    启用账号会清零当前违规次数，但不会删除历史审计记录、余额或消费记录。
+                  </p>
 
                   <FormField
                     control={form.control}

@@ -1218,6 +1218,105 @@ func ClearSensitiveWordViolations(userID int) error {
 	return nil
 }
 
+// SensitiveWordEnableResetResult describes the state transition performed by
+// an administrator enable/unban operation. The result deliberately includes
+// quota snapshots so callers can make the no-balance-change guarantee visible
+// in the management audit without having to issue a second, unlocked read.
+type SensitiveWordEnableResetResult struct {
+	UserID               int   `json:"user_id"`
+	StatusBefore         int   `json:"status_before"`
+	StatusAfter          int   `json:"status_after"`
+	ViolationCountBefore int   `json:"violation_count_before"`
+	ViolationCountAfter  int   `json:"violation_count_after"`
+	AuthVersionBefore    int64 `json:"auth_version_before"`
+	AuthVersionAfter     int64 `json:"auth_version_after"`
+	QuotaBefore          int   `json:"quota_before"`
+	QuotaAfter           int   `json:"quota_after"`
+	UsedQuotaBefore      int   `json:"used_quota_before"`
+	UsedQuotaAfter       int   `json:"used_quota_after"`
+	StatusChanged        bool  `json:"status_changed"`
+	ViolationCountReset  bool  `json:"violation_count_reset"`
+	SessionsRevoked      int64 `json:"sessions_revoked"`
+}
+
+// EnableUserAndResetSensitiveWordViolations enables an account and clears its
+// current sensitive-word counter in one row-locked transaction. Historical
+// audit/usage records and every balance-related field are intentionally left
+// untouched. A status transition advances auth_version and invalidates old
+// authentication state; an idempotent enable of an already-enabled account
+// does not revoke sessions or advance auth_version again.
+func EnableUserAndResetSensitiveWordViolations(userID int) (*SensitiveWordEnableResetResult, error) {
+	if userID <= 0 {
+		return nil, errors.New("用户 ID 无效")
+	}
+
+	result := &SensitiveWordEnableResetResult{UserID: userID}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var current User
+		if err := lockForUpdate(tx).First(&current, userID).Error; err != nil {
+			return err
+		}
+
+		result.StatusBefore = current.Status
+		result.StatusAfter = common.UserStatusEnabled
+		result.ViolationCountBefore = current.SensitiveWordViolationCount
+		result.ViolationCountAfter = 0
+		result.AuthVersionBefore = current.AuthVersion
+		result.AuthVersionAfter = current.AuthVersion
+		result.QuotaBefore = current.Quota
+		result.QuotaAfter = current.Quota
+		result.UsedQuotaBefore = current.UsedQuota
+		result.UsedQuotaAfter = current.UsedQuota
+		result.StatusChanged = current.Status != common.UserStatusEnabled
+		result.ViolationCountReset = current.SensitiveWordViolationCount != 0
+
+		updates := map[string]interface{}{
+			"status":                         common.UserStatusEnabled,
+			"sensitive_word_violation_count": 0,
+		}
+		if result.StatusChanged {
+			nextVersion, err := IncrementUserAuthVersionWithTx(tx, userID)
+			if err != nil {
+				return err
+			}
+			result.AuthVersionAfter = nextVersion
+			updates["auth_version"] = nextVersion
+		}
+
+		// Avoid an unnecessary UPDATE for an already-enabled, already-clean
+		// account. Whenever a reset is needed, use a map so zero is persisted;
+		// Updates(struct) would silently omit the counter's zero value.
+		if result.StatusChanged || result.ViolationCountReset {
+			if err := tx.Model(&User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if result.StatusChanged {
+		// The database transition has committed. Refresh the user auth snapshot,
+		// revoke sessions issued under the old status/version, and clear token
+		// caches so every authentication path observes the new state.
+		if err := PublishUserAuthCache(userID); err != nil {
+			return result, err
+		}
+		revoked, err := RevokeAllUserSessions(userID, "sensitive_word_enable")
+		if err != nil {
+			return result, err
+		}
+		result.SessionsRevoked = revoked
+		if err := InvalidateUserTokensCache(userID); err != nil {
+			return result, err
+		}
+	}
+
+	return result, nil
+}
+
 // normalizeLegacySensitiveWords preserves the old matcher as a fallback when
 // a historical option contains a value that the new editor intentionally
 // rejects (for example, a word longer than the new limit). A migration must
@@ -1342,16 +1441,11 @@ func MigrateSensitiveWordData() error {
 	invalidateSensitiveWordRuntime()
 	return nil
 }
+
+// UnbanSensitiveWordUser is the compatibility wrapper for older callers. New
+// administrative paths should use EnableUserAndResetSensitiveWordViolations
+// when they need the transition details for an audit record.
 func UnbanSensitiveWordUser(userID int) error {
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		next, err := IncrementUserAuthVersionWithTx(tx, userID)
-		if err != nil {
-			return err
-		}
-		return tx.Model(&User{}).Where("id = ?", userID).Updates(map[string]any{"status": common.UserStatusEnabled, "auth_version": next}).Error
-	})
-	if err == nil {
-		_ = invalidateUserCache(userID)
-	}
+	_, err := EnableUserAndResetSensitiveWordViolations(userID)
 	return err
 }

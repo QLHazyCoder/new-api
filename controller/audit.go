@@ -57,6 +57,7 @@ var auditContentTemplates = map[string]string{
 	"sensitive_word_rule.delete":       "Deleted sensitive-word rule ${rule_id}",
 	"sensitive_word_clear_violations":  "Cleared sensitive-word violations for user ${user_id}",
 	"sensitive_word_unban":             "Unbanned sensitive-word user ${user_id}",
+	"sensitive_word.enable_reset":      "Enabled user ${target_user_id} and reset sensitive-word violations from ${before} to ${after}",
 	"sensitive_word.violations_update": "Updated sensitive-word violations for user ${target_user_id} from ${before} to ${after}",
 	"sensitive_word.violations_clear":  "Cleared sensitive-word violations for user ${target_user_id} (${before} to ${after})",
 	"sensitive_word.whitelist_update":  "Updated sensitive-word whitelist for user ${target_user_id} from ${before} to ${after}",

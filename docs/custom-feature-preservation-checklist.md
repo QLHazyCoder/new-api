@@ -471,6 +471,11 @@
 - 必须保留：默认客户端警示文案明确说明“余额不退”和严重情形报警，但这是提示文本，
   不是余额处理指令；管理员可在用户编辑右抽屉维护违规次数、清零次数和个人白名单，
   敏感词页面不承载白名单名单或审计列表，审计复核入口统一在使用日志。
+- 必须保留：管理员从用户列表启用账户或调用专用解封接口时，必须在同一行锁事务内恢复
+  `status` 并将当前违规次数清零；历史审计、使用日志、`quota`、`used_quota` 和白名单状态
+  不得改变。禁用状态转启用才递增 `auth_version`、刷新认证缓存并撤销旧会话；重复启用
+  不得重复执行这些认证动作。操作审计使用 `sensitive_word.enable_reset`，并记录入口来源
+  与 `balance_changed:false`。
 - 当前位置：`model/sensitive_word.go`、`model/user.go`、`model/main.go`、
   `service/sensitive.go`、`controller/relay.go`、`controller/sensitive_word.go`、
   `controller/user.go`、`controller/log.go`、`model/log.go`、`router/api-router.go`、
@@ -553,3 +558,6 @@ GitHub Actions 的 amd64、arm64 与 manifest 均成功。
 - 2026-08-30：新增 P-30，登记敏感词与内容审计重构的规则、分组、审计、白名单、
   违规次数、第五次封禁、HTTP 403 和余额不变契约；确认功能提交已推送并按蓝绿流程
   上线，`84daf8a43` 仅为发布记录文档维护提交。
+- 2026-08-30：补充 P-30 的启用边界：所有管理员启用/解封入口清零当前次数、保留历史
+  证据和余额；状态变化才刷新认证并撤销会话，重复启用保持幂等。实现提交待本轮发布
+  后回填。

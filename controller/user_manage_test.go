@@ -62,6 +62,20 @@ func performManageUserRequest(t *testing.T, body string) *httptest.ResponseRecor
 	return recorder
 }
 
+func performSensitiveWordUnbanRequest(t *testing.T, userID int) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/sensitive-words/users/%d/unban", userID), nil)
+	c.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", userID)}}
+	c.Set("id", 9999)
+	c.Set("role", common.RoleRootUser)
+	c.Set("username", "root-operator")
+	UnbanSensitiveWordUser(c)
+	return recorder
+}
+
 func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	now := time.Now().Unix()
@@ -87,6 +101,127 @@ func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T)
 	var session model.UserSession
 	require.NoError(t, db.First(&session, "sid = ?", "managed-disable-session").Error)
 	assert.Equal(t, model.UserSessionStatusRevoked, session.Status)
+}
+
+func TestManageUserEnableResetsSensitiveWordViolationsWithoutChangingBalance(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.SensitiveWordAuditEvent{}))
+	now := time.Now().Unix()
+	user := model.User{
+		Username: "managed-enable-reset-user", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusDisabled, Group: "default", AuthVersion: 2,
+		SensitiveWordViolationCount: 5, SensitiveWordWhitelist: true,
+		Quota: 87654321, UsedQuota: 12345,
+	}
+	require.NoError(t, db.Create(&user).Error)
+	require.NoError(t, db.Create(&model.SensitiveWordAuditEvent{
+		RequestID: "managed-enable-history", UserID: user.Id, FullPrompt: "历史证据必须保留",
+		MatchedWords: `["历史词"]`, Blocked: true, ViolationCount: 5, CreatedAt: time.Now(),
+	}).Error)
+	require.NoError(t, db.Create(&model.UserSession{
+		SID: "managed-enable-stale-session", UserID: user.Id, Version: 1, UserAuthVersion: 2,
+		Status: model.UserSessionStatusActive, RefreshHash: "managed-enable-stale-refresh",
+		LoginMethod: "password", LastActiveAt: now, ExpiresAt: now + 3600,
+	}).Error)
+
+	recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"enable"}`, user.Id))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+
+	var updated model.User
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	require.Equal(t, common.UserStatusEnabled, updated.Status)
+	require.Zero(t, updated.SensitiveWordViolationCount)
+	require.EqualValues(t, 3, updated.AuthVersion)
+	require.Equal(t, 87654321, updated.Quota)
+	require.Equal(t, 12345, updated.UsedQuota)
+	require.True(t, updated.SensitiveWordWhitelist)
+	var session model.UserSession
+	require.NoError(t, db.First(&session, "sid = ?", "managed-enable-stale-session").Error)
+	require.Equal(t, model.UserSessionStatusRevoked, session.Status)
+	require.Equal(t, "sensitive_word_enable", session.RevokedReason)
+	var historyCount int64
+	require.NoError(t, db.Model(&model.SensitiveWordAuditEvent{}).Where("user_id = ?", user.Id).Count(&historyCount).Error)
+	require.EqualValues(t, 1, historyCount, "启用清零不得删除历史审计事件")
+
+	var enableAuditFound bool
+	var enableAuditParams map[string]interface{}
+	var logs []model.Log
+	require.NoError(t, db.Where("type = ?", model.LogTypeManage).Find(&logs).Error)
+	for _, log := range logs {
+		other, parseErr := common.StrToMap(log.Other)
+		if parseErr != nil {
+			continue
+		}
+		op, ok := other["op"].(map[string]interface{})
+		if !ok || op["action"] != "sensitive_word.enable_reset" {
+			continue
+		}
+		enableAuditFound = true
+		enableAuditParams, _ = op["params"].(map[string]interface{})
+		break
+	}
+	require.True(t, enableAuditFound)
+	require.Equal(t, float64(5), enableAuditParams["before"])
+	require.Equal(t, float64(0), enableAuditParams["after"])
+	require.Equal(t, false, enableAuditParams["balance_changed"])
+	require.Equal(t, "user_manage_enable", enableAuditParams["source"])
+
+	// A repeated enable must not advance auth_version or revoke a session that
+	// was created after the first successful reset.
+	require.NoError(t, db.Create(&model.UserSession{
+		SID: "managed-enable-new-session", UserID: user.Id, Version: 1, UserAuthVersion: 3,
+		Status: model.UserSessionStatusActive, RefreshHash: "managed-enable-new-refresh",
+		LoginMethod: "password", LastActiveAt: now, ExpiresAt: now + 3600,
+	}).Error)
+	recorder = performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"enable"}`, user.Id))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	require.EqualValues(t, 3, updated.AuthVersion)
+	session = model.UserSession{}
+	require.NoError(t, db.First(&session, "sid = ?", "managed-enable-new-session").Error)
+	require.Equal(t, model.UserSessionStatusActive, session.Status)
+}
+
+func TestSensitiveWordUnbanEndpointUsesSameEnableResetSemantics(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	user := model.User{
+		Username: "sensitive-unban-reset-user", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusDisabled, Group: "default", AuthVersion: 4,
+		SensitiveWordViolationCount: 3, Quota: 314159, UsedQuota: 2718,
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	recorder := performSensitiveWordUnbanRequest(t, user.Id)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"success":true`)
+	var updated model.User
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	require.Equal(t, common.UserStatusEnabled, updated.Status)
+	require.Zero(t, updated.SensitiveWordViolationCount)
+	require.EqualValues(t, 5, updated.AuthVersion)
+	require.Equal(t, 314159, updated.Quota)
+	require.Equal(t, 2718, updated.UsedQuota)
+
+	var found bool
+	var logs []model.Log
+	require.NoError(t, db.Where("type = ?", model.LogTypeManage).Find(&logs).Error)
+	for _, log := range logs {
+		other, parseErr := common.StrToMap(log.Other)
+		if parseErr != nil {
+			continue
+		}
+		op, ok := other["op"].(map[string]interface{})
+		if !ok || op["action"] != "sensitive_word.enable_reset" {
+			continue
+		}
+		params, _ := op["params"].(map[string]interface{})
+		if params["source"] == "sensitive_word_unban" && params["balance_changed"] == false {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "专用解封入口必须写入统一启用重置审计")
 }
 
 func TestManageUserDemoteAdvancesAuthVersionAndRevokesSessionsOnce(t *testing.T) {

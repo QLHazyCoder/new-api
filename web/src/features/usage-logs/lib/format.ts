@@ -446,6 +446,8 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   sensitive_word_clear_violations:
     'Cleared sensitive-word violations for user {{user_id}}',
   sensitive_word_unban: 'Unbanned sensitive-word user {{user_id}}',
+  'sensitive_word.enable_reset':
+    'Enabled user {{target_user_id}} and reset sensitive-word violations from {{before}} to {{after}}',
   // System settings
   'option.update': 'Updated system setting {{key}}',
   'option.payment_compliance': 'Confirmed payment compliance',

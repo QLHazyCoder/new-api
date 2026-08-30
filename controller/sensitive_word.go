@@ -270,17 +270,41 @@ func ClearSensitiveWordViolations(c *gin.Context) {
 	recordManageAuditFor(c, id, "sensitive_word_clear_violations", map[string]interface{}{"user_id": id})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
+
+func sensitiveWordEnableResetAuditParams(result *model.SensitiveWordEnableResetResult, source string) map[string]interface{} {
+	return map[string]interface{}{
+		"target_user_id":         result.UserID,
+		"status_before":          result.StatusBefore,
+		"status_after":           result.StatusAfter,
+		"before":                 result.ViolationCountBefore,
+		"after":                  result.ViolationCountAfter,
+		"violation_count_before": result.ViolationCountBefore,
+		"violation_count_after":  result.ViolationCountAfter,
+		"auth_version_before":    result.AuthVersionBefore,
+		"auth_version_after":     result.AuthVersionAfter,
+		"quota_before":           result.QuotaBefore,
+		"quota_after":            result.QuotaAfter,
+		"used_quota_before":      result.UsedQuotaBefore,
+		"used_quota_after":       result.UsedQuotaAfter,
+		"status_changed":         result.StatusChanged,
+		"sessions_revoked":       result.SessionsRevoked,
+		"balance_changed":        false,
+		"source":                 source,
+	}
+}
+
 func UnbanSensitiveWordUser(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil || id <= 0 {
 		common.ApiError(c, fmt.Errorf("用户 ID 无效"))
 		return
 	}
-	if err := model.UnbanSensitiveWordUser(id); err != nil {
+	result, err := model.EnableUserAndResetSensitiveWordViolations(id)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	recordManageAuditFor(c, id, "sensitive_word_unban", map[string]interface{}{"user_id": id})
+	recordManageAuditFor(c, id, "sensitive_word.enable_reset", sensitiveWordEnableResetAuditParams(result, "sensitive_word_unban"))
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
