@@ -296,6 +296,7 @@ func migrateDB() error {
 		&SystemTask{},
 		&SystemTaskLock{},
 		&SensitiveWordRule{},
+		&SensitiveWordRuleWord{},
 		&SensitiveWordRuleGroup{},
 		&SensitiveWordWhitelist{},
 		&SensitiveWordAuditEvent{},
@@ -308,6 +309,9 @@ func migrateDB() error {
 		return err
 	}
 	if err := seedRequiredOptions(DB); err != nil {
+		return err
+	}
+	if err := MigrateSensitiveWordData(); err != nil {
 		return err
 	}
 	if err := ReconcileAffiliateCounts(); err != nil {
@@ -332,9 +336,10 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
-
-	var wg sync.WaitGroup
-
+	// SQLite serializes schema changes and an in-memory SQLite database may be
+	// backed by multiple connections. Running AutoMigrate concurrently can
+	// race on CREATE TABLE (and makes startup nondeterministic). Keep the fast
+	// migration path ordered; the rest of startup remains unchanged.
 	migrations := []struct {
 		model interface{}
 		name  string
@@ -372,6 +377,7 @@ func migrateDBFast() error {
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
 		{&SensitiveWordRule{}, "SensitiveWordRule"},
+		{&SensitiveWordRuleWord{}, "SensitiveWordRuleWord"},
 		{&SensitiveWordRuleGroup{}, "SensitiveWordRuleGroup"},
 		{&SensitiveWordWhitelist{}, "SensitiveWordWhitelist"},
 		{&SensitiveWordAuditEvent{}, "SensitiveWordAuditEvent"},
@@ -380,30 +386,15 @@ func migrateDBFast() error {
 		{&CasbinRule{}, "CasbinRule"},
 		{&AuthzRole{}, "AuthzRole"},
 	}
-	// 动态计算migration数量，确保errChan缓冲区足够大
-	errChan := make(chan error, len(migrations))
-
 	for _, m := range migrations {
-		wg.Add(1)
-		go func(model interface{}, name string) {
-			defer wg.Done()
-			if err := DB.AutoMigrate(model); err != nil {
-				errChan <- fmt.Errorf("failed to migrate %s: %v", name, err)
-			}
-		}(m.model, m.name)
-	}
-
-	// Wait for all migrations to complete
-	wg.Wait()
-	close(errChan)
-
-	// Check for any errors
-	for err := range errChan {
-		if err != nil {
-			return err
+		if err := DB.AutoMigrate(m.model); err != nil {
+			return fmt.Errorf("failed to migrate %s: %v", m.name, err)
 		}
 	}
 	if err := seedRequiredOptions(DB); err != nil {
+		return err
+	}
+	if err := MigrateSensitiveWordData(); err != nil {
 		return err
 	}
 	if err := ReconcileAffiliateCounts(); err != nil {

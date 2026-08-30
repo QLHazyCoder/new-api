@@ -2,8 +2,10 @@ package controller
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -19,10 +21,21 @@ func UpdateSensitiveWordConfig(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	previous := model.GetSensitiveWordConfig()
 	if err := model.SaveSensitiveWordConfig(cfg); err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	recordManageAudit(c, "sensitive_word.config_update", map[string]interface{}{
+		"enabled":               cfg.Enabled,
+		"check_prompt":          cfg.CheckPrompt,
+		"mode":                  cfg.Mode,
+		"audit_enabled":         cfg.AuditEnabled,
+		"ban_threshold":         cfg.BanThreshold,
+		"retention_days":        cfg.FullPromptRetentionDays,
+		"max_prompt_runes":      cfg.MaxPromptRunes,
+		"block_message_changed": previous.BlockMessage != cfg.BlockMessage,
+	})
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": model.GetSensitiveWordConfig()})
 }
 func GetSensitiveWordGroups(c *gin.Context) {
@@ -45,11 +58,34 @@ func GetSensitiveWordRules(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rules})
 }
 
+func GetSensitiveWordRule(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		common.ApiError(c, fmt.Errorf("规则 ID 无效"))
+		return
+	}
+	rule, err := model.GetSensitiveWordRuleDetail(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": rule})
+}
+
 type sensitiveRuleRequest struct {
-	Word    string   `json:"word"`
+	Name    string   `json:"name"`
+	Word    string   `json:"word"` // legacy single-word payload
+	Words   []string `json:"words"`
 	Scope   string   `json:"scope"`
 	Groups  []string `json:"groups"`
 	Enabled *bool    `json:"enabled"`
+}
+
+func sensitiveRuleWords(req sensitiveRuleRequest) []string {
+	if len(req.Words) > 0 {
+		return req.Words
+	}
+	return strings.Split(req.Word, "\n")
 }
 
 func CreateSensitiveWordRule(c *gin.Context) {
@@ -58,36 +94,69 @@ func CreateSensitiveWordRule(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	rule, err := model.UpsertSensitiveWordRule(0, req.Word, req.Scope, req.Groups, c.GetInt("id"))
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "未命名规则"
+	}
+	rule, err := model.UpsertSensitiveWordRule(0, name, sensitiveRuleWords(req), req.Scope, req.Groups, c.GetInt("id"), req.Enabled)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	recordManageAudit(c, "sensitive_word_rule.create", map[string]interface{}{"rule_id": rule.ID, "name": rule.Name, "scope": rule.Scope})
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rule})
 }
 func UpdateSensitiveWordRule(c *gin.Context) {
-	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		common.ApiError(c, fmt.Errorf("规则 ID 无效"))
+		return
+	}
 	var req sensitiveRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	rule, err := model.UpsertSensitiveWordRule(id, req.Word, req.Scope, req.Groups, c.GetInt("id"))
+	rule, err := model.UpsertSensitiveWordRule(id, req.Name, sensitiveRuleWords(req), req.Scope, req.Groups, c.GetInt("id"), req.Enabled)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if req.Enabled != nil {
-		model.DB.Model(&model.SensitiveWordRule{}).Where("id = ?", id).Update("enabled", *req.Enabled)
-	}
+	recordManageAudit(c, "sensitive_word_rule.update", map[string]interface{}{"rule_id": id, "name": rule.Name, "scope": rule.Scope, "enabled": rule.Enabled})
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rule})
 }
+
+func SetSensitiveWordRuleStatus(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		common.ApiError(c, fmt.Errorf("规则 ID 无效"))
+		return
+	}
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.SetSensitiveWordRuleEnabled(id, req.Enabled); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "sensitive_word_rule.status", map[string]interface{}{"rule_id": id, "enabled": req.Enabled})
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
 func DeleteSensitiveWordRule(c *gin.Context) {
-	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		common.ApiError(c, fmt.Errorf("规则 ID 无效"))
+		return
+	}
 	if err := model.DeleteSensitiveWordRule(id); err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	recordManageAudit(c, "sensitive_word_rule.delete", map[string]interface{}{"rule_id": id})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -111,19 +180,27 @@ func CreateSensitiveWordWhitelist(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	before := model.IsSensitiveWordWhitelisted(req.UserID)
 	item, err := model.UpsertSensitiveWordWhitelist(req.UserID, c.GetInt("id"), req.Enabled, req.Remark)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	recordManageAuditFor(c, req.UserID, "sensitive_word.whitelist_update", map[string]interface{}{"target_user_id": req.UserID, "before": before, "after": req.Enabled})
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": item})
 }
 func DeleteSensitiveWordWhitelist(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("user_id"))
+	id, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil || id <= 0 {
+		common.ApiError(c, fmt.Errorf("用户 ID 无效"))
+		return
+	}
+	before := model.IsSensitiveWordWhitelisted(id)
 	if err := model.DeleteSensitiveWordWhitelist(id); err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	recordManageAuditFor(c, id, "sensitive_word.whitelist_update", map[string]interface{}{"target_user_id": id, "before": before, "after": false})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 
@@ -168,7 +245,11 @@ func GetSensitiveWordAudits(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"items": events, "total": total, "page": page, "page_size": size}})
 }
 func GetSensitiveWordAudit(c *gin.Context) {
-	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		common.ApiError(c, fmt.Errorf("审计 ID 无效"))
+		return
+	}
 	var event model.SensitiveWordAuditEvent
 	if err := model.DB.First(&event, id).Error; err != nil {
 		common.ApiError(c, err)
@@ -177,21 +258,29 @@ func GetSensitiveWordAudit(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": event})
 }
 func ClearSensitiveWordViolations(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiError(c, fmt.Errorf("用户 ID 无效"))
+		return
+	}
 	if err := model.ClearSensitiveWordViolations(id); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	model.RecordOperationAuditLog(c.GetInt("id"), "clear sensitive word violations", c.ClientIP(), "sensitive_word_clear_violations", map[string]interface{}{"user_id": id}, nil, nil)
+	recordManageAuditFor(c, id, "sensitive_word_clear_violations", map[string]interface{}{"user_id": id})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 func UnbanSensitiveWordUser(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiError(c, fmt.Errorf("用户 ID 无效"))
+		return
+	}
 	if err := model.UnbanSensitiveWordUser(id); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	model.RecordOperationAuditLog(c.GetInt("id"), "unban sensitive word user", c.ClientIP(), "sensitive_word_unban", map[string]interface{}{"user_id": id}, nil, nil)
+	recordManageAuditFor(c, id, "sensitive_word_unban", map[string]interface{}{"user_id": id})
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }
 

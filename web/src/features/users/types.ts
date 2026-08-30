@@ -53,6 +53,8 @@ export const userSchema = z.object({
   inviter_id: z.number().optional(),
   linux_do_id: z.string().optional(),
   status: userStatusSchema,
+  sensitive_word_violation_count: z.number().default(0),
+  sensitive_word_whitelist: z.boolean().default(false),
   role: userRoleSchema,
   created_at: z.number().optional(),
   updated_at: z.number().optional(),
@@ -126,6 +128,8 @@ export interface UserFormData {
   quota?: number // Only used when updating user
   group?: string // Only used when updating user
   remark?: string // Only used when updating user
+  sensitive_word_violation_count?: number // Admin-only content-safety counter
+  sensitive_word_whitelist?: boolean // Admin-only content-safety bypass
   admin_permissions?: AdminPermissionMatrix
 }
 

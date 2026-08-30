@@ -113,7 +113,34 @@ export interface ToolSurchargeItem {
   price: number
 }
 
+export interface KeywordFilterLogData {
+  action?: 'blocked' | 'whitelist_bypass' | 'observe' | string
+  audit_id?: number
+  request_id?: string
+  rule_ids?: number[]
+  rule_names?: string[]
+  matched_words?: string[]
+  scope?: 'global' | 'group' | 'global+group' | string
+  group?: string
+  model?: string
+  endpoint?: string
+  protocol?: string
+  violation_count?: number
+  whitelist_bypassed?: boolean
+  blocked?: boolean
+  auto_banned?: boolean
+  observe_only?: boolean
+  user_status_before?: number
+  user_status_after?: number
+  balance_changed?: boolean
+  prompt_hash?: string
+  rule_version?: number
+}
+
 export interface LogOtherData {
+  action?: string
+  audit_id?: number
+  keyword_filter?: KeywordFilterLogData
   admin_info?: {
     is_multi_key?: boolean
     multi_key_index?: number

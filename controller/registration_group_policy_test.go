@@ -42,6 +42,9 @@ func (p *registrationGroupTestProvider) SetProviderUserID(user *model.User, prov
 	user.GitHubId = providerUserID
 }
 func (p *registrationGroupTestProvider) GetProviderPrefix() string { return "github_" }
+func (p *registrationGroupTestProvider) ProviderUserIDColumn() string {
+	return "github_id"
+}
 
 func setupRegistrationGroupControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()

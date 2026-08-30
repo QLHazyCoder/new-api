@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -727,7 +729,10 @@ func buildUserModelOptions(models []string) []dto.UserModelOption {
 
 func UpdateUser(c *gin.Context) {
 	var updatedUser model.User
-	err := common.DecodeJson(c.Request.Body, &updatedUser)
+	body, err := io.ReadAll(c.Request.Body)
+	if err == nil {
+		err = json.Unmarshal(body, &updatedUser)
+	}
 	if err != nil || updatedUser.Id == 0 {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
@@ -747,6 +752,19 @@ func UpdateUser(c *gin.Context) {
 	originUser, err := model.GetUserById(updatedUser.Id, false)
 	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	var supplied map[string]json.RawMessage
+	if err := json.Unmarshal(body, &supplied); err == nil {
+		if _, ok := supplied["sensitive_word_violation_count"]; !ok {
+			updatedUser.SensitiveWordViolationCount = originUser.SensitiveWordViolationCount
+		}
+		if _, ok := supplied["sensitive_word_whitelist"]; !ok {
+			updatedUser.SensitiveWordWhitelist = originUser.SensitiveWordWhitelist
+		}
+	}
+	if updatedUser.SensitiveWordViolationCount < 0 {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
 	if updatedUser.Role != common.RoleGuestUser && updatedUser.Role != originUser.Role {
@@ -792,9 +810,31 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 	recordManageAuditFor(c, updatedUser.Id, "user.update", map[string]interface{}{
-		"username": originUser.Username,
-		"id":       updatedUser.Id,
+		"username":                              originUser.Username,
+		"id":                                    updatedUser.Id,
+		"sensitive_word_violation_count_before": originUser.SensitiveWordViolationCount,
+		"sensitive_word_violation_count_after":  updatedUser.SensitiveWordViolationCount,
+		"sensitive_word_whitelist_before":       originUser.SensitiveWordWhitelist,
+		"sensitive_word_whitelist_after":        updatedUser.SensitiveWordWhitelist,
 	})
+	if originUser.SensitiveWordViolationCount != updatedUser.SensitiveWordViolationCount {
+		action := "sensitive_word.violations_update"
+		if originUser.SensitiveWordViolationCount > 0 && updatedUser.SensitiveWordViolationCount == 0 {
+			action = "sensitive_word.violations_clear"
+		}
+		recordManageAuditFor(c, updatedUser.Id, action, map[string]interface{}{
+			"target_user_id": updatedUser.Id,
+			"before":         originUser.SensitiveWordViolationCount,
+			"after":          updatedUser.SensitiveWordViolationCount,
+		})
+	}
+	if originUser.SensitiveWordWhitelist != updatedUser.SensitiveWordWhitelist {
+		recordManageAuditFor(c, updatedUser.Id, "sensitive_word.whitelist_update", map[string]interface{}{
+			"target_user_id": updatedUser.Id,
+			"before":         originUser.SensitiveWordWhitelist,
+			"after":          updatedUser.SensitiveWordWhitelist,
+		})
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

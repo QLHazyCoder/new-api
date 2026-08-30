@@ -212,3 +212,77 @@ func TestManageUserQuotaModesPersistExpectedValues(t *testing.T) {
 		assert.Equal(t, test.want, stored.Quota)
 	}
 }
+
+func TestUpdateUserPersistsSensitiveWordControlsWithoutChangingQuota(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, authz.Init(db))
+	user := model.User{
+		Username:    "safety-controls-user",
+		Password:    "password",
+		DisplayName: "before",
+		Role:        common.RoleCommonUser,
+		Status:      common.UserStatusEnabled,
+		Group:       "default",
+		Quota:       7654321,
+		AffCode:     "sensitive-controls-aff",
+		AuthVersion: 1,
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/user/", strings.NewReader(fmt.Sprintf(`{
+		"id": %d,
+		"username": "safety-controls-user",
+		"display_name": "after",
+		"group": "default",
+		"remark": "content-safety review",
+		"sensitive_word_violation_count": 4,
+		"sensitive_word_whitelist": true,
+		"quota": 0
+	}`, user.Id)))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", 9999)
+	ctx.Set("role", common.RoleRootUser)
+	ctx.Set("username", "root-operator")
+
+	UpdateUser(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"success":true`, recorder.Body.String())
+	var updated model.User
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	require.Equal(t, 4, updated.SensitiveWordViolationCount)
+	require.True(t, updated.SensitiveWordWhitelist)
+	require.Equal(t, 7654321, updated.Quota, "用户编辑内容安全字段不得修改余额或内部额度")
+
+	var auditLogs []model.Log
+	require.NoError(t, db.Where("type = ?", model.LogTypeManage).Find(&auditLogs).Error)
+	var auditContent string
+	for _, log := range auditLogs {
+		auditContent += log.Other
+	}
+	require.Contains(t, auditContent, "sensitive_word.violations_update")
+	require.Contains(t, auditContent, "sensitive_word.whitelist_update")
+
+	recorder = httptest.NewRecorder()
+	ctx, _ = gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/user/", strings.NewReader(fmt.Sprintf(`{
+		"id": %d,
+		"username": "safety-controls-user",
+		"display_name": "after",
+		"group": "default"
+	}`, user.Id)))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", 9999)
+	ctx.Set("role", common.RoleRootUser)
+	ctx.Set("username", "root-operator")
+	UpdateUser(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"success":true`, recorder.Body.String())
+	require.NoError(t, db.First(&updated, user.Id).Error)
+	require.Equal(t, 4, updated.SensitiveWordViolationCount, "兼容旧客户端时省略字段必须保留已有违规次数")
+	require.True(t, updated.SensitiveWordWhitelist, "兼容旧客户端时省略字段必须保留已有白名单状态")
+}

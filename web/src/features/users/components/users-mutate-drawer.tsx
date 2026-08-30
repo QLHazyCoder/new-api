@@ -30,6 +30,7 @@ import {
   sideDrawerFooterClassName,
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
+  sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -61,6 +62,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
   ADMIN_PERMISSION_ACTIONS,
@@ -445,6 +447,76 @@ export function UsersMutateDrawer({
                           />
                         </FormControl>
                         <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </SideDrawerSection>
+              )}
+
+              {/* Content Safety (administrator-managed, update only) */}
+              {isUpdate && (
+                <SideDrawerSection>
+                  <h3 className='text-sm font-medium'>内容安全</h3>
+                  <p className='text-muted-foreground text-xs'>
+                    违规次数可由管理员修正或清零；白名单用户命中后放行，但仍会写入关键词拦截日志。
+                  </p>
+
+                  <FormField
+                    control={form.control}
+                    name='sensitive_word_violation_count'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>敏感词违规次数</FormLabel>
+                        <div className='flex gap-2'>
+                          <FormControl>
+                            <Input
+                              type='number'
+                              min={0}
+                              step={1}
+                              value={field.value ?? 0}
+                              onChange={(event) =>
+                                field.onChange(
+                                  Math.max(
+                                    0,
+                                    Number.parseInt(event.target.value, 10) || 0
+                                  )
+                                )
+                              }
+                            />
+                          </FormControl>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            onClick={() => field.onChange(0)}
+                          >
+                            清零
+                          </Button>
+                        </div>
+                        <FormDescription>
+                          只修改当前计数，历史关键词拦截日志会保留。
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='sensitive_word_whitelist'
+                    render={({ field }) => (
+                      <FormItem className={sideDrawerSwitchItemClassName()}>
+                        <div className='flex flex-col gap-0.5'>
+                          <FormLabel className='!mt-0'>敏感词白名单</FormLabel>
+                          <FormDescription className='text-xs'>
+                            命中后继续请求，不增加违规次数，但仍记录日志。
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch
+                            checked={field.value === true}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
                       </FormItem>
                     )}
                   />

@@ -124,6 +124,21 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			delete(otherMap, "admin_info")
 			// Remove operation-audit details (operator/route info), admin-only.
 			delete(otherMap, "audit_info")
+			// Sensitive-word evidence (matched words, rules, prompt hash and the
+			// audit identifier) is admin-only. Token owners can still see the
+			// policy outcome and their current count without learning the rule set.
+			if filter, ok := otherMap["keyword_filter"].(map[string]interface{}); ok {
+				otherMap["keyword_filter"] = map[string]interface{}{
+					"action":             filter["action"],
+					"blocked":            filter["blocked"],
+					"whitelist_bypassed": filter["whitelist_bypassed"],
+					"observe_only":       filter["observe_only"],
+					"violation_count":    filter["violation_count"],
+					"auto_banned":        filter["auto_banned"],
+					"balance_changed":    false,
+				}
+				delete(otherMap, "audit_id")
+			}
 			// delete(otherMap, "reject_reason")
 			// delete(otherMap, "stream_status")
 		}

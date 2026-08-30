@@ -49,6 +49,17 @@ var auditContentTemplates = map[string]string{
 
 	"subscription.plan_reset":      "Reset active subscriptions for plan ${plan_id}",
 	"subscription.user_plan_reset": "Reset active plan ${plan_id} subscriptions for user ${target_user_id}",
+
+	"sensitive_word.config_update":     "Updated sensitive-word policy (mode ${mode}, threshold ${ban_threshold})",
+	"sensitive_word_rule.create":       "Created sensitive-word rule ${name} (ID: ${rule_id})",
+	"sensitive_word_rule.update":       "Updated sensitive-word rule ${name} (ID: ${rule_id})",
+	"sensitive_word_rule.status":       "Changed sensitive-word rule ${rule_id} status to ${enabled}",
+	"sensitive_word_rule.delete":       "Deleted sensitive-word rule ${rule_id}",
+	"sensitive_word_clear_violations":  "Cleared sensitive-word violations for user ${user_id}",
+	"sensitive_word_unban":             "Unbanned sensitive-word user ${user_id}",
+	"sensitive_word.violations_update": "Updated sensitive-word violations for user ${target_user_id} from ${before} to ${after}",
+	"sensitive_word.violations_clear":  "Cleared sensitive-word violations for user ${target_user_id} (${before} to ${after})",
+	"sensitive_word.whitelist_update":  "Updated sensitive-word whitelist for user ${target_user_id} from ${before} to ${after}",
 }
 
 // auditContentEN 按 action 模板渲染英文兜底文本；未登记的 action 退回 action 本身。

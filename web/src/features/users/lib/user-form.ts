@@ -41,6 +41,8 @@ export const userFormSchema = z.object({
   quota_dollars: z.number().min(0).optional(),
   group: z.string().optional(),
   remark: z.string().optional(),
+  sensitive_word_violation_count: z.number().int().min(0).optional(),
+  sensitive_word_whitelist: z.boolean().optional(),
   admin_permissions: z
     .record(z.string(), z.record(z.string(), z.boolean()))
     .optional(),
@@ -60,6 +62,8 @@ export const USER_FORM_DEFAULT_VALUES: UserFormValues = {
   quota_dollars: 0,
   group: DEFAULT_GROUP,
   remark: '',
+  sensitive_word_violation_count: 0,
+  sensitive_word_whitelist: false,
   // Filled against the backend catalog at render time; see UsersMutateDrawer.
   admin_permissions: {},
 }
@@ -101,6 +105,9 @@ export function transformFormDataToPayload(
     // For update: quota is adjusted atomically via /api/user/manage, not sent here
     payload.group = data.group
     payload.remark = data.remark || undefined
+    payload.sensitive_word_violation_count =
+      data.sensitive_word_violation_count ?? 0
+    payload.sensitive_word_whitelist = data.sensitive_word_whitelist === true
     payload.id = userId
   }
 
@@ -121,6 +128,8 @@ export function transformUserToFormDefaults(user: User): UserFormValues {
     quota_dollars: quotaUnitsToDollars(user.quota),
     group: user.group || DEFAULT_GROUP,
     remark: user.remark || '',
+    sensitive_word_violation_count: user.sensitive_word_violation_count ?? 0,
+    sensitive_word_whitelist: user.sensitive_word_whitelist === true,
     admin_permissions: user.admin_permissions ?? {},
   }
 }

@@ -161,6 +161,29 @@ export function useUsersColumns(): ColumnDef<User>[] {
       meta: { mobileBadge: true },
     },
     {
+      accessorKey: 'sensitive_word_violation_count',
+      header: '敏感词违规',
+      cell: ({ row }) => {
+        const count = row.original.sensitive_word_violation_count ?? 0
+        const whitelist = row.original.sensitive_word_whitelist === true
+        return (
+          <div className='flex flex-wrap items-center gap-1'>
+            <StatusBadge
+              label={`${count} 次`}
+              variant={count > 0 ? 'orange' : 'neutral'}
+              copyable={false}
+            />
+            {whitelist && (
+              <StatusBadge label='白名单' variant='success' copyable={false} />
+            )}
+          </div>
+        )
+      },
+      enableSorting: false,
+      size: 150,
+      meta: { mobileOrder: 35, mobileBadge: true },
+    },
+    {
       id: 'quota',
       accessorKey: 'quota',
       header: t('Quota'),

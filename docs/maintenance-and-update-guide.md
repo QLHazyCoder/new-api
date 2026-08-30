@@ -1,152 +1,158 @@
 # new-api 维护与更新指南
 
-本文档面向后续维护、排障和版本更新。所有路径均以 `/opt/qlh-main/new-api` 为代码根目录；线上部署文件位于 `/opt/qlh-main/deploy`，公网入口位于 `/opt/qlh-main/caddy`。
+本文档面向后续维护、排障和版本更新。代码根目录为 /opt/qlh-main/new-api；线上发布脚本位于 /opt/qlh-main/deploy；公网入口配置位于 /opt/qlh-main/caddy。
+
+敏感词子系统的完整架构、字段和接口见 [sensitive-word-content-audit-redesign.md](./sensitive-word-content-audit-redesign.md)。任何修改该功能的提交都必须同步更新那份文档和 [sensitive-word-refactor-checklist.md](./sensitive-word-refactor-checklist.md)。
 
 ## 1. 项目边界
 
-- `controller/`：HTTP/API 入口和权限校验。
-- `model/`：数据库模型、迁移、配置和事务逻辑。
-- `service/`：跨模块业务服务、后台任务和运行时策略。
-- `relay/`：OpenAI、Claude、Gemini 等协议解析、模型路由和上游调用。
-- `web/src/`：当前唯一前端，不要恢复 `web/classic` 或 `web/default`。
-- `.github/workflows/docker-build.yml`：推送 `main` 后构建并发布 amd64、arm64 和多架构 GHCR 镜像。
+- controller/：HTTP/API 入口、权限校验和协议响应。
+- model/：数据库模型、迁移、事务、Option 和运行时数据。
+- service/：跨模块业务服务、后台任务和运行时策略。
+- relay/ 与 relaykit/：协议解析、提示词提取、上游调用和错误契约；relaykit 是独立 Go 模块。
+- web/src/：当前前端。不要恢复 web/classic 或 web/default。
+- .github/workflows/docker-build.yml：main 推送后的 amd64、arm64 和多架构镜像构建。
+- docs/：架构、兼容、排障、发布和保护清单。文档属于同一交付，不在发布后补写。
 
-自研功能保护边界见 [custom-feature-preservation-checklist.md](./custom-feature-preservation-checklist.md)。合并上游正式标签前，必须先阅读该清单和对应的 `upstream-merge-*.md` 审计记录。
+自研功能保护边界见 [custom-feature-preservation-checklist.md](./custom-feature-preservation-checklist.md)。合并上游时只选正式标签，并先完成对应上游审计记录；不得直接合并上游 main、alpha、beta、preview 或 nightly。
 
-## 2. 敏感词与内容审计
+## 2. 敏感词与内容审计维护
 
-### 2.1 代码入口
+### 2.1 正确的管理入口
 
-请求统一在 [controller/relay.go](../controller/relay.go) 的预扣费、计费和上游请求之前调用 `model.CheckSensitiveRequest`。命中后：
+敏感词策略页只管理策略和规则。它不显示命中记录、白名单清单、用户违规历史或完整提示词。
 
-1. 从规范化提示词生成哈希、脱敏摘要和长度受限的完整提示词。
-2. 匹配全局规则及当前分组的局部规则；旧 `setting.SensitiveWords` 仅作为迁移期回退。
-3. 写入主数据库审计事件，并写入使用日志类型 8“关键词拦截”。
-4. 白名单用户记录但继续请求，不增加违规次数。
-5. 非白名单用户按用户行锁累计历史命中；达到配置阈值时封禁、保留主余额、递增 `auth_version` 并失效缓存。
+- 规则：系统设置中的敏感词策略页。
+- 违规次数和白名单：用户管理的用户编辑右抽屉，内容安全区。
+- 命中记录和完整提示词：使用日志，类型 8“关键词拦截”的详情抽屉。
 
-### 2.2 数据表
+不要创建第二个白名单页面或审计页面，否则同一状态会出现多个编辑入口并引入不一致。
 
-| 表 | 作用 |
-| --- | --- |
-| `sensitive_word_rules` | 全局/局部敏感词规则 |
-| `sensitive_word_rule_groups` | 局部规则与分组定价名称的绑定 |
-| `sensitive_word_user_whitelists` | 按用户 ID 的白名单 |
-| `sensitive_word_audit_events` | 误判复核的唯一证据来源 |
-| `options` 的 `SensitiveWordConfig` | 开关、提示、封禁阈值和保留策略 |
+### 2.2 运行时边界
 
-审计列表接口不会返回 `full_prompt`；完整提示词只允许管理员详情接口读取。保留任务会清空过期提示词和摘要，但保留命中计数与审计元数据。
+Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检查提示词。正常用户命中后返回 403；这类请求不能产生预扣费、消费日志或上游请求。
 
-### 2.3 管理接口
+白名单命中和观察模式命中仍写一条类型 8 日志与主库审计事件，但不会增加用户违规次数。第五次有效拦截禁用用户并撤销会话。任何敏感词路径都不得修改 users.quota、充值记录、历史消费或内部余额。
 
-统一前缀：`/api/sensitive-words`，全部要求管理员权限。
+规则变更必须通过敏感词管理 API 或页面进行。规则操作会立即刷新当前进程的匹配器；策略配置有五秒本地缓存，但通过页面/API 保存会立即失效。不要用直接 SQL 修改规则、配置、用户白名单或违规次数。
 
-- `GET/PUT /config`：读取或保存策略配置。
-- `GET /stats`：规则、白名单和今日命中统计。
-- `GET/POST/PUT/DELETE /rules`：规则管理。
-- `GET /groups`：只返回分组定价中的候选分组。
-- `GET/POST/DELETE /whitelist`：用户白名单管理。
-- `GET /audits`、`GET /audits/:id`：审计列表和管理员详情。
-- `POST /users/:id/clear-violations`：清理违规记录，必须明确操作。
-- `POST /users/:id/unban`：解封并刷新认证版本。
+### 2.3 误判排查步骤
 
-排查误判时，先用请求 ID或用户 ID筛选列表，再查看管理员详情中的完整提示词、命中词、规则版本、白名单状态和封禁结果。不要把完整提示词写入普通日志或聊天记录。
+1. 在使用日志按关键词拦截类型和 request_id 查找事件。
+2. 管理员打开详情，核对实际分组、规则 ID/名称、命中词、匹配片段、白名单、观察/拦截状态和当前次数。
+3. 需要复核语义时，查看完整规范化提示词；普通用户日志不会也不应看到它。
+4. 确认规则或绑定分组有误后先修正规则，再到用户编辑抽屉修改或清零违规次数。
+5. 不要删除单条使用日志或审计事件来处理误判。历史证据和操作审计必须保留。
+6. 用户第五次后仍可调用时，检查 users.status、auth_version、user_sessions 撤销状态和认证缓存。
 
-## 3. 常用排障路径
+审计详情没有完整提示词通常有两种原因：管理员关闭了“保存完整审计证据”，或证据已超过保留期被清理任务清空。清理只清空 full_prompt 和 redacted_preview，不删除审计元数据。
 
-### 3.1 代码与工作区
+### 2.4 旧配置与迁移
 
-```bash
-git status --short --branch
-git log -5 --oneline --decorate
-git diff --check
-```
+旧 SensitiveWords Option 在第一次启动时导入独立规则表。成功后写 SensitiveWordRulesMigrationVersion=1，新的规则表成为权威来源，删除导入规则不会重新回退旧词库。
 
-确认没有未授权改动后，再进行构建、合并或发布。不要使用 `git reset --hard`、`git checkout --` 清理用户改动。
+若旧 Option 含有超过新限制的词条，迁移会保留兼容匹配、不写完成标记并在系统日志提示；这不会阻断服务，但管理员必须在规则编辑器中修正旧数据。不要手工删除迁移标记或旧 Option，除非已按架构文档完成迁移复核。
 
-### 3.2 线上实例
+### 2.5 数据库和日志库
 
-```bash
-docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
-grep -oE 'new-api-(blue|green):3000' /opt/qlh-main/caddy/Caddyfile | head -n1
-curl -k -sS https://api.qlhazycoder.top/api/status
-```
+审计事件表始终位于主数据库，支持 SQLite、MySQL 和 PostgreSQL。类型 8 使用日志仍位于 LOG_DB；当 LOG_DB 是 ClickHouse 时，日志表不需要额外列迁移，因为类型是整数。
 
-当前公网流量槽位必须从 `Caddyfile` 实时读取。`new-api-blue` 和 `new-api-green` 共用 MySQL、Redis 和 `/data/new-api`，不要同时进行不兼容的数据库迁移。
+上线前重点检查：
 
-### 3.3 敏感词问题定位
+- MySQL：旧 sensitive_word_rules.word 列保持 VARCHAR(200) 及索引，新多词条存于子表。
+- PostgreSQL：保留 group 和 key 等保留字的现有引号策略。
+- SQLite：快速迁移顺序执行，避免内存 SQLite 并发建表。
+- ClickHouse：确认 logs 表已有 type、request_id 和 other；类型 8 不改变表结构。
 
-按以下顺序查找：
+## 3. 代码与工作区检查
 
-1. 管理页面规则是否启用、范围是否正确、局部分组是否仍存在于分组定价。
-2. `request_id` 是否同时出现在审计表和使用日志 `Other.audit_id`。
-3. 审计事件的 `whitelist_bypassed`、`blocked`、`violation_count` 和 `rule_version`。
-4. 用户状态、`quota`、`auth_version` 和认证缓存是否一致。
-5. Relay 日志是否在预扣费前返回 `SensitiveWordsDetected`。
+执行任何变更、合并或发布前：
 
-如果是误判，不要直接删除单条证据；由管理员审核后使用清理违规记录接口，并保留管理审计日志。
+    cd /opt/qlh-main/new-api
+    git status --short --branch
+    git log -5 --oneline --decorate
+    git diff --check
+
+不要用 git reset --hard 或 git checkout -- 清理不属于当前任务的改动。发现非本次变更时，先保留并判断是否影响当前工作。
+
+敏感词改动至少执行：
+
+    gofmt -w <changed-go-files>
+    go test ./model -run 'Test(MigrateSensitiveWordData|SaveSensitiveWordConfig|SensitiveWord)' -count=1
+    go test ./controller -run 'Test(SensitiveWordAuditListRedactsFullPrompt|RelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery|UpdateUserPersistsSensitiveWordControlsWithoutChangingQuota)' -count=1
+    go test ./...
+    go build ./...
+
+    cd relaykit
+    go test ./... -count=1
+    go build ./...
+
+    cd ../web
+    npm run typecheck
+    npm run build:check
+    npm run lint
+    npm test
+
+还要检查：没有乱码或 replacement character；列表没有完整提示词；普通用户日志没有 audit_id/命中词；白名单不影响计数以外的用户属性；任何自动封禁路径不写 quota。
 
 ## 4. 标准更新流程
 
 ### 4.1 更新前检查
 
-1. 阅读本文件、[custom-feature-preservation-checklist.md](./custom-feature-preservation-checklist.md) 和目标上游正式标签审计文档。
-2. 只选择正式发布标签；不得直接合并上游 `main`、alpha、beta、preview 或 nightly。
-3. 确认本地 `main` 工作区干净、目标提交已推送，且 GitHub Actions 的构建、镜像推送和多架构 manifest 全部成功。
-4. 记录当前公网状态、在线槽位、镜像 revision 和回滚目标。
+1. 阅读本文件、自研功能保护清单和目标正式标签的上游审计文档。
+2. 确认本地 main 工作区干净，目标提交已推送。
+3. 等待 GitHub Actions 的构建、镜像推送和多架构 manifest 全部成功。
+4. 记录当前在线槽位、运行镜像 revision、容器状态和回滚目标。
+5. 对包含数据库迁移的版本，先确认迁移幂等且旧在线槽位可继续读取新字段。
 
 ### 4.2 蓝绿发布
 
-线上标准脚本位于 `/opt/qlh-main/deploy`：
+标准脚本位于 /opt/qlh-main/deploy：
 
-```bash
-bash /opt/qlh-main/deploy/update-new-api-standby.sh
-bash /opt/qlh-main/deploy/switch-new-api.sh
-```
+    bash /opt/qlh-main/deploy/update-new-api-standby.sh
+    bash /opt/qlh-main/deploy/switch-new-api.sh
 
-脚本顺序不可颠倒：
+脚本顺序不能颠倒：
 
-1. 从 `Caddyfile` 判断在线槽位。
-2. 只拉取和重建备用槽位，不停止在线槽位。
-3. 等待备用容器健康，并检查其 `/api/status`。
+1. 从 Caddyfile 读取当前在线槽位。
+2. 只拉取和重建备用槽位，不能停止在线槽位。
+3. 等待备用容器健康并检查其 /api/status。
 4. 再次确认公网旧槽位健康。
 5. 修改 Caddy 上游并验证、平滑 reload。
-6. 立即检查公网 `/api/status` 和根路径 HTTP 状态。
-7. 保留旧槽位作为回滚入口，观察稳定后再按运维决定停止。
+6. 检查公网 /api/status 和根路径 HTTP 状态。
+7. 保留旧槽位作为回滚入口，观察稳定后再由运维决定停止。
 
-备用实例启动可能执行共享数据库迁移。新增表或字段必须确认迁移幂等且向后兼容后才能继续；发现启动日志有迁移、数据库或健康检查错误时，不切流量。
+备用实例可能执行共享数据库迁移。任何迁移、数据库连接或健康检查错误都意味着不能切流量。
 
-### 4.3 失败回滚
+### 4.3 敏感词功能上线后核对
 
-切流后任一公网健康检查失败，立即把 `Caddyfile` 恢复到切流前槽位并 reload Caddy；不要先重建或删除旧槽位。回滚后再次检查公网 `/api/status`、根路径和两个容器健康状态，并保留失败日志。
+切流后使用管理员 API 或页面做最小验证，不向真实用户发送违规请求：
 
-## 5. 验收门禁
+1. 打开敏感词策略页，确认规则数量、分组多选和默认提示显示正确。
+2. 创建临时本地测试用户和临时规则，在非生产流量环境验证一次观察模式日志。
+3. 确认类型 8 日志详情能读取审计事件，普通用户日志不显示完整词条。
+4. 确认用户抽屉能编辑违规次数和白名单，且修改后 quota 不变。
+5. 删除临时规则和测试用户时保留必要操作审计。
 
-代码提交前至少执行：
+生产环境若无法安全创建临时测试数据，只做只读检查：页面加载、路由鉴权、数据库表存在、日志详情权限和容器健康。
 
-```bash
-gofmt -w <changed-go-files>
-go build ./...
-go test ./model -run 'Test(NormalizeSensitiveWord|TruncateSensitivePrompt)$'
-git diff --check
-```
+### 4.4 失败回滚
 
-前端变更执行：
+切流后任何公网健康检查失败，立即将 Caddyfile 恢复到切流前槽位并 reload Caddy。不要先删除、重建或停止旧槽位。
 
-```bash
-cd web
-npm run build
-```
+回滚后检查：
 
-还要检查：
+    docker ps --format '{{.Names}}	{{.Image}}	{{.Status}}'
+    grep -oE 'new-api-(blue|green):3000' /opt/qlh-main/caddy/Caddyfile | head -n1
+    curl -k -sS https://api.qlhazycoder.top/api/status
 
-- 文本按 UTF-8 解码，无 Unicode replacement character 或乱码。
-- 没有真实冲突标记、无意删除保护功能、无 `web/classic`/`web/default` 回流。
-- 列表接口不返回完整提示词，白名单不泄露用户密码字段。
-- 更新 `main` 后 GitHub Actions 的两个架构构建、manifest、签名和镜像标签全部成功。
+数据库新增字段、规则和审计数据不应在代码回滚时删除。关闭敏感词策略或改为观察模式是可逆的业务回退，优先于删除数据。
 
-全量测试若因已有 SQLite 迁移测试夹具并发建表失败，必须在提交文档中记录具体失败表和测试名，不得把它误报为敏感词逻辑通过。
+## 5. 变更记录要求
 
-## 6. 变更记录要求
+每次修改敏感词字段、规则语义、管理接口、迁移、权限、日志结构、错误文案、测试或发布流程时：
 
-每次新增敏感词字段、规则语义、管理接口、迁移、排障结论或发布流程，都要在同一提交更新本文件，并同步更新保护清单或对应的上游合并审计文档。提交信息应说明是功能、修复、文档还是上游合并，避免把部署操作和代码合并混在一个不可追踪的提交中。
+1. 同一提交更新敏感词架构文档和开发清单。
+2. 记录实际验证命令和失败原因；不要把未运行的验证写成通过。
+3. 代码提交、镜像发布和线上部署分别留下可追踪记录。
+4. 涉及余额的代码审查必须显式确认：敏感词路径没有 quota 写操作。

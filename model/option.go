@@ -386,6 +386,12 @@ func updateOptionMap(key string, value string) (err error) {
 	}
 
 	common.OptionMap[key] = value
+	if key == "SensitiveWords" || key == "SensitiveWordConfig" {
+		// The legacy option remains writable during the transition period.
+		// Invalidate the local matcher/config snapshot when it changes so an
+		// administrator does not need to restart the relay process.
+		invalidateSensitiveWordRuntime()
+	}
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
 	if handleConfigUpdate(key, value) {

@@ -101,7 +101,7 @@ function buildDetailSegments(
   t: (key: string, opts?: Record<string, unknown>) => string,
   isAdmin: boolean
 ): DetailSegment[] {
-  const segments = buildTypeDetailSegments(log, other, t)
+  const segments = buildTypeDetailSegments(log, other, t, isAdmin)
   // Quota saturation is a rare, admin-only anomaly marker; surface it first
   // and in danger styling so it stands out on the related billing log. The
   // backend already strips admin_info for non-admins; gate on isAdmin too as
@@ -115,7 +115,8 @@ function buildDetailSegments(
 function buildTypeDetailSegments(
   log: UsageLog,
   other: LogOtherData | null,
-  t: (key: string, opts?: Record<string, unknown>) => string
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  isAdmin: boolean
 ): DetailSegment[] {
   // Audit (type=3) and login (type=7) logs: render localized content from the
   // structured op descriptor instead of the raw (English-fallback) content.
@@ -126,6 +127,38 @@ function buildTypeDetailSegments(
 
   if (log.type === 6) {
     return [{ text: t('Async task refund') }]
+  }
+
+  if (log.type === 8) {
+    const filter = other?.keyword_filter
+    let action = '关键词命中记录'
+    if (filter?.whitelist_bypassed) {
+      action = '白名单放行'
+    } else if (filter?.observe_only) {
+      action = '观察记录'
+    } else if (filter?.blocked) {
+      action = '关键词已拦截'
+    }
+    const segments: DetailSegment[] = [
+      { text: action, danger: filter?.blocked === true },
+    ]
+    if (typeof filter?.violation_count === 'number') {
+      segments.push({
+        text: `当前违规次数：${filter.violation_count}`,
+        muted: true,
+      })
+    }
+    if (filter?.auto_banned) {
+      segments.push({ text: '已自动封禁账号', danger: true })
+    }
+    if (
+      isAdmin &&
+      Array.isArray(filter?.matched_words) &&
+      filter.matched_words.length > 0
+    ) {
+      segments.push({ text: filter.matched_words.join('、'), muted: true })
+    }
+    return segments
   }
 
   if (log.type !== 2) return []

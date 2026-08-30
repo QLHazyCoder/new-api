@@ -91,8 +91,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
-			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
-			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			if newAPIError.GetErrorCode() == types.ErrorCodeSensitiveWordsDetected {
+				// An intentional policy block is already represented by log type 8.
+				// Do not emit a second error-level relay record for the same request.
+				logger.LogInfo(c, "sensitive word request blocked")
+			} else {
+				logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
+			}
+			// The sensitive-word message is administrator-configured policy text.
+			// Keep it byte-for-byte consistent across OpenAI, Claude and Gemini
+			// responses instead of appending a transport request ID.
+			if newAPIError.GetErrorCode() != types.ErrorCodeSensitiveWordsDetected {
+				newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -137,17 +148,28 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 
 	if needSensitiveCheck && meta != nil {
-		result, checkErr := model.CheckSensitiveRequest(model.SensitiveCheckInput{
+		candidateGroups := []string{relayInfo.UsingGroup}
+		if relayInfo.TokenGroup == "auto" {
+			candidateGroups = service.GetRequestAutoGroups(c, relayInfo.UserGroup)
+		}
+		result, checkErr := model.CheckSensitiveRequestForGroups(model.SensitiveCheckInput{
 			RequestID: c.GetString(common.RequestIdKey), UserID: relayInfo.UserId, Username: c.GetString("username"),
-			TokenID: relayInfo.TokenId, GroupName: relayInfo.UsingGroup, ModelName: relayInfo.OriginModelName,
-			Endpoint: relayInfo.RequestURLPath, Protocol: string(relayInfo.RelayFormat), Prompt: meta.CombineText,
-		})
+			TokenID: relayInfo.TokenId, TokenName: c.GetString("token_name"), GroupName: relayInfo.UsingGroup, ModelName: relayInfo.OriginModelName,
+			// Audit records keep only the URL path. Query strings can contain
+			// caller-supplied secrets and are not needed to review a policy hit.
+			Endpoint: c.Request.URL.Path, Protocol: string(relayInfo.RelayFormat), Prompt: meta.CombineText,
+		}, candidateGroups)
 		if checkErr != nil {
 			logger.LogWarn(c, "sensitive word audit failed: "+checkErr.Error())
-		} else if result != nil && result.Matched {
-			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(result.MatchedWords, ", ")))
+			if result == nil || !result.Matched || !result.Blocked {
+				newAPIError = types.NewErrorWithStatusCode(errors.New("敏感词审计暂时不可用，请稍后重试"), types.ErrorCodeQueryDataError, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+				return
+			}
+		}
+		if result != nil && result.Matched {
+			logger.LogWarn(c, "sensitive word policy matched")
 			if result.Blocked {
-				newAPIError = types.NewError(errors.New(result.Message), types.ErrorCodeSensitiveWordsDetected, types.ErrOptionWithStatusCode(http.StatusForbidden))
+				newAPIError = types.NewOpenAIError(errors.New(result.Message), types.ErrorCodeSensitiveWordsDetected, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 				return
 			}
 		}
