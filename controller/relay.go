@@ -68,6 +68,14 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 	return err
 }
 
+// Observation mode is explicitly non-blocking. If the policy matched but the
+// audit row could not be persisted, let the request continue and keep the
+// storage failure visible in the service logs. Blocking mode remains fail
+// closed so an audit outage cannot become a policy bypass.
+func shouldAllowSensitiveAuditFailure(result *model.SensitiveCheckResult, err error) bool {
+	return result != nil && result.Matched && result.ObserveOnly && errors.Is(err, model.ErrSensitiveWordAuditPersistence)
+}
+
 func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	requestId := c.GetString(common.RequestIdKey)
@@ -161,7 +169,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}, candidateGroups)
 		if checkErr != nil {
 			logger.LogWarn(c, "sensitive word audit failed: "+checkErr.Error())
-			if result == nil || !result.Matched || !result.Blocked {
+			if shouldAllowSensitiveAuditFailure(result, checkErr) {
+				logger.LogWarn(c, "sensitive word audit unavailable in observe mode; continuing request")
+			} else if result == nil || !result.Matched || !result.Blocked {
 				newAPIError = types.NewErrorWithStatusCode(errors.New("敏感词审计暂时不可用，请稍后重试"), types.ErrorCodeQueryDataError, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
 				return
 			}

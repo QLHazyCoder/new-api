@@ -36,6 +36,11 @@ Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检�
 
 白名单命中和观察模式命中仍写一条类型 8 日志与主库审计事件，但不会增加用户违规次数。第五次有效拦截禁用用户并撤销会话。任何敏感词路径都不得修改 users.quota、充值记录、历史消费或内部余额。
 
+审计落库失败也按模式处理：`block` 模式失败关闭并返回不可重试 503；`observe` 模式仅对
+已经确认命中且错误类型为审计事件写入失败时放行，并在服务日志记录降级。规则/用户读取、
+运行时快照和其他事务错误在两种模式下都返回 503。观察模式放行不增加违规次数，也不写一条
+伪造的类型 8“已记录”日志。
+
 规则变更必须通过敏感词管理 API 或页面进行。规则操作会立即刷新当前进程的匹配器；策略配置有五秒本地缓存，但通过页面/API 保存会立即失效。不要用直接 SQL 修改规则、配置、用户白名单或违规次数。
 
 ### 2.3 误判排查步骤
@@ -48,6 +53,12 @@ Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检�
 6. 用户第五次后仍可调用时，检查 users.status、auth_version、user_sessions 撤销状态和认证缓存。
 
 审计详情没有完整提示词通常有两种原因：管理员关闭了“保存完整审计证据”，或证据已超过保留期被清理任务清空。清理只清空 full_prompt 和 redacted_preview，不删除审计元数据。
+
+若日志出现 `Error 1406: Data too long for column 'full_prompt'`，检查主库
+`sensitive_word_audit_events.full_prompt` 的实际类型。MySQL 必须为 `MEDIUMTEXT`；
+PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规范化提示词，但旧槽位或未完成
+迁移时仍可能因旧 `TEXT` 失败。完成迁移后，在观察模式发送受控长文本测试，确认日志出现降级后请求
+继续；拦截模式不得因此绕过 403。
 
 ### 2.4 封禁后启用的边界
 
@@ -76,6 +87,9 @@ Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检�
 上线前重点检查：
 
 - MySQL：旧 sensitive_word_rules.word 列保持 VARCHAR(200) 及索引，新多词条存于子表。
+- MySQL：`sensitive_word_audit_events.full_prompt` 应为 `MEDIUMTEXT`，不能恢复为 `TEXT`；
+  可用 `SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema = DATABASE()
+  AND table_name = 'sensitive_word_audit_events' AND column_name = 'full_prompt';` 只读核对。
 - PostgreSQL：保留 group 和 key 等保留字的现有引号策略。
 - SQLite：快速迁移顺序执行，避免内存 SQLite 并发建表。
 - ClickHouse：确认 logs 表已有 type、request_id 和 other；类型 8 不改变表结构。
@@ -96,6 +110,8 @@ Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检�
     gofmt -w <changed-go-files>
     go test ./model -run 'Test(MigrateSensitiveWordData|SaveSensitiveWordConfig|SensitiveWord)' -count=1
     go test ./controller -run 'Test(SensitiveWordAuditListRedactsFullPrompt|RelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery|UpdateUserPersistsSensitiveWordControlsWithoutChangingQuota|ManageUserEnableResets|SensitiveWordUnbanEndpoint)' -count=1
+    go test ./model -run 'Test(SensitiveWordAuditPrompt(GormTypeForSupportedDialects|UsesDialectSizedTypes)|TruncateSensitivePromptIsByteSafeForLargeUnicodeInput|SensitiveWordObserveAuditPersistenceErrorIsTyped)' -count=1
+    go test ./controller -run 'TestShouldAllowSensitiveAuditFailureOnlyInObserveMode' -count=1
     go test ./...
     go build ./...
 

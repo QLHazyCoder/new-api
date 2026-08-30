@@ -481,6 +481,9 @@
   不得改变。禁用状态转启用才递增 `auth_version`、刷新认证缓存并撤销旧会话；重复启用
   不得重复执行这些认证动作。操作审计使用 `sensitive_word.enable_reset`，并记录入口来源
   与 `balance_changed:false`。
+- 必须保留：审计完整提示词在 MySQL 使用 `MEDIUMTEXT`、在 PostgreSQL/SQLite 使用 `TEXT`，
+  写入前执行合法 UTF-8 的字符/字节双重截断。`observe` 模式仅对明确的审计落库失败放行并记录
+  降级；规则、用户或其他事务错误以及 `block` 模式仍失败关闭返回 503，不能借故绕过策略。
 - 当前位置：`model/sensitive_word.go`、`model/user.go`、`model/main.go`、
   `service/sensitive.go`、`controller/relay.go`、`controller/sensitive_word.go`、
   `controller/user.go`、`controller/log.go`、`model/log.go`、`router/api-router.go`、
@@ -498,6 +501,8 @@
   `controller/relay_test.go`、`controller/user_manage_test.go`、
   `relaykit/**`，以及敏感词页面、用户抽屉和使用日志的前端 typecheck/build/lint。
 - 来源提交：`21cc64f46`、`7f17b6307`、`ab37d8b51`。
+- 本轮长提示词/观察模式故障修复随本次提交交付，涉及：`model/sensitive_word.go`、
+  `controller/relay.go` 及其模型/控制器回归测试；提交号以 Git 历史为准。
 
 ## 5. 提交映射完整性
 

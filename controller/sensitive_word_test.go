@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -16,6 +17,23 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestShouldAllowSensitiveAuditFailureOnlyInObserveMode(t *testing.T) {
+	auditErr := model.ErrSensitiveWordAuditPersistence
+	require.True(t, shouldAllowSensitiveAuditFailure(&model.SensitiveCheckResult{
+		Matched: true, ObserveOnly: true,
+	}, auditErr))
+	require.False(t, shouldAllowSensitiveAuditFailure(&model.SensitiveCheckResult{
+		Matched: true, ObserveOnly: false,
+	}, auditErr))
+	require.False(t, shouldAllowSensitiveAuditFailure(&model.SensitiveCheckResult{
+		Matched: false, ObserveOnly: true,
+	}, auditErr))
+	require.False(t, shouldAllowSensitiveAuditFailure(nil, auditErr))
+	require.False(t, shouldAllowSensitiveAuditFailure(&model.SensitiveCheckResult{
+		Matched: true, ObserveOnly: true,
+	}, errors.New("unrelated database failure")))
+}
 
 func TestSensitiveWordAuditListRedactsFullPrompt(t *testing.T) {
 	db := setupManageUserTestDB(t)

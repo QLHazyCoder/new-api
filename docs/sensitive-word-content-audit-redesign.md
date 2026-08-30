@@ -53,7 +53,18 @@
 | `mode=observe` 命中 | 写 | 写 `observe` | 不变 | 否 | 是 |
 | 白名单命中 | 写 | 写 `whitelist_bypass` | 不变 | 否 | 是 |
 | 普通用户命中 | 写 | 写 `blocked` | 原子加一 | 第 5 次一次 | 否，返回 403 |
-| 审计事务失败 | 不保留半条记录 | 不写或仅系统错误 | 回滚 | 否 | 否，返回 503 |
+| 审计事务失败 | 不保留半条记录 | 不写或仅系统错误 | 回滚 | 否 | `observe` 放行并记录降级；`block` 返回 503 |
+
+审计写入失败按策略模式区分处理：`mode=observe` 的目标是观察而不是阻断请求，因此仅当
+命中结果已经明确、且失败类型是审计事件落库失败（`ErrSensitiveWordAuditPersistence`）时
+允许 Relay 继续，并在服务日志中记录降级；这次请求不增加违规次数，也不伪造“已记录”的
+使用日志。规则、用户、运行时快照或其他数据库读取/事务错误仍返回 503。`mode=block` 始终
+对审计落库失败保持失败关闭，避免审计不可用时绕过拦截策略。
+
+完整提示词的存储类型按数据库方言选择：MySQL 使用 `MEDIUMTEXT`，PostgreSQL 和 SQLite
+使用 `TEXT`。`max_prompt_runes` 是逻辑字符上限，写入前还会执行 UTF-8 字节上限保护
+（`SensitiveWordMaxPromptBytes`），保证截断结果是合法 UTF-8 并保留截断标记；因此不能只
+通过提高字符上限来替代数据库迁移。
 
 第 5 次之后的请求仍会记录和递增违规次数，但不会重复执行封禁或重复增加认证版本。
 
@@ -190,6 +201,8 @@
 6. 若用户在第 5 次后仍可访问，检查 `users.status`、`auth_version`、`user_sessions` 的撤销状态和用户认证缓存。
 7. 若规则未生效，确认策略已启用、模式不是关闭、规则已启用、局部规则分组存在于分组定价，并确认请求实际使用的分组。
 8. 若审计详情为空，检查“保存完整审计证据”是否关闭，或是否已经超过提示词保留天数。清理任务只清空完整提示词和摘要，不删除命中元数据。
+9. 若 Relay 返回“敏感词审计暂时不可用，请稍后重试”，先查看同一 request ID 的服务日志和数据库错误。重点确认 MySQL 的 `sensitive_word_audit_events.full_prompt` 为 `MEDIUMTEXT`；旧版本的 `TEXT` 在中文、多字节或长 Responses 提示词下会触发 1406。`observe` 模式遇到明确的审计落库错误应记录“continuing request”并放行，若仍返回 503，继续检查是否为规则/用户读取错误或未运行新版本迁移。
+10. 修复数据库类型或配置后，用一条受控测试请求确认：观察模式继续请求且不计数，拦截模式仍返回 403；两种模式都不能写入余额、预扣费或上游调用。
 
 ## 8. 文件职责映射
 
@@ -215,6 +228,8 @@
 ```bash
 go test ./model -run 'Test(MigrateSensitiveWordData|SaveSensitiveWordConfig|SensitiveWord)' -count=1
 go test ./controller -run 'Test(SensitiveWordAuditListRedactsFullPrompt|RelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery|UpdateUserPersistsSensitiveWordControlsWithoutChangingQuota|ManageUserEnableResets|SensitiveWordUnbanEndpoint)' -count=1
+go test ./model -run 'Test(SensitiveWordAuditPrompt(GormTypeForSupportedDialects|UsesDialectSizedTypes)|TruncateSensitivePromptIsByteSafeForLargeUnicodeInput|SensitiveWordObserveAuditPersistenceErrorIsTyped)' -count=1
+go test ./controller -run 'TestShouldAllowSensitiveAuditFailureOnlyInObserveMode' -count=1
 go test ./...
 go build ./...
 ```

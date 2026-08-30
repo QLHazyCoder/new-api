@@ -6,10 +6,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func setupSensitiveWordTest(t *testing.T) {
@@ -150,6 +154,87 @@ func TestTruncateSensitivePrompt(t *testing.T) {
 	if got := truncateSensitivePrompt("a\x00b", 10); got != "ab" {
 		t.Fatalf("got %q", got)
 	}
+}
+
+func TestSensitiveWordAuditPromptUsesDialectSizedTypes(t *testing.T) {
+	require.Equal(t, "mediumtext", sensitiveWordAuditPromptDBType(string(common.DatabaseTypeMySQL)))
+	require.Equal(t, "text", sensitiveWordAuditPromptDBType(string(common.DatabaseTypePostgreSQL)))
+	require.Equal(t, "text", sensitiveWordAuditPromptDBType(string(common.DatabaseTypeSQLite)))
+}
+
+func TestSensitiveWordAuditPromptGormTypeForSupportedDialects(t *testing.T) {
+	cases := []struct {
+		name string
+		open func() (*gorm.DB, error)
+		want string
+	}{
+		{
+			name: "mysql",
+			open: func() (*gorm.DB, error) {
+				return gorm.Open(mysql.New(mysql.Config{
+					DSN:                       "gorm:gorm@tcp(localhost:9910)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
+					SkipInitializeWithVersion: true,
+				}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+			},
+			want: "mediumtext",
+		},
+		{
+			name: "postgres",
+			open: func() (*gorm.DB, error) {
+				return gorm.Open(postgres.New(postgres.Config{
+					DSN:                  "host=localhost user=postgres dbname=postgres sslmode=disable",
+					PreferSimpleProtocol: true,
+				}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+			},
+			want: "text",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, err := tc.open()
+			require.NoError(t, err)
+			statement := &gorm.Statement{DB: db}
+			require.NoError(t, statement.Parse(&SensitiveWordAuditEvent{}))
+			field := statement.Schema.LookUpField("FullPrompt")
+			require.NotNil(t, field)
+			require.Equal(t, tc.want, strings.ToLower(db.Migrator().FullDataTypeOf(field).SQL))
+		})
+	}
+}
+
+func TestTruncateSensitivePromptIsByteSafeForLargeUnicodeInput(t *testing.T) {
+	value := truncateSensitivePrompt(strings.Repeat("界", 200000), 200000)
+	require.True(t, utf8.ValidString(value))
+	require.LessOrEqual(t, len([]byte(value)), SensitiveWordMaxPromptBytes)
+	require.True(t, strings.HasSuffix(value, "…"))
+}
+
+func TestSensitiveWordObserveAuditPersistenceErrorIsTyped(t *testing.T) {
+	setupSensitiveWordTest(t)
+	saveSensitiveWordTestConfig(t, "observe", true, SensitiveWordBanThreshold)
+	user := createSensitiveWordTestUser(t, 4200000, false)
+	addSensitiveWordTestRule(t, "审计故障规则", []string{"审计故障命中词"}, SensitiveWordScopeGlobal, nil)
+
+	triggerName := fmt.Sprintf("sensitive_audit_failure_%d", time.Now().UnixNano())
+	triggerSQL := fmt.Sprintf(
+		"CREATE TRIGGER %s BEFORE INSERT ON sensitive_word_audit_events BEGIN SELECT RAISE(ABORT, 'forced audit failure'); END",
+		triggerName,
+	)
+	require.NoError(t, DB.Exec(triggerSQL).Error)
+	t.Cleanup(func() { _ = DB.Exec("DROP TRIGGER " + triggerName).Error })
+
+	result, err := CheckSensitiveRequest(sensitiveWordTestInput(user, "observe-audit-failure", "审计故障命中词"))
+	require.ErrorIs(t, err, ErrSensitiveWordAuditPersistence)
+	require.NotNil(t, result)
+	require.True(t, result.Matched)
+	require.True(t, result.ObserveOnly)
+	require.False(t, result.Blocked)
+	require.Zero(t, result.ViolationCount)
+
+	var stored User
+	require.NoError(t, DB.First(&stored, user.Id).Error)
+	require.Zero(t, stored.SensitiveWordViolationCount)
 }
 
 func TestMigrateSensitiveWordDataImportsPersistedLegacyOptionOnce(t *testing.T) {

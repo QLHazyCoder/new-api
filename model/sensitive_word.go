@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
@@ -18,6 +19,7 @@ import (
 	goahocorasick "github.com/anknown/ahocorasick"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/schema"
 )
 
 const (
@@ -27,11 +29,36 @@ const (
 	SensitiveWordBanThreshold   = 5
 	SensitiveWordMaxRunes       = 200
 	SensitiveWordMaxPromptRunes = 65536
+	// The audit prompt limit is intentionally larger than MySQL TEXT's byte
+	// limit. The audit column uses MEDIUMTEXT on MySQL, while this byte cap
+	// remains a final guard if the configured rune limit changes in the future.
+	SensitiveWordMaxPromptBytes = 512 * 1024
 	SensitiveWordMaxRules       = 10000
 	sensitiveWordConfigCacheTTL = 5 * time.Second
 	sensitiveWordMigrationKey   = "SensitiveWordRulesMigrationVersion"
 	sensitiveWordMigrationValue = "1"
 )
+
+// SensitiveWordAuditPrompt keeps the public JSON shape as a string while
+// allowing GORM to select a storage type that is large enough for UTF-8
+// prompts on MySQL. PostgreSQL and SQLite both use their unbounded TEXT type.
+type SensitiveWordAuditPrompt string
+
+func sensitiveWordAuditPromptDBType(dialect string) string {
+	if dialect == string(common.DatabaseTypeMySQL) {
+		return "mediumtext"
+	}
+	return "text"
+}
+
+func (SensitiveWordAuditPrompt) GormDBDataType(db *gorm.DB, _ *schema.Field) string {
+	if db != nil && db.Dialector != nil {
+		return sensitiveWordAuditPromptDBType(db.Dialector.Name())
+	}
+	return "text"
+}
+
+var ErrSensitiveWordAuditPersistence = errors.New("sensitive word audit persistence failed")
 
 type SensitiveWordRule struct {
 	ID   int64  `json:"id" gorm:"primaryKey"`
@@ -92,35 +119,35 @@ type SensitiveWordWhitelist struct {
 }
 
 type SensitiveWordAuditEvent struct {
-	ID                int64     `json:"id" gorm:"primaryKey"`
-	RequestID         string    `json:"request_id" gorm:"type:varchar(128);index"`
-	UserID            int       `json:"user_id" gorm:"index"`
-	UsernameSnapshot  string    `json:"username_snapshot"`
-	TokenID           int       `json:"token_id" gorm:"index"`
-	TokenNameSnapshot string    `json:"token_name_snapshot"`
-	GroupName         string    `json:"group_name" gorm:"index"`
-	ModelName         string    `json:"model_name" gorm:"index"`
-	Endpoint          string    `json:"endpoint"`
-	Protocol          string    `json:"protocol"`
-	PromptHash        string    `json:"prompt_hash" gorm:"type:char(64);index"`
-	RedactedPreview   string    `json:"redacted_preview" gorm:"type:text"`
-	FullPrompt        string    `json:"full_prompt" gorm:"type:text"`
-	MatchedRuleIDs    string    `json:"matched_rule_ids" gorm:"type:text"`
-	MatchedRuleNames  string    `json:"matched_rule_names" gorm:"type:text"`
-	MatchedWords      string    `json:"matched_words" gorm:"type:text"`
-	MatchedSnippets   string    `json:"matched_snippets" gorm:"type:text"`
-	MatchedScope      string    `json:"matched_scope" gorm:"type:varchar(16);index"`
-	WhitelistBypassed bool      `json:"whitelist_bypassed" gorm:"index"`
-	Blocked           bool      `json:"blocked" gorm:"index"`
-	ViolationCount    int       `json:"violation_count"`
-	AutoBanned        bool      `json:"auto_banned"`
-	ObserveOnly       bool      `json:"observe_only"`
-	UserStatusBefore  int       `json:"user_status_before"`
-	UserStatusAfter   int       `json:"user_status_after"`
-	QuotaBefore       int       `json:"quota_before"`
-	QuotaAfter        int       `json:"quota_after"`
-	RuleVersion       int64     `json:"rule_version"`
-	CreatedAt         time.Time `json:"created_at" gorm:"index"`
+	ID                int64                    `json:"id" gorm:"primaryKey"`
+	RequestID         string                   `json:"request_id" gorm:"type:varchar(128);index"`
+	UserID            int                      `json:"user_id" gorm:"index"`
+	UsernameSnapshot  string                   `json:"username_snapshot"`
+	TokenID           int                      `json:"token_id" gorm:"index"`
+	TokenNameSnapshot string                   `json:"token_name_snapshot"`
+	GroupName         string                   `json:"group_name" gorm:"index"`
+	ModelName         string                   `json:"model_name" gorm:"index"`
+	Endpoint          string                   `json:"endpoint"`
+	Protocol          string                   `json:"protocol"`
+	PromptHash        string                   `json:"prompt_hash" gorm:"type:char(64);index"`
+	RedactedPreview   string                   `json:"redacted_preview" gorm:"type:text"`
+	FullPrompt        SensitiveWordAuditPrompt `json:"full_prompt"`
+	MatchedRuleIDs    string                   `json:"matched_rule_ids" gorm:"type:text"`
+	MatchedRuleNames  string                   `json:"matched_rule_names" gorm:"type:text"`
+	MatchedWords      string                   `json:"matched_words" gorm:"type:text"`
+	MatchedSnippets   string                   `json:"matched_snippets" gorm:"type:text"`
+	MatchedScope      string                   `json:"matched_scope" gorm:"type:varchar(16);index"`
+	WhitelistBypassed bool                     `json:"whitelist_bypassed" gorm:"index"`
+	Blocked           bool                     `json:"blocked" gorm:"index"`
+	ViolationCount    int                      `json:"violation_count"`
+	AutoBanned        bool                     `json:"auto_banned"`
+	ObserveOnly       bool                     `json:"observe_only"`
+	UserStatusBefore  int                      `json:"user_status_before"`
+	UserStatusAfter   int                      `json:"user_status_after"`
+	QuotaBefore       int                      `json:"quota_before"`
+	QuotaAfter        int                      `json:"quota_after"`
+	RuleVersion       int64                    `json:"rule_version"`
+	CreatedAt         time.Time                `json:"created_at" gorm:"index"`
 }
 
 type SensitiveWordStats struct {
@@ -1113,7 +1140,7 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 			RequestID: input.RequestID, UserID: input.UserID, UsernameSnapshot: input.Username,
 			TokenID: input.TokenID, TokenNameSnapshot: input.TokenName, GroupName: input.GroupName,
 			ModelName: input.ModelName, Endpoint: input.Endpoint, Protocol: input.Protocol,
-			PromptHash: hex.EncodeToString(hash[:]), RedactedPreview: preview, FullPrompt: fullPrompt,
+			PromptHash: hex.EncodeToString(hash[:]), RedactedPreview: preview, FullPrompt: SensitiveWordAuditPrompt(fullPrompt),
 			MatchedRuleIDs: string(idsRaw), MatchedRuleNames: string(namesRaw), MatchedWords: string(wordsRaw), MatchedSnippets: string(snippetsRaw),
 			MatchedScope: scope, WhitelistBypassed: whitelisted, Blocked: result.Blocked, ObserveOnly: observeOnly,
 			ViolationCount: result.ViolationCount, AutoBanned: result.AutoBanned,
@@ -1121,7 +1148,7 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 			QuotaBefore: result.QuotaBefore, QuotaAfter: result.QuotaAfter, RuleVersion: ruleVersion, CreatedAt: time.Now(),
 		}
 		if err := tx.Create(&event).Error; err != nil {
-			return err
+			return fmt.Errorf("%w: %v", ErrSensitiveWordAuditPersistence, err)
 		}
 		return nil
 	})
@@ -1201,10 +1228,45 @@ func truncateSensitivePrompt(value string, max int) string {
 	if max <= 0 {
 		max = SensitiveWordMaxPromptRunes
 	}
-	if len(runes) > max {
-		return string(runes[:max]) + "…"
+
+	truncated := len(runes) > max
+	if truncated {
+		runes = runes[:max]
 	}
-	return string(runes)
+	value = string(runes)
+
+	// Rune limits alone are not a storage limit: UTF-8 characters can occupy
+	// up to four bytes, and the truncation marker adds another three bytes.
+	// Keep the result valid UTF-8 and bounded even if a future configuration
+	// raises the rune limit beyond the current MEDIUMTEXT-safe range.
+	marker := "…"
+	byteLimit := SensitiveWordMaxPromptBytes - len(marker)
+	if len(value) > byteLimit {
+		value = trimSensitivePromptBytes(value, byteLimit)
+		truncated = true
+	}
+	if truncated {
+		return value + marker
+	}
+	return value
+}
+
+func trimSensitivePromptBytes(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	value = value[:maxBytes]
+	for len(value) > 0 && !utf8.ValidString(value) {
+		_, size := utf8.DecodeLastRuneInString(value)
+		if size <= 0 {
+			return ""
+		}
+		value = value[:len(value)-size]
+	}
+	return value
 }
 
 func ClearSensitiveWordViolations(userID int) error {

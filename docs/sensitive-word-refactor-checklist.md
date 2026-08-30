@@ -33,7 +33,8 @@
 - [x] 自动分组在预扣费前检查全部候选分组，局部命中写实际命中组。
 - [x] 同一请求多规则、多词条命中只计数一次。
 - [x] Relay 在 token 估算、预扣费、选渠道、上游调用和重试之前执行检查。
-- [x] 审计事务失败时回滚计数，返回不可重试 503，不向用户伪报已记录。
+- [x] 审计事务失败时回滚计数；`block` 模式失败关闭并返回不可重试 503，`observe` 模式仅对明确的审计落库错误放行并记录服务降级，不伪报已记录。
+- [x] 审计完整提示词按数据库方言使用 MySQL `MEDIUMTEXT`、PostgreSQL/SQLite `TEXT`，并执行 UTF-8 字节安全截断。
 
 阶段自检：
 
@@ -41,6 +42,8 @@
 - [x] 局部规则未绑定分组不命中。
 - [x] 规则删除后已完成迁移的实例不回退旧 Option。
 - [x] 提示词规范化、哈希、脱敏摘要和截断使用同一快照。
+- [x] 长中文/多字节提示词不会因 MySQL `TEXT` 字节上限触发 1406；运行时错误类型可被 Relay 区分为审计落库失败或其他故障。
+- [x] GORM MySQL/PostgreSQL dry-run 类型验证确认 `full_prompt` 分别生成 `MEDIUMTEXT`/`TEXT`。
 
 ## 3. 白名单、违规次数与封禁
 
@@ -76,6 +79,7 @@
 阶段自检：
 
 - [x] 控制器回归测试证明审计列表不泄露完整提示词，详情保留管理员复核证据。
+- [x] 观察模式审计落库失败故障测试证明请求继续、计数回滚；拦截模式和非审计故障仍失败关闭。
 - [x] 错误响应是 HTTP 403、sensitive_words_detected、不可重试且不重复写普通错误日志。
 - [x] OpenAI Chat、Responses、Claude、Gemini、图片请求的提示词提取已有独立模块测试。
 
@@ -120,12 +124,13 @@
 - [x] 前端类型检查和 lint：`npm run typecheck`、`npm run lint`。本次确认框与抽屉改动无新增错误。
 - [x] 前端生产构建：`npm run build:check` 通过（Rsbuild v2.1.6，构建耗时 23.2s）。
 - [x] 前端定向 Vitest：`npm test -- src/features/wallet/lib/payment.test.ts`，4 项通过。
-- [ ] 前端全量 Vitest：历史基线仍有 `node:test`/`bun:test` 打包限制；2026-08-30 最终运行共 8 个失败套件、37 个套件通过，191 项中 191 项通过。8 个失败套件均为既有内置测试的打包限制；新增敏感词搜索两套测试共 11 项均通过，存量测试债务仍需后续单独处理。
+- [ ] 前端全量 Vitest：历史基线仍有 `node:test`/`bun:test` 打包限制；本轮运行共 9 个失败套件、36 个套件通过，191 项中 190 项通过，另有 1 项既有 API Key 抽屉测试超时。8 个失败套件为既有内置测试打包限制；新增敏感词搜索两套测试共 11 项均通过，存量测试债务仍需后续单独处理。
 - [ ] 前端全量格式检查：`npm run format:check` 当前仅报告 5 个既有无关文件（`response-fade-*`、`response-renderer-inline.tsx`、`api-key-group-cell.tsx`、`redemption-form.ts`）；本次敏感词文件未在失败清单中。
 - [x] 2026-08-30 实时查找增量验证：`sensitive-word-search.test.ts` 与 `sensitive-words-section.test.tsx` 共 11 项通过；`npm run typecheck`、`npm run lint`、`npm run build:check` 和 `git diff --check` 通过。7 个 locale 均包含新增搜索键且未发现 replacement character。
 - [x] GitHub Actions 成功：`33313133592`，镜像提交为 `384e4988c5a453b0c000cc4f85d7866e2729f3e6`；amd64、arm64、manifest 和 cosign 均通过。不可变标签 `main-384e498` 的 GHCR manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
 - [x] 蓝绿发布、线上健康检查和观察窗口：先更新 standby `new-api-green`，再从 blue 平滑切流到 green；两槽均 healthy，Caddy 三处上游均为 green，公网连续 HTTP 200，版本为 `main-384e498`。
+- [x] 2026-08-30 审计长提示词修复：MySQL `full_prompt` 改用 `MEDIUMTEXT`，写入前执行 UTF-8 字节安全截断；观察模式仅对审计落库错误放行，其他错误和拦截模式保持 503。新增模型/控制器回归测试；未执行生产发布或 Actions 等待，待代码推送后按既有更新流程处理。
 
 ## 最终审查结论
 
-敏感词与内容审计重构及本轮启用边界修复已随 `384e4988c5a453b0c000cc4f85d7866e2729f3e6` 交付并上线。用户列表启用和专用解封现在共享行锁事务：恢复状态并清零当前违规次数，状态变化才刷新认证并撤销旧会话；历史审计、使用日志、白名单和所有余额/消费字段保持不变，下一次命中从第 1 次计数。Actions `33313133592` 和 standby-first 蓝绿发布均已验证成功，公网状态为 `main-384e498`。前端全量 Vitest 本轮为 8 个既有 `node:test`/`bun:test` 打包失败套件、37 个套件通过且 191/191 项通过；新增实时查找测试 11/11 通过。格式检查的 5 个无关文件仍如实保留，敏感词相关文件未在失败清单中。
+敏感词与内容审计重构及本轮启用边界修复已随 `384e4988c5a453b0c000cc4f85d7866e2729f3e6` 交付并上线。用户列表启用和专用解封现在共享行锁事务：恢复状态并清零当前违规次数，状态变化才刷新认证并撤销旧会话；历史审计、使用日志、白名单和所有余额/消费字段保持不变，下一次命中从第 1 次计数。Actions `33313133592` 和 standby-first 蓝绿发布均已验证成功，公网状态为 `main-384e498`。本轮长提示词修复已完成代码与回归测试，但尚未部署到线上，需后续按更新流程执行数据库迁移和观察。前端全量 Vitest 本轮为 9 个失败套件、36 个通过套件，190/191 项通过；失败为既有内置测试打包限制及 1 项既有 API Key 抽屉测试超时，敏感词定向测试 11/11 通过。
