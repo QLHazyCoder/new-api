@@ -172,3 +172,17 @@ Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检�
 2. 记录实际验证命令和失败原因；不要把未运行的验证写成通过。
 3. 代码提交、镜像发布和线上部署分别留下可追踪记录。
 4. 涉及余额的代码审查必须显式确认：敏感词路径没有 quota 写操作。
+
+## 6. 最近发布记录
+
+2026-08-30 的封禁后启用边界修复：
+
+- 代码提交：`384e4988c5a453b0c000cc4f85d7866e2729f3e6`，已推送 `main`。
+- GitHub Actions：`33313133592` 成功完成 amd64、arm64、manifest 和 cosign；GHCR `latest`
+  manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
+- 发布顺序：active blue 保持在线，`update-new-api-standby.sh` 更新 green 并健康检查，
+  `switch-new-api.sh` 平滑切换到 green；两槽均为 healthy，Caddy 三处上游为 green。
+- 线上核对：容器 revision 为 `384e4988c`，公网 `/api/status` 连续 HTTP 200，版本
+  `main-384e498`；切流后短观察窗口无 panic、fatal 或 error 日志。
+- 数据边界：启用/解封只恢复状态并清零当前敏感词违规次数；历史审计、使用日志、白名单、
+  quota、used_quota、钱包/订阅余额和消费记录均未清理或修改。
