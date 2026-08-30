@@ -471,6 +471,10 @@
 - 必须保留：默认客户端警示文案明确说明“余额不退”和严重情形报警，但这是提示文本，
   不是余额处理指令；管理员可在用户编辑右抽屉维护违规次数、清零次数和个人白名单，
   敏感词页面不承载白名单名单或审计列表，审计复核入口统一在使用日志。
+- 必须保留：规则编辑弹窗在 TXT 导入按钮左侧提供实时查找。查找只针对当前未保存的
+  `draft.wordsText` 做不区分大小写的普通包含匹配，首个命中自动选中并滚动，`Enter`/
+  `Shift+Enter` 循环定位；搜索不支持正则、不重建或过滤文本，草稿编辑时不得抢占
+  文本框光标，关闭弹窗必须清空搜索状态，保存请求仍只提交原始解析后的词条。
 - 必须保留：管理员从用户列表启用账户或调用专用解封接口时，必须在同一行锁事务内恢复
   `status` 并将当前违规次数清零；历史审计、使用日志、`quota`、`used_quota` 和白名单状态
   不得改变。禁用状态转启用才递增 `auth_version`、刷新认证缓存并撤销旧会话；重复启用
@@ -480,6 +484,9 @@
   `service/sensitive.go`、`controller/relay.go`、`controller/sensitive_word.go`、
   `controller/user.go`、`controller/log.go`、`model/log.go`、`router/api-router.go`、
   `web/src/features/system-settings/request-limits/sensitive-words-section.tsx`、
+  `web/src/features/system-settings/request-limits/sensitive-word-search.ts`、
+  `web/src/features/system-settings/request-limits/sensitive-word-search.test.ts`、
+  `web/src/features/system-settings/request-limits/sensitive-words-section.test.tsx`、
   `web/src/features/users/components/users-columns.tsx`、
   `web/src/features/users/components/users-mutate-drawer.tsx`、
   `web/src/features/usage-logs/**`。
@@ -562,3 +569,5 @@ GitHub Actions 的 amd64、arm64 与 manifest 均成功。
   证据和余额；状态变化才刷新认证并撤销会话，重复启用保持幂等。实现已由
   `384e4988c` 发布，Actions `33313133592` 成功，green standby-first 切流完成，公网版本
   `main-384e498`；该不可变版本标签的 GHCR manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
+- 2026-08-30：在 P-30 增加规则弹窗实时查找契约及其辅助函数/组件测试；搜索仅作用于
+  未保存草稿，不改变保存 payload 或后端数据结构。提交哈希在本次交付后回填。

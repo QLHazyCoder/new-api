@@ -24,7 +24,9 @@ import {
   Plus,
   Power,
   PowerOff,
+  Search,
   Trash2,
+  X,
 } from 'lucide-react'
 import {
   useCallback,
@@ -33,7 +35,9 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type KeyboardEvent,
 } from 'react'
+import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
@@ -73,6 +77,11 @@ import { api } from '@/lib/api'
 
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import {
+  findSensitiveWordMatches,
+  getNextSensitiveWordMatchIndex,
+  type SensitiveWordTextMatch,
+} from './sensitive-word-search'
 
 const DEFAULT_BLOCK_MESSAGE =
   '你的请求因命中敏感词已被拦截，已记录 1 次；累计超过 5 次将立即封号，余额不退，如果有攻击破解别人网站等情节严重的情况将会直接报警。请勿使用当前分组进行违规对话；如有误判，请联系群主审核并清理你的记录。'
@@ -185,6 +194,7 @@ function RulePowerIcon(props: { enabled: boolean; isLoading: boolean }) {
 }
 
 export function SensitiveWordsSection({ defaultValues }: Props) {
+  const { t } = useTranslation()
   const [config, setConfig] = useState<SensitiveWordConfig>({
     enabled: defaultValues.CheckSensitiveEnabled,
     check_prompt: defaultValues.CheckSensitiveOnPromptEnabled,
@@ -207,6 +217,10 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
   const [deleteTarget, setDeleteTarget] = useState<RuleSummary | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const [wordSearch, setWordSearch] = useState('')
+  const [activeMatchIndex, setActiveMatchIndex] = useState(0)
 
   const reload = useCallback(async () => {
     setIsLoading(true)
@@ -245,6 +259,85 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
     [draft.wordsText]
   )
 
+  const wordMatches = useMemo(
+    () => findSensitiveWordMatches(draft.wordsText, wordSearch),
+    [draft.wordsText, wordSearch]
+  )
+  const wordMatchesRef = useRef<SensitiveWordTextMatch[]>(wordMatches)
+  wordMatchesRef.current = wordMatches
+
+  const resetWordSearch = useCallback(() => {
+    setWordSearch('')
+    setActiveMatchIndex(0)
+  }, [])
+
+  const scrollTextareaMatchIntoView = useCallback(
+    (textarea: HTMLTextAreaElement, start: number) => {
+      const computedStyle = window.getComputedStyle(textarea)
+      const parsedLineHeight = Number.parseFloat(computedStyle.lineHeight)
+      const fontSize = Number.parseFloat(computedStyle.fontSize)
+      const lineHeight = Number.isFinite(parsedLineHeight)
+        ? parsedLineHeight
+        : Number.isFinite(fontSize)
+          ? fontSize * 1.5
+          : 20
+
+      const lineNumber = textarea.value.slice(0, start).split('\n').length - 1
+      const lineTop = lineNumber * lineHeight
+      const lineBottom = lineTop + lineHeight
+      const visibleTop = textarea.scrollTop
+      const visibleBottom = visibleTop + textarea.clientHeight
+
+      if (lineTop < visibleTop) {
+        textarea.scrollTop = lineTop
+      } else if (lineBottom > visibleBottom) {
+        textarea.scrollTop = Math.max(
+          0,
+          lineTop - Math.max(0, (textarea.clientHeight - lineHeight) / 2)
+        )
+      }
+    },
+    []
+  )
+
+  const locateWordMatch = useCallback(
+    (index: number) => {
+      const match = wordMatchesRef.current[index]
+      const textarea = textareaRef.current
+      if (!match || !textarea) return
+
+      const searchInput = searchInputRef.current
+      const shouldRestoreSearchFocus = document.activeElement === searchInput
+
+      if (shouldRestoreSearchFocus) {
+        textarea.focus({ preventScroll: true })
+      }
+      textarea.setSelectionRange(match.start, match.end)
+      scrollTextareaMatchIntoView(textarea, match.start)
+
+      if (shouldRestoreSearchFocus) {
+        searchInput?.focus({ preventScroll: true })
+      }
+    },
+    [scrollTextareaMatchIntoView]
+  )
+
+  useEffect(() => {
+    setActiveMatchIndex((current) => {
+      if (wordMatches.length === 0) return 0
+      return Math.min(current, wordMatches.length - 1)
+    })
+  }, [wordMatches.length])
+
+  useEffect(() => {
+    const currentMatches = wordMatchesRef.current
+    if (!ruleDialogOpen || !wordSearch.trim() || currentMatches.length === 0) {
+      return
+    }
+    if (document.activeElement === textareaRef.current) return
+    locateWordMatch(Math.min(activeMatchIndex, currentMatches.length - 1))
+  }, [activeMatchIndex, locateWordMatch, ruleDialogOpen, wordSearch])
+
   const saveConfig = async () => {
     const banThreshold = Math.max(
       1,
@@ -274,11 +367,13 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
   }
 
   const openCreateDialog = () => {
+    resetWordSearch()
     setDraft(emptyDraft())
     setRuleDialogOpen(true)
   }
 
   const openEditDialog = async (rule: RuleSummary) => {
+    resetWordSearch()
     try {
       const response = await api.get(`/api/sensitive-words/rules/${rule.id}`)
       const detail = response.data?.data as RuleDetail | undefined
@@ -291,6 +386,7 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
         groups: detail.groups,
         enabled: detail.enabled,
       })
+      resetWordSearch()
       setRuleDialogOpen(true)
     } catch (error) {
       toast.error(getErrorMessage(error, '无法加载规则详情'))
@@ -327,6 +423,7 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
         await api.post('/api/sensitive-words/rules', payload)
       }
       setRuleDialogOpen(false)
+      resetWordSearch()
       await reload()
       toast.success(draft.id ? '敏感词规则已更新' : '敏感词规则已添加')
     } catch (error) {
@@ -393,6 +490,30 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
       event.target.value = ''
     }
   }
+
+  const handleWordSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    if (wordMatches.length === 0) return
+
+    const backwards = event.shiftKey
+    setActiveMatchIndex((current) =>
+      getNextSensitiveWordMatchIndex(current, wordMatches.length, backwards)
+    )
+  }
+
+  const currentMatchIndex =
+    wordMatches.length === 0
+      ? 0
+      : Math.min(activeMatchIndex, wordMatches.length - 1)
+  const matchCountLabel = `${wordMatches.length === 0 ? 0 : currentMatchIndex + 1}/${wordMatches.length}`
+  const matchCountAriaLabel = t(
+    'Sensitive word matches: {{current}} of {{total}}',
+    {
+      current: wordMatches.length === 0 ? 0 : currentMatchIndex + 1,
+      total: wordMatches.length,
+    }
+  )
 
   return (
     <SettingsSection title='敏感词策略'>
@@ -741,7 +862,10 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
 
       <Dialog
         open={ruleDialogOpen}
-        onOpenChange={setRuleDialogOpen}
+        onOpenChange={(open) => {
+          setRuleDialogOpen(open)
+          if (!open) resetWordSearch()
+        }}
         title={draft.id ? '编辑敏感词规则' : '添加敏感词规则'}
         description='一个规则可包含多个词条，并可设为全局或绑定多个定价分组。'
         contentClassName='sm:max-w-3xl'
@@ -752,7 +876,10 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
             <Button
               type='button'
               variant='outline'
-              onClick={() => setRuleDialogOpen(false)}
+              onClick={() => {
+                setRuleDialogOpen(false)
+                resetWordSearch()
+              }}
               disabled={isSavingRule}
             >
               取消
@@ -867,27 +994,73 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
         )}
 
         <div className='space-y-2'>
-          <div className='flex items-center justify-between gap-2'>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
             <Label htmlFor='sensitive-rule-words'>敏感词条</Label>
-            <input
-              ref={fileInputRef}
-              type='file'
-              accept='.txt,text/plain'
-              className='hidden'
-              onChange={(event) => void handleWordFile(event)}
-            />
-            <Button
-              type='button'
-              size='sm'
-              variant='outline'
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <FileUp data-icon='inline-start' />
-              导入 TXT
-            </Button>
+            <div className='flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto'>
+              <div className='relative w-full sm:w-60'>
+                <Search
+                  aria-hidden='true'
+                  className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2'
+                />
+                <Input
+                  ref={searchInputRef}
+                  type='text'
+                  value={wordSearch}
+                  onChange={(event) => {
+                    setWordSearch(event.target.value)
+                    setActiveMatchIndex(0)
+                  }}
+                  onKeyDown={handleWordSearchKeyDown}
+                  placeholder={t('Search current words...')}
+                  aria-label={t('Search current words...')}
+                  className='pr-20 pl-8'
+                />
+                <span
+                  role='status'
+                  aria-live='polite'
+                  aria-label={matchCountAriaLabel}
+                  className='text-muted-foreground pointer-events-none absolute top-1/2 right-8 -translate-y-1/2 text-xs tabular-nums'
+                >
+                  {matchCountLabel}
+                </span>
+                {wordSearch && (
+                  <Button
+                    type='button'
+                    size='icon-sm'
+                    variant='ghost'
+                    className='absolute top-1/2 right-0.5 size-7 -translate-y-1/2'
+                    aria-label={t('Clear search')}
+                    title={t('Clear search')}
+                    onClick={() => {
+                      resetWordSearch()
+                      searchInputRef.current?.focus()
+                    }}
+                  >
+                    <X aria-hidden='true' />
+                  </Button>
+                )}
+              </div>
+              <input
+                ref={fileInputRef}
+                type='file'
+                accept='.txt,text/plain'
+                className='hidden'
+                onChange={(event) => void handleWordFile(event)}
+              />
+              <Button
+                type='button'
+                size='sm'
+                variant='outline'
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <FileUp data-icon='inline-start' />
+                导入 TXT
+              </Button>
+            </div>
           </div>
           <Textarea
             id='sensitive-rule-words'
+            ref={textareaRef}
             rows={12}
             value={draft.wordsText}
             onChange={(event) =>

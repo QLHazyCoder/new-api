@@ -26,6 +26,8 @@
 - 违规次数和白名单：用户管理的用户编辑右抽屉，内容安全区。
 - 命中记录和完整提示词：使用日志，类型 8“关键词拦截”的详情抽屉。
 
+规则编辑弹窗的敏感词条搜索是纯前端草稿工具：它只查找当前弹窗中的 `draft.wordsText`，不调用后端、不改写文本，也不会改变保存请求。搜索框在“导入 TXT”按钮左侧，输入后可用 `Enter`/`Shift+Enter` 循环定位；草稿编辑只更新计数，不抢占文本框光标；关闭弹窗后搜索状态会清空。
+
 不要创建第二个白名单页面或审计页面，否则同一状态会出现多个编辑入口并引入不一致。
 
 ### 2.2 运行时边界
@@ -105,6 +107,7 @@ Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检�
     npm run typecheck
     npm run build:check
     npm run lint
+    npm test -- --run src/features/system-settings/request-limits/sensitive-word-search.test.ts src/features/system-settings/request-limits/sensitive-words-section.test.tsx
     npm test
 
 还要检查：没有乱码或 replacement character；列表没有完整提示词；普通用户日志没有 audit_id/命中词；白名单不影响计数以外的用户属性；任何自动封禁路径不写 quota。
