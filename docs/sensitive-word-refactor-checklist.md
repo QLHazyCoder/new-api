@@ -105,6 +105,7 @@
 - [x] 记录文件职责、测试入口、旧配置兼容和禁止余额清零的硬约束。
 - [x] 历史重构提交并推送至 `main`：`ab37d8b5149870302416b1b4a7cb4bb6365a519a`（`feat: redesign sensitive word content audit`）。
 - [x] 边界修复提交并推送至 `main`：`384e4988c5a453b0c000cc4f85d7866e2729f3e6`（`fix: reset sensitive word violations when enabling users`）。
+- [x] 实时查找功能提交并推送至 `main`：`416fabe52`（`feat: add sensitive word draft search`）。
 - [x] 历史 GitHub Actions `33307400802` 成功完成：amd64、arm64 构建、GHCR 清单创建与 cosign 签名均通过。
 - [x] 历史蓝绿发布已完成：曾更新待机 `new-api-green` 并切流，公网版本为 `main-ab37d8b`；当前发布记录见下方最新条目。
 
