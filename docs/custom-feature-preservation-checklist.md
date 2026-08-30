@@ -13,7 +13,7 @@
   93 个非合并提交。
 - rc.22 合并完成后的自研补充：`441ea707`、`9773de9e`、`51cd6ec4`、
   `51e0b058`、`d81c294f`、`504e193f`。
-- 本清单共映射 106 个可追踪的本地非合并提交（截至 `main@4173af597`）。其中
+- 历史基线共映射 106 个可追踪的本地非合并提交（截至 `main@4173af597`）。其中
   `d81c294f` 是对分组可见性回归测试的泛化修正，不单独增加产品功能；其余提交都
   对应下列可见行为、账务不变量、数据迁移或发布能力。
 - 已批准退休的本地提交有两个：`cd2f8814` 只服务于已退休的 Classic 前端构建，
@@ -29,6 +29,8 @@
   `754a7de43`、`6d5b3e554` 以及本轮清单更新提交 `eb9c43244` 仅维护审计、保护映射
   或合并记录，不新增独立产品契约；它们必须在对应审计文档或本节保留归属，不能被
   误计入未归类自研功能。
+- 本次新增 P-30 敏感词与内容审计保护项，功能提交为 `21cc64f46`、`7f17b6307`、
+  `ab37d8b51`；`84daf8a43` 仅回填发布记录，不新增产品契约。
 - 本文档与 [upstream-merge-v1.0.0-rc.22.md](./upstream-merge-v1.0.0-rc.22.md)、
   `upstream-merge-v1.0.0-rc.23.md`、`upstream-merge-v1.0.0-rc.24.md` 配套使用：
   各审计文件保留对应上游标签的逐提交迁移证据，本文件是以后每次合并的验收入口。
@@ -450,6 +452,40 @@
 - 设计与阶段记录：[payment-amount-discount-group-policy.md](./payment-amount-discount-group-policy.md)。
 - 来源提交：`e1765fd8e`、`4173af597`。
 
+### P-30 敏感词规则、内容审计与用户违规控制
+
+- 必须保留：策略支持全局规则和绑定定价分组的局部规则，规则以统一表格管理；局部
+  分组只能来自 `ratio_setting.GetGroupRatioCopy()`，不得接受 `auto` 或不存在的分组。
+  规则词条支持批量文本/TXT 导入、去重、启停、编辑和确认删除，运行时快照更新无需
+  重启。
+- 必须保留：Relay 在 token 估算、预扣费、计费、渠道选择、上游调用和重试之前检查
+  规范化提示词；自动分组检查全部候选分组。同一请求无论命中多少词只计一次，命中
+  返回不可重试的 HTTP 403 `sensitive_words_detected`，并使用协议对应的错误封装。
+- 必须保留：使用日志类型 8 `关键词拦截` 通过 request ID 关联主库审计事件；列表和
+  普通用户视图脱敏，管理员详情才可查看完整规范化提示词、命中规则、片段、规则版本
+  和处理结果。审计证据不写入原始请求体、API Key 或普通日志字段。
+- 必须保留：用户字段保存敏感词违规次数和白名单开关。白名单命中仍记录审计和日志但
+  不拦截、不计数；观察模式只记录。普通用户按行锁事务原子递增，第 5 次有效命中禁用
+  账户、刷新认证版本并撤销会话；封禁、清零次数、解封和白名单操作均不得清空或修改
+  `quota`、余额、历史账务或历史审计证据。
+- 必须保留：默认客户端警示文案明确说明“余额不退”和严重情形报警，但这是提示文本，
+  不是余额处理指令；管理员可在用户编辑右抽屉维护违规次数、清零次数和个人白名单，
+  敏感词页面不承载白名单名单或审计列表，审计复核入口统一在使用日志。
+- 当前位置：`model/sensitive_word.go`、`model/user.go`、`model/main.go`、
+  `service/sensitive.go`、`controller/relay.go`、`controller/sensitive_word.go`、
+  `controller/user.go`、`controller/log.go`、`model/log.go`、`router/api-router.go`、
+  `web/src/features/system-settings/request-limits/sensitive-words-section.tsx`、
+  `web/src/features/users/components/users-columns.tsx`、
+  `web/src/features/users/components/users-mutate-drawer.tsx`、
+  `web/src/features/usage-logs/**`。
+- 数据/配置：保留旧 `SensitiveWords` Option 的迁移和兼容回退；新增规则、词条、分组、
+  审计表及用户字段必须同时兼容标准/快速迁移。审计事件写主库，日志库只保存结构化
+  摘要；配置关闭证据留存时不得写入完整提示词或片段。
+- 验证入口：`model/sensitive_word_test.go`、`controller/sensitive_word_test.go`、
+  `controller/relay_test.go`、`controller/user_manage_test.go`、
+  `relaykit/**`，以及敏感词页面、用户抽屉和使用日志的前端 typecheck/build/lint。
+- 来源提交：`21cc64f46`、`7f17b6307`、`ab37d8b51`。
+
 ## 5. 提交映射完整性
 
 以下映射用于机械核对。未来合并前，应从历史基线列出本地非合并提交并与本节比较；
@@ -487,6 +523,7 @@
 | P-27 | `571b38f03` |
 | P-28 | `b44e6971e` |
 | P-29 | `e1765fd8e`, `4173af597` |
+| P-30 | `21cc64f46`, `7f17b6307`, `ab37d8b51` |
 
 ## 6. 本次及以后维护记录模板
 
@@ -513,3 +550,6 @@ GitHub Actions 的 amd64、arm64 与 manifest 均成功。
   提交引用均可解析且已归属 P-01 至 P-29，补录 rc.24 的五个阶段/审计维护提交和
   本轮 `eb9c43244` 的清单维护归属。发现并修复 rc.25 合并后 Epay 成功回调遗漏
   `success` 响应的问题；该修复属于阶段 2 后端审查，不改变历史订单或数据库数据。
+- 2026-08-30：新增 P-30，登记敏感词与内容审计重构的规则、分组、审计、白名单、
+  违规次数、第五次封禁、HTTP 403 和余额不变契约；确认功能提交已推送并按蓝绿流程
+  上线，`84daf8a43` 仅为发布记录文档维护提交。
