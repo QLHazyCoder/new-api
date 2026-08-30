@@ -94,7 +94,9 @@
 - [x] 新增架构、接口、迁移、回滚和排障文档。
 - [x] 更新维护指南中的敏感词操作和发布边界。
 - [x] 记录文件职责、测试入口、旧配置兼容和禁止余额清零的硬约束。
-- [ ] 最终提交后回填提交号、GitHub Actions 和部署结果。
+- [x] 功能提交并推送至 `main`：`ab37d8b5149870302416b1b4a7cb4bb6365a519a`（`feat: redesign sensitive word content audit`）。
+- [x] GitHub Actions `33307400802` 成功完成：amd64、arm64 构建、GHCR 清单创建与 cosign 签名均通过。
+- [x] 按蓝绿流程更新待机 `new-api-green`，确认主库敏感词表与用户字段迁移完成后切流；公网 `/api/status` 返回 `main-ab37d8b`，两槽均为 healthy。
 
 ## 7. 最终验证门禁
 
@@ -107,9 +109,9 @@
 - [x] 前端定向 Vitest：`npm test -- src/features/wallet/lib/payment.test.ts`，4 项通过。
 - [ ] 前端全量 Vitest：当前基线仍有 8 个测试文件导入 `node:test`/`bun:test` 导致 Vite 解析失败，另有 2 个既有 API Key 抽屉用例超时；本次敏感词相关文件未在失败清单中。发布前需由维护者决定是否单独修复该存量测试债务。
 - [ ] 前端全量格式检查：`npm run format:check` 当前仅报告 5 个既有无关文件（`response-fade-*`、`response-renderer-inline.tsx`、`api-key-group-cell.tsx`、`redemption-form.ts`）；本次敏感词文件未在失败清单中。
-- [ ] GitHub Actions 成功。
-- [ ] 蓝绿发布、线上健康检查和观察窗口。
+- [x] GitHub Actions 成功：`33307400802`，镜像提交为 `ab37d8b5149870302416b1b4a7cb4bb6365a519a`。
+- [x] 蓝绿发布、线上健康检查和观察窗口：流量已切至 `new-api-green`，Caddy 实际三处上游均为 green，公网版本为 `main-ab37d8b`。
 
 ## 最终审查结论
 
-代码实现、定向回归、根 Go 全量测试、relaykit 测试、前端类型检查、生产构建和项目 lint 已完成。前端全量 Vitest 和格式检查的已知存量失败未被掩盖；GitHub Actions、提交和授权的线上更新仍待完成。完成后必须在本节补充实际提交号、Actions run 和发布结果；不得以设计完成或局部测试通过替代最终交付结论。
+敏感词与内容审计重构已随 `ab37d8b5149870302416b1b4a7cb4bb6365a519a` 交付并上线。规则、分组、审计和用户违规字段已迁移，流量由健康的 `new-api-green` 承接，公网状态为 `main-ab37d8b`。实现只禁用账户、刷新认证版本并撤销会话，不会清空或修改余额。前端全量 Vitest 和格式检查的已知存量失败仍如实保留，均不在本次敏感词文件范围内；不得以设计完成或局部测试通过替代后续维护时的全量验证。
