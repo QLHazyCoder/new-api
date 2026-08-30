@@ -178,8 +178,8 @@ Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检�
 2026-08-30 的封禁后启用边界修复：
 
 - 代码提交：`384e4988c5a453b0c000cc4f85d7866e2729f3e6`，已推送 `main`。
-- GitHub Actions：`33313133592` 成功完成 amd64、arm64、manifest 和 cosign；GHCR `latest`
-  manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
+- GitHub Actions：`33313133592` 成功完成 amd64、arm64、manifest 和 cosign；不可变镜像标签
+  `main-384e498` 的 GHCR manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
 - 发布顺序：active blue 保持在线，`update-new-api-standby.sh` 更新 green 并健康检查，
   `switch-new-api.sh` 平滑切换到 green；两槽均为 healthy，Caddy 三处上游为 green。
 - 线上核对：容器 revision 为 `384e4988c`，公网 `/api/status` 连续 HTTP 200，版本

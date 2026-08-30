@@ -240,8 +240,8 @@ npm test
 ## 10. 本轮边界修复发布记录
 
 2026-08-30，提交 `384e4988c5a453b0c000cc4f85d7866e2729f3e6` 已推送到 `main`，GitHub
-Actions `33313133592` 的 amd64、arm64、manifest 和 cosign 均成功。GHCR `latest`
-manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
+Actions `33313133592` 的 amd64、arm64、manifest 和 cosign 均成功。不可变镜像标签
+`main-384e498` 的 GHCR manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
 
 发布按 standby-first 蓝绿流程完成：先更新 `new-api-green` 并确认健康，再将 Caddy 三处
 上游从 blue 平滑切换到 green；两槽均为 healthy，公网 `/api/status` 连续返回 HTTP 200 和

@@ -119,7 +119,7 @@
 - [x] 前端定向 Vitest：`npm test -- src/features/wallet/lib/payment.test.ts`，4 项通过。
 - [ ] 前端全量 Vitest：`vitest run` 当前 8 个既有测试文件因导入 `node:test`/`bun:test` 无法打包，已执行的 35 个文件共 180 项测试全部通过；本次敏感词相关文件未在失败清单中。该存量测试债务需后续单独处理。
 - [ ] 前端全量格式检查：`npm run format:check` 当前仅报告 5 个既有无关文件（`response-fade-*`、`response-renderer-inline.tsx`、`api-key-group-cell.tsx`、`redemption-form.ts`）；本次敏感词文件未在失败清单中。
-- [x] GitHub Actions 成功：`33313133592`，镜像提交为 `384e4988c5a453b0c000cc4f85d7866e2729f3e6`；amd64、arm64、manifest 和 cosign 均通过。GHCR `latest` manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
+- [x] GitHub Actions 成功：`33313133592`，镜像提交为 `384e4988c5a453b0c000cc4f85d7866e2729f3e6`；amd64、arm64、manifest 和 cosign 均通过。不可变标签 `main-384e498` 的 GHCR manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
 - [x] 蓝绿发布、线上健康检查和观察窗口：先更新 standby `new-api-green`，再从 blue 平滑切流到 green；两槽均 healthy，Caddy 三处上游均为 green，公网连续 HTTP 200，版本为 `main-384e498`。
 
 ## 最终审查结论

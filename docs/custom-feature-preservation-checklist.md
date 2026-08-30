@@ -561,4 +561,4 @@ GitHub Actions 的 amd64、arm64 与 manifest 均成功。
 - 2026-08-30：补充 P-30 的启用边界：所有管理员启用/解封入口清零当前次数、保留历史
   证据和余额；状态变化才刷新认证并撤销会话，重复启用保持幂等。实现已由
   `384e4988c` 发布，Actions `33313133592` 成功，green standby-first 切流完成，公网版本
-  `main-384e498`；GHCR latest manifest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
+  `main-384e498`；该不可变版本标签的 GHCR manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
