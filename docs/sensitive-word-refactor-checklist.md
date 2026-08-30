@@ -117,11 +117,11 @@
 - [x] 前端类型检查和 lint：`npm run typecheck`、`npm run lint`。本次确认框与抽屉改动无新增错误。
 - [x] 前端生产构建：`npm run build:check` 通过（Rsbuild v2.1.6，构建耗时 23.2s）。
 - [x] 前端定向 Vitest：`npm test -- src/features/wallet/lib/payment.test.ts`，4 项通过。
-- [ ] 前端全量 Vitest：`vitest run` 当前 8 个既有测试文件因导入 `node:test`/`bun:test` 无法打包，已执行的 35 个文件共 180 项测试全部通过；本次敏感词相关文件未在失败清单中。该存量测试债务需后续单独处理。
+- [ ] 前端全量 Vitest：本轮 `vitest run` 有 9 个失败文件、34 个文件通过，180 项中 179 项通过；其中 8 个既有文件因导入 `node:test`/`bun:test` 无法打包，另 1 个无关的 API Key 抽屉测试在全量并行环境下超时。该测试单独重跑为 2/2 通过，敏感词相关文件未在失败清单中；存量测试债务仍需后续单独处理。
 - [ ] 前端全量格式检查：`npm run format:check` 当前仅报告 5 个既有无关文件（`response-fade-*`、`response-renderer-inline.tsx`、`api-key-group-cell.tsx`、`redemption-form.ts`）；本次敏感词文件未在失败清单中。
 - [x] GitHub Actions 成功：`33313133592`，镜像提交为 `384e4988c5a453b0c000cc4f85d7866e2729f3e6`；amd64、arm64、manifest 和 cosign 均通过。不可变标签 `main-384e498` 的 GHCR manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
 - [x] 蓝绿发布、线上健康检查和观察窗口：先更新 standby `new-api-green`，再从 blue 平滑切流到 green；两槽均 healthy，Caddy 三处上游均为 green，公网连续 HTTP 200，版本为 `main-384e498`。
 
 ## 最终审查结论
 
-敏感词与内容审计重构及本轮启用边界修复已随 `384e4988c5a453b0c000cc4f85d7866e2729f3e6` 交付并上线。用户列表启用和专用解封现在共享行锁事务：恢复状态并清零当前违规次数，状态变化才刷新认证并撤销旧会话；历史审计、使用日志、白名单和所有余额/消费字段保持不变，下一次命中从第 1 次计数。Actions `33313133592` 和 standby-first 蓝绿发布均已验证成功，公网状态为 `main-384e498`。前端全量 Vitest 的 8 个存量 `node:test`/`bun:test` 打包失败及格式检查的 5 个无关文件仍如实保留，敏感词相关文件未在失败清单中。
+敏感词与内容审计重构及本轮启用边界修复已随 `384e4988c5a453b0c000cc4f85d7866e2729f3e6` 交付并上线。用户列表启用和专用解封现在共享行锁事务：恢复状态并清零当前违规次数，状态变化才刷新认证并撤销旧会话；历史审计、使用日志、白名单和所有余额/消费字段保持不变，下一次命中从第 1 次计数。Actions `33313133592` 和 standby-first 蓝绿发布均已验证成功，公网状态为 `main-384e498`。前端全量 Vitest 本轮为 9 个失败文件（8 个既有 `node:test`/`bun:test` 打包失败，另 1 个无关测试并行超时）、34 个文件通过且 179/180 项通过；无关超时测试单独重跑 2/2 通过。格式检查的 5 个无关文件仍如实保留，敏感词相关文件未在失败清单中。
