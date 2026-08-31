@@ -90,14 +90,6 @@
 
 拦截错误为 HTTP `403`，错误码和类型均为 `sensitive_words_detected`，同时设置不可重试和不写普通 Relay 错误日志。OpenAI、Claude 和 Gemini 路径都保持相同的中文提示原文，不附加请求 ID，避免客户端看到被篡改的策略文案。
 
-自动封禁后的客户端重试有一个额外边界：认证中间件早于 Relay 执行，因此第五次命中
-完成封禁后，后续重试不会再次进入提示词检查。`middleware.TokenAuth` 会通过当前用户的
-违规次数和最近一条 `auto_banned=true` 审计事件识别这种情况，并继续返回当前配置的
-敏感词提示及 `sensitive_words_detected`（仍为 HTTP 403）；它不会解除封禁、增加次数、
-写入余额或产生上游请求。已清零次数、普通人工禁用、审计查询失败或策略模式为 `off`
-仍返回原来的通用封禁提示。这样可以覆盖会在收到 403 后自动重试的第三方客户端，同时
-不把普通账号禁用误报为敏感词命中。
-
 ## 3. 数据模型与存储位置
 
 ### 3.1 主数据库
@@ -207,10 +199,6 @@
 4. 误判时先修正规则或分组绑定，再在用户抽屉清零违规次数；不要删除历史日志或审计事件。
 5. 用户被封禁后，使用用户列表“启用”或专用解封入口会清零当前次数，但不会删除历史证据、余额或消费记录；下一次命中应显示第 1 次。
 6. 若用户在第 5 次后仍可访问，检查 `users.status`、`auth_version`、`user_sessions` 的撤销状态和用户认证缓存。
-   若客户端显示“正在重新连接”后最终出现 `User has been banned`，先按 request ID 对照时间线：
-   第五次请求应有类型 8 审计事件和配置提示，后续重试会在 `TokenAuth` 阶段结束。新版本会
-   对审计确认的自动封禁重试返回同一配置提示；若仍是通用文案，核对违规次数是否已被
-   管理员清零、最新自动封禁事件是否存在，或当前运行槽位是否已加载包含该修复的版本。
 7. 若规则未生效，确认策略已启用、模式不是关闭、规则已启用、局部规则分组存在于分组定价，并确认请求实际使用的分组。
 8. 若审计详情为空，检查“保存完整审计证据”是否关闭，或是否已经超过提示词保留天数。清理任务只清空完整提示词和摘要，不删除命中元数据。
 9. 若 Relay 返回“敏感词审计暂时不可用，请稍后重试”，先查看同一 request ID 的服务日志和数据库错误。重点确认 MySQL 的 `sensitive_word_audit_events.full_prompt` 为 `MEDIUMTEXT`；旧版本的 `TEXT` 在中文、多字节或长 Responses 提示词下会触发 1406。`observe` 模式遇到明确的审计落库错误应记录“continuing request”并放行，若仍返回 503，继续检查是否为规则/用户读取错误或未运行新版本迁移。
@@ -226,8 +214,6 @@
 | [model/log.go](../model/log.go) | 类型 8、普通用户日志脱敏。 |
 | [model/option.go](../model/option.go) | 旧 Option 更新时的运行时快照失效。 |
 | [controller/relay.go](../controller/relay.go) | 计费前的检查、403 和禁止重试。 |
-| [middleware/auth.go](../middleware/auth.go) | 令牌认证阶段识别自动封禁重试，并保持普通人工禁用的通用响应。 |
-| [middleware/utils.go](../middleware/utils.go) | OpenAI 错误响应封装；敏感词响应保留配置文案，不追加传输 request ID。 |
 | [controller/sensitive_word.go](../controller/sensitive_word.go) | 管理 API 与操作审计。 |
 | [controller/user.go](../controller/user.go) | 管理员编辑次数/白名单和操作审计。 |
 | [router/api-router.go](../router/api-router.go) | 管理路由与权限边界。 |
@@ -243,9 +229,7 @@
 go test ./model -run 'Test(MigrateSensitiveWordData|SaveSensitiveWordConfig|SensitiveWord)' -count=1
 go test ./controller -run 'Test(SensitiveWordAuditListRedactsFullPrompt|RelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery|UpdateUserPersistsSensitiveWordControlsWithoutChangingQuota|ManageUserEnableResets|SensitiveWordUnbanEndpoint)' -count=1
 go test ./model -run 'Test(SensitiveWordAuditPrompt(GormTypeForSupportedDialects|UsesDialectSizedTypes)|TruncateSensitivePromptIsByteSafeForLargeUnicodeInput|SensitiveWordObserveAuditPersistenceErrorIsTyped)' -count=1
-go test ./model -run 'TestSensitiveWordAutoBanMessageRequiresCurrentAutomaticBanState' -count=1
 go test ./controller -run 'TestShouldAllowSensitiveAuditFailureOnlyInObserveMode' -count=1
-go test ./middleware -run 'TestTokenAuthReturnsSensitivePolicyMessageForAutomaticBanRetry' -count=1
 go test ./...
 go build ./...
 ```
@@ -280,12 +264,3 @@ Actions `33313133592` 的 amd64、arm64、manifest 和 cosign 均成功。不可
 上游从 blue 平滑切换到 green；两槽均为 healthy，公网 `/api/status` 连续返回 HTTP 200 和
 版本 `main-384e498`。本次上线只改变启用/解封的状态与违规次数边界，不清理余额、消费、
 历史审计、使用日志或白名单状态。
-
-## 11. 自动封禁重试响应修复（2026-08-31）
-
-运行日志复核确认：第五次敏感词命中在 Relay 中已经按配置文案返回并完成自动封禁；
-客户端随后自动重试，重试请求在 `TokenAuth` 阶段发现账号已禁用，于是显示了通用
-`User has been banned`。本轮修复在认证阶段查询当前违规次数和最近自动封禁审计事件，
-仅对该类重试返回配置的敏感词文案和 `sensitive_words_detected`，不改变封禁状态、
-计数、余额或历史证据。观察模式仍只影响后续命中，不能追溯解除已经存在的封禁；管理员
-启用/解封并清零次数后，认证恢复通用的账号状态判断。

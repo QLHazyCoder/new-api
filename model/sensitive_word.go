@@ -361,54 +361,6 @@ func GetSensitiveWordConfig() SensitiveWordConfig {
 	return cfg
 }
 
-// SensitiveWordAutoBanMessage returns the configured policy message for a
-// currently disabled user when the database contains a matching automatic-ban
-// audit event. Authentication runs before Relay, so this best-effort lookup
-// lets a client's retry receive the same sensitive-word response as the
-// original blocked request instead of the generic user-banned message. A
-// cleared counter or an ordinary/manual ban deliberately returns false.
-func SensitiveWordAutoBanMessage(userID int) (string, bool) {
-	if DB == nil || userID <= 0 {
-		return "", false
-	}
-	cfg := GetSensitiveWordConfig()
-	if cfg.Mode == "off" || strings.TrimSpace(cfg.BlockMessage) == "" {
-		return "", false
-	}
-
-	var userState struct {
-		Status                      int
-		SensitiveWordViolationCount int
-	}
-	if err := DB.Model(&User{}).
-		Select("status, sensitive_word_violation_count").
-		Where("id = ?", userID).
-		First(&userState).Error; err != nil {
-		return "", false
-	}
-	if userState.Status != common.UserStatusDisabled || userState.SensitiveWordViolationCount <= 0 {
-		return "", false
-	}
-
-	var latestAutoBan struct {
-		ViolationCount int
-	}
-	if err := DB.Model(&SensitiveWordAuditEvent{}).
-		Select("violation_count").
-		Where("user_id = ? AND auto_banned = ?", userID, true).
-		Order("id DESC").
-		First(&latestAutoBan).Error; err != nil {
-		return "", false
-	}
-	// Enabling/unbanning clears the current counter but intentionally keeps the
-	// historical event. Comparing counts prevents that old event from changing
-	// a later ordinary/manual ban into a sensitive-word response.
-	if latestAutoBan.ViolationCount <= 0 || userState.SensitiveWordViolationCount < latestAutoBan.ViolationCount {
-		return "", false
-	}
-	return cfg.BlockMessage, true
-}
-
 func GetSensitiveWordStats() (SensitiveWordStats, error) {
 	var stats SensitiveWordStats
 	if err := DB.Model(&SensitiveWordRule{}).Count(&stats.TotalRules).Error; err != nil {

@@ -33,7 +33,6 @@
 - [x] 自动分组在预扣费前检查全部候选分组，局部命中写实际命中组。
 - [x] 同一请求多规则、多词条命中只计数一次。
 - [x] Relay 在 token 估算、预扣费、选渠道、上游调用和重试之前执行检查。
-- [x] 自动封禁后的认证阶段重试能根据当前次数和自动封禁审计事件返回配置敏感词文案；普通人工禁用和已清零账号仍返回通用封禁提示。
 - [x] 审计事务失败时回滚计数；`block` 模式失败关闭并返回不可重试 503，`observe` 模式仅对明确的审计落库错误放行并记录服务降级，不伪报已记录。
 - [x] 审计完整提示词按数据库方言使用 MySQL `MEDIUMTEXT`、PostgreSQL/SQLite `TEXT`，并执行 UTF-8 字节安全截断。
 
@@ -82,7 +81,6 @@
 - [x] 控制器回归测试证明审计列表不泄露完整提示词，详情保留管理员复核证据。
 - [x] 观察模式审计落库失败故障测试证明请求继续、计数回滚；拦截模式和非审计故障仍失败关闭。
 - [x] 错误响应是 HTTP 403、sensitive_words_detected、不可重试且不重复写普通错误日志。
-- [x] 客户端自动重试在 TokenAuth 阶段仍保持 HTTP 403 和 sensitive_words_detected，不重复计数、不解封、不修改余额。
 - [x] OpenAI Chat、Responses、Claude、Gemini、图片请求的提示词提取已有独立模块测试。
 
 ## 5. 管理界面
@@ -132,12 +130,6 @@
 - [x] GitHub Actions 成功：`33313133592`，镜像提交为 `384e4988c5a453b0c000cc4f85d7866e2729f3e6`；amd64、arm64、manifest 和 cosign 均通过。不可变标签 `main-384e498` 的 GHCR manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
 - [x] 蓝绿发布、线上健康检查和观察窗口：先更新 standby `new-api-green`，再从 blue 平滑切流到 green；两槽均 healthy，Caddy 三处上游均为 green，公网连续 HTTP 200，版本为 `main-384e498`。
 - [x] 2026-08-30 审计长提示词修复：MySQL `full_prompt` 改用 `MEDIUMTEXT`，写入前执行 UTF-8 字节安全截断；观察模式仅对审计落库错误放行，其他错误和拦截模式保持 503。新增模型/控制器回归测试；未执行生产发布或 Actions 等待，待代码推送后按既有更新流程处理。
-- [x] 2026-08-31 自动封禁重试文案修复：运行日志确认第五次命中后客户端自动重试进入
-  `TokenAuth`，导致最后一次响应显示通用 `User has been banned`。新增模型判定和认证层回归
-  测试；仅审计确认的自动封禁重试返回配置敏感词文案，普通人工禁用保持原行为。验证命令：
-  `go test ./model -run TestSensitiveWordAutoBanMessageRequiresCurrentAutomaticBanState -count=1`、
-  `go test ./middleware -run TestTokenAuthReturnsSensitivePolicyMessageForAutomaticBanRetry -count=1`、
-  `go test ./... -count=1`、`go build ./...`。
 
 ## 最终审查结论
 

@@ -450,11 +450,7 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		userEnabled := userCache.Status == common.UserStatusEnabled
 		if !userEnabled {
-			if message, ok := model.SensitiveWordAutoBanMessage(token.UserId); ok {
-				abortWithOpenAiMessage(c, http.StatusForbidden, message, types.ErrorCodeSensitiveWordsDetected)
-			} else {
-				abortWithOpenAiMessage(c, http.StatusForbidden, common.TranslateMessage(c, i18n.MsgAuthUserBanned))
-			}
+			abortWithOpenAiMessage(c, http.StatusForbidden, common.TranslateMessage(c, i18n.MsgAuthUserBanned))
 			return
 		}
 

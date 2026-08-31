@@ -12,7 +12,6 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -33,13 +32,11 @@ func setupDashboardAuthMiddlewareTest(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
 	model.DB = db
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
-	model.InitColumnNamesForTest()
 	common.RedisEnabled = false
 	common.SessionSecret = "middleware-auth-test-secret"
 	t.Cleanup(func() {
 		model.DB = previousDB
 		common.SetMainDatabaseType(previousType)
-		model.InitColumnNamesForTest()
 		common.RedisEnabled = previousRedis
 		common.SessionSecret = previousSecret
 	})
@@ -106,76 +103,6 @@ func TestUserAuthAllowsOpaqueDottedPAT(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
 	assert.Equal(t, user.Id, body.ID)
-}
-
-func TestTokenAuthReturnsSensitivePolicyMessageForAutomaticBanRetry(t *testing.T) {
-	setupDashboardAuthMiddlewareTest(t)
-	require.NoError(t, model.DB.AutoMigrate(
-		&model.Token{}, &model.Option{}, &model.SensitiveWordRule{},
-		&model.SensitiveWordRuleWord{}, &model.SensitiveWordRuleGroup{},
-		&model.SensitiveWordAuditEvent{},
-	))
-	message := "自定义敏感词重试提示"
-	require.NoError(t, model.SaveSensitiveWordConfig(model.SensitiveWordConfig{
-		Enabled:     true,
-		CheckPrompt: true,
-		// The reported production state was observe mode. The historical
-		// auto-ban must still explain itself on a retry after that switch.
-		Mode:                    "observe",
-		AuditEnabled:            true,
-		BlockMessage:            message,
-		BanThreshold:            model.SensitiveWordBanThreshold,
-		FullPromptRetentionDays: 180,
-		MaxPromptRunes:          model.SensitiveWordMaxPromptRunes,
-	}))
-	t.Cleanup(func() {
-		// Clear the process-local sensitive-word snapshot before the temporary
-		// database is restored by setupDashboardAuthMiddlewareTest.
-		_ = model.SaveSensitiveWordConfig(model.SensitiveWordConfig{
-			Enabled:                 false,
-			CheckPrompt:             true,
-			Mode:                    "off",
-			AuditEnabled:            false,
-			BlockMessage:            message,
-			BanThreshold:            model.SensitiveWordBanThreshold,
-			FullPromptRetentionDays: 180,
-			MaxPromptRunes:          model.SensitiveWordMaxPromptRunes,
-		})
-	})
-	user := &model.User{
-		Username: "automatic-ban-retry-user", Password: "password-placeholder",
-		Role: common.RoleCommonUser, Status: common.UserStatusDisabled, Group: "default",
-		Quota: 123456, SensitiveWordViolationCount: model.SensitiveWordBanThreshold,
-		AuthVersion: 2, AffCode: "automatic-ban-retry-aff",
-	}
-	require.NoError(t, model.DB.Create(user).Error)
-	require.NoError(t, model.DB.Create(&model.Token{
-		UserId: user.Id, Key: "automaticbanretrytoken", Status: common.TokenStatusEnabled,
-		UnlimitedQuota: true, RemainQuota: 1,
-	}).Error)
-	require.NoError(t, model.DB.Create(&model.SensitiveWordAuditEvent{
-		UserID: user.Id, AutoBanned: true, Blocked: true,
-		ViolationCount: model.SensitiveWordBanThreshold, CreatedAt: time.Now(),
-	}).Error)
-
-	router := gin.New()
-	router.Use(func(c *gin.Context) {
-		c.Set(common.RequestIdKey, "automatic-ban-retry-request")
-		c.Next()
-	})
-	router.POST("/v1/responses", TokenAuth(), func(c *gin.Context) {
-		c.Status(http.StatusNoContent)
-	})
-	request := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	request.Header.Set("Authorization", "Bearer automaticbanretrytoken")
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, request)
-
-	assert.Equal(t, http.StatusForbidden, response.Code)
-	assert.Contains(t, response.Body.String(), message)
-	assert.Contains(t, response.Body.String(), string(types.ErrorCodeSensitiveWordsDetected))
-	assert.NotContains(t, response.Body.String(), "User has been banned")
-	assert.NotContains(t, response.Body.String(), "request id:")
 }
 
 func TestUserAuthNeverFallsBackForRecognizedInvalidInternalJWT(t *testing.T) {

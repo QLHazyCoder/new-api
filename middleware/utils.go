@@ -14,24 +14,15 @@ func abortWithOpenAiMessage(c *gin.Context, statusCode int, message string, code
 	if len(code) > 0 {
 		codeStr = string(code[0])
 	}
-	isSensitiveWord := len(code) > 0 && code[0] == types.ErrorCodeSensitiveWordsDetected
 	userId := c.GetInt("id")
-	displayMessage := message
-	if !isSensitiveWord {
-		displayMessage = common.MessageWithRequestId(message, c.GetString(common.RequestIdKey))
-	}
 	c.JSON(statusCode, gin.H{
 		"error": gin.H{
-			"message": displayMessage,
+			"message": common.MessageWithRequestId(message, c.GetString(common.RequestIdKey)),
 			"type":    "new_api_error",
 			"code":    codeStr,
 		},
 	})
 	c.Abort()
-	if isSensitiveWord {
-		logger.LogInfo(c, fmt.Sprintf("user %d | sensitive word auto-ban response", userId))
-		return
-	}
 	logger.LogError(c.Request.Context(), fmt.Sprintf("user %d | %s", userId, message))
 }
 
