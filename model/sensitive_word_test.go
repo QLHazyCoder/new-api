@@ -474,6 +474,54 @@ func TestSensitiveWordFifthViolationBansWithoutChangingBalance(t *testing.T) {
 	require.Contains(t, fifthLog.Other, "\"balance_changed\":false")
 }
 
+func TestSensitiveWordAutoBanMessageRequiresCurrentAutomaticBanState(t *testing.T) {
+	setupSensitiveWordTest(t)
+	message := "自定义敏感词处理提示"
+	require.NoError(t, SaveSensitiveWordConfig(SensitiveWordConfig{
+		Enabled:                 true,
+		CheckPrompt:             true,
+		Mode:                    "block",
+		AuditEnabled:            true,
+		BlockMessage:            message,
+		BanThreshold:            SensitiveWordBanThreshold,
+		FullPromptRetentionDays: 180,
+		MaxPromptRunes:          SensitiveWordMaxPromptRunes,
+	}))
+	user := createSensitiveWordTestUser(t, 4000000, false)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"status":                         common.UserStatusDisabled,
+		"sensitive_word_violation_count": SensitiveWordBanThreshold,
+	}).Error)
+	autoBan := SensitiveWordAuditEvent{
+		UserID: user.Id, AutoBanned: true, ViolationCount: SensitiveWordBanThreshold,
+		Blocked: true, CreatedAt: time.Now(),
+	}
+	require.NoError(t, DB.Create(&autoBan).Error)
+
+	got, ok := SensitiveWordAutoBanMessage(user.Id)
+	require.True(t, ok)
+	require.Equal(t, message, got)
+
+	// Enabling/unbanning clears the current counter but preserves the audit row;
+	// the historical event must not affect later authentication responses.
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"status":                         common.UserStatusEnabled,
+		"sensitive_word_violation_count": 0,
+	}).Error)
+	_, ok = SensitiveWordAutoBanMessage(user.Id)
+	require.False(t, ok)
+
+	// A manual ban with a stale or absent automatic-ban event keeps the generic
+	// account-disabled response even when the counter is non-zero.
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"status":                         common.UserStatusDisabled,
+		"sensitive_word_violation_count": SensitiveWordBanThreshold,
+	}).Error)
+	require.NoError(t, DB.Delete(&autoBan).Error)
+	_, ok = SensitiveWordAutoBanMessage(user.Id)
+	require.False(t, ok)
+}
+
 func TestSensitiveWordEnableResetsCounterIdempotentlyAndPreservesEvidence(t *testing.T) {
 	setupSensitiveWordTest(t)
 	saveSensitiveWordTestConfig(t, "block", true, SensitiveWordBanThreshold)

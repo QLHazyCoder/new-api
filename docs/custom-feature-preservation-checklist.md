@@ -484,6 +484,10 @@
 - 必须保留：审计完整提示词在 MySQL 使用 `MEDIUMTEXT`、在 PostgreSQL/SQLite 使用 `TEXT`，
   写入前执行合法 UTF-8 的字符/字节双重截断。`observe` 模式仅对明确的审计落库失败放行并记录
   降级；规则、用户或其他事务错误以及 `block` 模式仍失败关闭返回 503，不能借故绕过策略。
+- 必须保留：第五次自动封禁后的客户端重试如果在 `TokenAuth` 阶段被拦截，且当前违规次数
+  与最近 `auto_banned=true` 审计事件仍对应，必须返回配置的敏感词文案和
+  `sensitive_words_detected`；已清零、普通人工禁用、策略关闭或缺少审计证据时仍返回通用
+  封禁提示。该兼容判定不得解封、重复计数、修改余额或写入正常消费记录。
 - 当前位置：`model/sensitive_word.go`、`model/user.go`、`model/main.go`、
   `service/sensitive.go`、`controller/relay.go`、`controller/sensitive_word.go`、
   `controller/user.go`、`controller/log.go`、`model/log.go`、`router/api-router.go`、
@@ -503,6 +507,9 @@
 - 来源提交：`21cc64f46`、`7f17b6307`、`ab37d8b51`。
 - 本轮长提示词/观察模式故障修复随本次提交交付，涉及：`model/sensitive_word.go`、
   `controller/relay.go` 及其模型/控制器回归测试；提交号以 Git 历史为准。
+- 2026-08-31：根据运行日志确认自动封禁后的客户端重试会在认证中间件显示通用封禁文案；
+  新增 `SensitiveWordAutoBanMessage` 判定和 `TokenAuth` 响应回归测试。修复只统一自动封禁
+  重试的错误文案/错误码，不改变封禁、计数、余额或历史审计语义；提交号以 Git 历史为准。
 
 ## 5. 提交映射完整性
 
