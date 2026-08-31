@@ -138,6 +138,8 @@
   `go test ./model -run TestSensitiveWordAutoBanMessageRequiresCurrentAutomaticBanState -count=1`、
   `go test ./middleware -run TestTokenAuthReturnsSensitivePolicyMessageForAutomaticBanRetry -count=1`、
   `go test ./... -count=1`、`go build ./...`。
+- [x] 修复提交 `22eeed17108a2d6ad5bf1078c4ef55f4923f6ed4` 已推送到 `origin/main`；本轮未执行
+  线上容器更新或流量切换，待 Actions 完成后按维护指南的 standby-first 流程处理。
 
 ## 最终审查结论
 

@@ -30,7 +30,8 @@
   或合并记录，不新增独立产品契约；它们必须在对应审计文档或本节保留归属，不能被
   误计入未归类自研功能。
 - 本次新增 P-30 敏感词与内容审计保护项，功能提交为 `21cc64f46`、`7f17b6307`、
-  `ab37d8b51`、`384e4988c`；本轮实时查找功能提交为 `416fabe52`；
+  `ab37d8b51`、`384e4988c`；本轮实时查找功能提交为 `416fabe52`；自动封禁重试文案
+  修复提交为 `22eeed171`；
   `84daf8a43` 仅回填发布记录，不新增产品契约。
 - 本文档与 [upstream-merge-v1.0.0-rc.22.md](./upstream-merge-v1.0.0-rc.22.md)、
   `upstream-merge-v1.0.0-rc.23.md`、`upstream-merge-v1.0.0-rc.24.md` 配套使用：
@@ -504,12 +505,12 @@
 - 验证入口：`model/sensitive_word_test.go`、`controller/sensitive_word_test.go`、
   `controller/relay_test.go`、`controller/user_manage_test.go`、
   `relaykit/**`，以及敏感词页面、用户抽屉和使用日志的前端 typecheck/build/lint。
-- 来源提交：`21cc64f46`、`7f17b6307`、`ab37d8b51`。
+- 来源提交：`21cc64f46`、`7f17b6307`、`ab37d8b51`、`22eeed171`。
 - 本轮长提示词/观察模式故障修复随本次提交交付，涉及：`model/sensitive_word.go`、
   `controller/relay.go` 及其模型/控制器回归测试；提交号以 Git 历史为准。
 - 2026-08-31：根据运行日志确认自动封禁后的客户端重试会在认证中间件显示通用封禁文案；
   新增 `SensitiveWordAutoBanMessage` 判定和 `TokenAuth` 响应回归测试。修复只统一自动封禁
-  重试的错误文案/错误码，不改变封禁、计数、余额或历史审计语义；提交号以 Git 历史为准。
+  重试的错误文案/错误码，不改变封禁、计数、余额或历史审计语义；提交为 `22eeed171`。
 
 ## 5. 提交映射完整性
 
@@ -548,7 +549,7 @@
 | P-27 | `571b38f03` |
 | P-28 | `b44e6971e` |
 | P-29 | `e1765fd8e`, `4173af597` |
-| P-30 | `21cc64f46`, `7f17b6307`, `ab37d8b51`, `384e4988c`, `416fabe52` |
+| P-30 | `21cc64f46`, `7f17b6307`, `ab37d8b51`, `384e4988c`, `416fabe52`, `22eeed171` |
 
 ## 6. 本次及以后维护记录模板
 

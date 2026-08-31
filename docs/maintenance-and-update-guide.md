@@ -227,3 +227,4 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
   `sensitive_words_detected`，普通人工禁用和已清零账号保持通用封禁响应。
 - 本次只推送源代码，未执行线上容器更新；待 GitHub Actions 成功后，按第 4 节 standby-first
   流程更新，先验证备用槽位，再决定是否切流。数据库、余额、计数和历史审计无需额外迁移。
+- 代码提交：`22eeed17108a2d6ad5bf1078c4ef55f4923f6ed4`，本地 `main` 与 `origin/main` 已核对一致。
