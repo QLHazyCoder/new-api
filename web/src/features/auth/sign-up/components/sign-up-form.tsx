@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Loader2, MailWarning } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -27,7 +27,6 @@ import type { z } from 'zod'
 import { Dialog } from '@/components/dialog'
 import { PasswordInput } from '@/components/password-input'
 import { Turnstile } from '@/components/turnstile'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -62,7 +61,6 @@ export function SignUpForm({
   const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
   const [verificationCode, setVerificationCode] = useState('')
-  const [lastSentEmail, setLastSentEmail] = useState('')
   const [agreedToLegal, setAgreedToLegal] = useState(false)
   const [wechatCode, setWeChatCode] = useState('')
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
@@ -185,9 +183,7 @@ export function SignUpForm({
   }
 
   async function handleSendVerificationCode() {
-    const email = emailValue || ''
-    if (await sendCode(email)) {
-      setLastSentEmail(email)
+    if (await sendCode(emailValue || '')) {
       setTurnstileToken('')
       setTurnstileWidgetKey((current) => current + 1)
     }
@@ -347,24 +343,6 @@ export function SignUpForm({
                 {verificationCodeAction}
               </Button>
             </div>
-
-            {lastSentEmail && (
-              <Alert className='border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-500/50 dark:bg-amber-500/10 dark:text-amber-50'>
-                <MailWarning
-                  className='size-4 text-amber-600 dark:text-amber-300'
-                  aria-hidden='true'
-                />
-                <AlertTitle>
-                  {t('Verification email sent. Please check your spam folder')}
-                </AlertTitle>
-                <AlertDescription className='break-words text-amber-900/80 dark:text-amber-100/80'>
-                  {t(
-                    'A verification code was sent to {{email}}. Check your inbox first. If you do not see it, be sure to check your spam, junk, or promotions folder.',
-                    { email: lastSentEmail }
-                  )}
-                </AlertDescription>
-              </Alert>
-            )}
           </>
         )}
 
