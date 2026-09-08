@@ -34,6 +34,10 @@ const (
 	// PlaygroundImageMaxStoredResultsPerUser limits retained successful images,
 	// without restricting queued or running generation tasks.
 	PlaygroundImageMaxStoredResultsPerUser = 50
+
+	// playgroundImageResultRetentionBatchSize keeps each retention cleanup
+	// transaction bounded and gives offset queries an explicit SQL LIMIT.
+	playgroundImageResultRetentionBatchSize = 500
 )
 
 var ErrPlaygroundImageTaskNotFound = errors.New("playground image task not found")
@@ -294,6 +298,7 @@ func PrepareExcessPlaygroundImageResultsForDeletion(userID int, now int64) ([]Pl
 		if err := lockForUpdate(tx).
 			Where("user_id = ? AND status = ? AND hidden = ? AND result_path <> '' AND expires_at > ?", userID, PlaygroundImageTaskSucceeded, false, now).
 			Order("id DESC").
+			Limit(playgroundImageResultRetentionBatchSize).
 			Offset(PlaygroundImageMaxStoredResultsPerUser).
 			Find(&excess).Error; err != nil {
 			return err
