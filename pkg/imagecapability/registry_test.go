@@ -1,7 +1,10 @@
 package imagecapability
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/stretchr/testify/assert"
@@ -59,8 +62,17 @@ func TestIntersectUsesConservativeSharedCapabilities(t *testing.T) {
 	assert.False(t, result.SupportsEditing)
 }
 
-func TestGeminiImageResolutionIsCaseInsensitive(t *testing.T) {
+func TestConfiguredResolutionSuffixesAreCaseInsensitive(t *testing.T) {
+	capability, ok := Resolve(constant.ChannelTypeGemini, "gemini-3.1-flash-image-2K")
+	require.True(t, ok)
+	assert.Equal(t, "2K", capability.DefaultResolution)
+	assert.Empty(t, capability.Resolutions)
 	assert.Equal(t, "2K", GeminiImageResolution("gemini-3.1-flash-image-2K"))
+
+	capability, ok = Resolve(constant.ChannelTypeGemini, "gemini-3.1-flash-image-1k")
+	require.True(t, ok)
+	assert.Equal(t, "1K", capability.DefaultResolution)
+	assert.Empty(t, capability.Resolutions)
 	assert.Equal(t, "1K", GeminiImageResolution("gemini-3.1-flash-image-1k"))
 }
 
@@ -74,4 +86,73 @@ func TestApplyModelAliasDefaultsPreservesPublicResolution(t *testing.T) {
 	capability = ApplyModelAliasDefaults(capability, "gemini-3.1-flash-image-4k")
 	assert.Equal(t, "4K", capability.DefaultResolution)
 	assert.Empty(t, capability.Resolutions)
+}
+
+func TestRegistryCreatesAndReloadsExternalConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "image-capabilities.json")
+	registry := newCapabilityRegistry(path, defaultRules, defaultConfigJSON)
+
+	capability, ok := registry.resolve(1, "gpt-image-2")
+	require.True(t, ok)
+	assert.Contains(t, capability.Sizes, "3840x2160")
+	_, err := os.Stat(path)
+	require.NoError(t, err)
+
+	const replacement = `{
+  "version": 1,
+  "rules": [{
+    "name": "custom-image",
+    "match": {"exact_models": ["custom-image"]},
+    "capabilities": {
+      "provider": "other",
+      "size_mode": "dimensions",
+      "sizes": ["4096x4096"],
+      "default_size": "4096x4096",
+      "max_images": 1
+    }
+  }]
+}`
+	require.NoError(t, os.WriteFile(path, []byte(replacement), 0o640))
+	registry.forceNextReloadForTest()
+
+	capability, ok = registry.resolve(1, "custom-image")
+	require.True(t, ok)
+	assert.Equal(t, []string{"4096x4096"}, capability.Sizes)
+	_, ok = registry.resolve(1, "gpt-image-2")
+	assert.False(t, ok)
+}
+
+func TestRegistryRetainsLastValidExternalConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "image-capabilities.json")
+	const valid = `{
+  "version": 1,
+  "rules": [{
+    "name": "custom-image",
+    "match": {"exact_models": ["custom-image"]},
+    "capabilities": {
+      "provider": "other",
+      "size_mode": "dimensions",
+      "sizes": ["4096x4096"],
+      "default_size": "4096x4096",
+      "max_images": 1
+    }
+  }]
+}`
+	require.NoError(t, os.WriteFile(path, []byte(valid), 0o640))
+	registry := newCapabilityRegistry(path, defaultRules, defaultConfigJSON)
+
+	_, ok := registry.resolve(1, "custom-image")
+	require.True(t, ok)
+	require.NoError(t, os.WriteFile(path, []byte(`{"version": 1, "rules": []}`), 0o640))
+	registry.forceNextReloadForTest()
+
+	capability, ok := registry.resolve(1, "custom-image")
+	require.True(t, ok)
+	assert.Equal(t, []string{"4096x4096"}, capability.Sizes)
+}
+
+func (r *capabilityRegistry) forceNextReloadForTest() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lastChecked = time.Time{}
 }

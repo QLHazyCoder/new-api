@@ -212,7 +212,7 @@
 - 必须保留：Playground 图片模式支持本项目已接入的多供应商能力；模型可见性、
   OpenAI/Gemini/xAI 的图片路由和模型名保持一致，不能因上游模型识别变化错误地把
   图片请求送到文本渠道或重新开放已明确移除的 Grok 图片路径。
-- 当前位置：`pkg/imagecapability/**`、`service/image_capability.go`、
+- 当前位置：`pkg/imagecapability/**`、`/data/image-capabilities.json`、`service/image_capability.go`、
   `controller/playground.go`、`relay/channel/gemini/**`、`relay/channel/xai/**`、
   `web/src/features/playground/**`。
 - 合并检查：模型能力注册、用户可见分组、渠道选择、实际 relay DTO 和前端模型筛选

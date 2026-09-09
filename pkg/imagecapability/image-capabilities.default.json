@@ -1,0 +1,197 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "name": "gemini-imagen",
+      "match": {
+        "channel_types": [24],
+        "model_prefixes": ["imagen-"]
+      },
+      "capabilities": {
+        "provider": "imagen",
+        "size_mode": "aspect_ratio_resolution",
+        "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
+        "resolutions": ["1K", "2K"],
+        "default_aspect_ratio": "1:1",
+        "default_resolution": "1K",
+        "max_images": 4
+      }
+    },
+    {
+      "name": "gemini-3-native-image",
+      "match": {
+        "channel_types": [24],
+        "model_prefixes": ["gemini-3"],
+        "model_contains": ["image"]
+      },
+      "capabilities": {
+        "provider": "gemini",
+        "size_mode": "aspect_ratio_resolution",
+        "aspect_ratios": ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+        "resolutions": ["1K", "2K", "4K"],
+        "default_aspect_ratio": "1:1",
+        "default_resolution": "1K",
+        "max_images": 4,
+        "resolution_suffixes": {"-1k": "1K", "-2k": "2K", "-4k": "4K"},
+        "resolution_suffix_model_prefixes": ["gemini-"]
+      }
+    },
+    {
+      "name": "gemini-native-image",
+      "match": {
+        "channel_types": [24],
+        "model_prefixes": ["gemini-"],
+        "model_contains": ["image"]
+      },
+      "capabilities": {
+        "provider": "gemini",
+        "size_mode": "aspect_ratio_resolution",
+        "aspect_ratios": ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+        "resolutions": ["1K"],
+        "default_aspect_ratio": "1:1",
+        "default_resolution": "1K",
+        "max_images": 4,
+        "resolution_suffixes": {"-1k": "1K", "-2k": "2K", "-4k": "4K"},
+        "resolution_suffix_model_prefixes": ["gemini-"]
+      }
+    },
+    {
+      "name": "gpt-image-2",
+      "match": {
+        "excluded_channel_types": [24, 48],
+        "exact_models": ["gpt-image-2"]
+      },
+      "capabilities": {
+        "provider": "openai",
+        "size_mode": "dimensions",
+        "sizes": ["auto", "1024x1024", "1024x1536", "1536x1024", "1024x1792", "1792x1024", "2048x2048", "2560x1440", "1440x2560", "3840x2160", "2160x3840"],
+        "qualities": ["auto", "low", "medium", "high"],
+        "output_formats": ["png", "jpeg", "webp"],
+        "default_size": "1024x1024",
+        "default_quality": "auto",
+        "default_output_format": "png",
+        "supports_editing": true,
+        "supports_moderation": true,
+        "supports_output_compression": true,
+        "max_images": 4
+      }
+    },
+    {
+      "name": "gpt-image",
+      "match": {
+        "excluded_channel_types": [24, 48],
+        "exact_models": ["chatgpt-image-latest"],
+        "model_prefixes": ["gpt-image-"]
+      },
+      "capabilities": {
+        "provider": "openai",
+        "size_mode": "dimensions",
+        "sizes": ["auto", "1024x1024", "1024x1536", "1536x1024"],
+        "qualities": ["auto", "low", "medium", "high"],
+        "output_formats": ["png", "jpeg", "webp"],
+        "default_size": "1024x1024",
+        "default_quality": "auto",
+        "default_output_format": "png",
+        "supports_editing": true,
+        "supports_moderation": true,
+        "supports_output_compression": true,
+        "max_images": 4
+      }
+    },
+    {
+      "name": "dall-e-2",
+      "match": {
+        "excluded_channel_types": [24, 48],
+        "exact_models": ["dall-e", "dall-e-2"]
+      },
+      "capabilities": {
+        "provider": "openai",
+        "size_mode": "dimensions",
+        "sizes": ["256x256", "512x512", "1024x1024"],
+        "default_size": "1024x1024",
+        "max_images": 4
+      }
+    },
+    {
+      "name": "dall-e-3",
+      "match": {
+        "excluded_channel_types": [24, 48],
+        "exact_models": ["dall-e-3"]
+      },
+      "capabilities": {
+        "provider": "openai",
+        "size_mode": "dimensions",
+        "sizes": ["1024x1024", "1024x1792", "1792x1024"],
+        "qualities": ["standard", "hd"],
+        "default_size": "1024x1024",
+        "default_quality": "standard",
+        "max_images": 4
+      }
+    },
+    {
+      "name": "grok-imagine-image",
+      "match": {
+        "excluded_channel_types": [24],
+        "model_prefixes": ["grok-imagine-image"]
+      },
+      "capabilities": {
+        "provider": "xai",
+        "size_mode": "aspect_ratio_resolution",
+        "aspect_ratios": ["auto", "1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "2:1", "1:2", "19.5:9", "9:19.5", "20:9", "9:20"],
+        "resolutions": ["1K", "2K"],
+        "default_aspect_ratio": "auto",
+        "default_resolution": "1K",
+        "max_images": 4
+      }
+    },
+    {
+      "name": "imagen",
+      "match": {
+        "excluded_channel_types": [48],
+        "model_prefixes": ["imagen-"]
+      },
+      "capabilities": {
+        "provider": "imagen",
+        "size_mode": "aspect_ratio_resolution",
+        "aspect_ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"],
+        "resolutions": ["1K", "2K"],
+        "default_aspect_ratio": "1:1",
+        "default_resolution": "1K",
+        "max_images": 4
+      }
+    },
+    {
+      "name": "gemini-native-image-compatible",
+      "match": {
+        "excluded_channel_types": [48],
+        "model_prefixes": ["gemini-"],
+        "model_contains": ["image"]
+      },
+      "capabilities": {
+        "provider": "gemini",
+        "size_mode": "aspect_ratio_resolution",
+        "aspect_ratios": ["1:1", "1:4", "1:8", "2:3", "3:2", "3:4", "4:1", "4:3", "4:5", "5:4", "8:1", "9:16", "16:9", "21:9"],
+        "resolutions": ["1K"],
+        "default_aspect_ratio": "1:1",
+        "default_resolution": "1K",
+        "max_images": 4,
+        "resolution_suffixes": {"-1k": "1K", "-2k": "2K", "-4k": "4K"},
+        "resolution_suffix_model_prefixes": ["gemini-"]
+      }
+    },
+    {
+      "name": "flux",
+      "match": {
+        "excluded_channel_types": [24, 48],
+        "model_prefixes": ["flux-", "flux.1-"]
+      },
+      "capabilities": {
+        "provider": "other",
+        "size_mode": "dimensions",
+        "sizes": ["1024x1024", "1024x1536", "1536x1024"],
+        "default_size": "1024x1024",
+        "max_images": 4
+      }
+    }
+  ]
+}

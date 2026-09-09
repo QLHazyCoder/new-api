@@ -34,4 +34,10 @@ type Capability struct {
 	SupportsModeration        bool
 	SupportsOutputCompression bool
 	MaxImages                 int
+
+	// resolutionSuffixes is configuration metadata. It is deliberately not
+	// exposed to the client; matching a public model alias only changes UI
+	// defaults and never changes the model name sent upstream.
+	resolutionSuffixes            map[string]string
+	resolutionSuffixModelPrefixes []string
 }

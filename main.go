@@ -23,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/pkg/imagecapability"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
@@ -57,6 +58,7 @@ func main() {
 		common.FatalLog("failed to initialize resources: " + err.Error())
 		return
 	}
+	imagecapability.EnsureRuntimeConfig()
 
 	common.SysLog("New API " + common.Version + " started")
 	if os.Getenv("GIN_MODE") != "debug" {
