@@ -40,6 +40,24 @@ func TestResolveProviderImageCapabilities(t *testing.T) {
 	}
 }
 
+func TestGPTImageModelsShareFullResolutionCapability(t *testing.T) {
+	for _, modelName := range []string{
+		"gpt-image-2",
+		"gpt-image-2.5",
+		"gpt-image-2.5-flare",
+		"gpt-image-2.5-sunburst",
+		"chatgpt-image-latest",
+	} {
+		t.Run(modelName, func(t *testing.T) {
+			capability, ok := Resolve(constant.ChannelTypeOpenAI, modelName)
+			require.True(t, ok)
+			assert.Equal(t, ProviderOpenAI, capability.Provider)
+			assert.Contains(t, capability.Sizes, "3840x2160")
+			assert.Contains(t, capability.Sizes, "2160x3840")
+		})
+	}
+}
+
 func TestResolveRejectsUnsupportedProviderModelPair(t *testing.T) {
 	_, ok := Resolve(constant.ChannelTypeGemini, "gpt-image-2")
 	assert.False(t, ok)

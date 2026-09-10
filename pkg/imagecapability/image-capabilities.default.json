@@ -56,27 +56,6 @@
       }
     },
     {
-      "name": "gpt-image-2",
-      "match": {
-        "excluded_channel_types": [24, 48],
-        "exact_models": ["gpt-image-2"]
-      },
-      "capabilities": {
-        "provider": "openai",
-        "size_mode": "dimensions",
-        "sizes": ["auto", "1024x1024", "1024x1536", "1536x1024", "1024x1792", "1792x1024", "2048x2048", "2560x1440", "1440x2560", "3840x2160", "2160x3840"],
-        "qualities": ["auto", "low", "medium", "high"],
-        "output_formats": ["png", "jpeg", "webp"],
-        "default_size": "1024x1024",
-        "default_quality": "auto",
-        "default_output_format": "png",
-        "supports_editing": true,
-        "supports_moderation": true,
-        "supports_output_compression": true,
-        "max_images": 4
-      }
-    },
-    {
       "name": "gpt-image",
       "match": {
         "excluded_channel_types": [24, 48],
@@ -86,7 +65,7 @@
       "capabilities": {
         "provider": "openai",
         "size_mode": "dimensions",
-        "sizes": ["auto", "1024x1024", "1024x1536", "1536x1024"],
+        "sizes": ["auto", "1024x1024", "1024x1536", "1536x1024", "1024x1792", "1792x1024", "2048x2048", "2560x1440", "1440x2560", "3840x2160", "2160x3840"],
         "qualities": ["auto", "low", "medium", "high"],
         "output_formats": ["png", "jpeg", "webp"],
         "default_size": "1024x1024",
