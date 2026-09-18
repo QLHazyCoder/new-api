@@ -32,7 +32,7 @@ import { useMediaQuery } from '@/hooks'
 import { toIntlLocale } from '@/i18n/languages'
 import { getUserGroups } from '@/lib/api'
 import dayjs from '@/lib/dayjs'
-import { formatQuota } from '@/lib/format'
+import { formatQuota, quotaToBigInt } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { API_KEY_STATUSES } from '../constants'
@@ -147,13 +147,20 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
       cell: ({ row }) => {
         const apiKey = row.original
         if (apiKey.unlimited_quota) {
-          return <UnlimitedQuotaBadge used={apiKey.used_quota} />
+          return (
+            <UnlimitedQuotaBadge
+              used={quotaToBigInt(apiKey.used_quota_raw ?? apiKey.used_quota)}
+            />
+          )
         }
 
-        const used = apiKey.used_quota
-        const remaining = apiKey.remain_quota
+        const used = quotaToBigInt(apiKey.used_quota_raw ?? apiKey.used_quota)
+        const remaining = quotaToBigInt(
+          apiKey.remain_quota_raw ?? apiKey.remain_quota
+        )
         const total = used + remaining
-        const percentage = total > 0 ? (remaining / total) * 100 : 0
+        const percentage =
+          total > 0n ? Number((remaining * 10000n) / total) / 100 : 0
 
         return (
           <Tooltip>

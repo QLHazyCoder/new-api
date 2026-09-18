@@ -97,10 +97,12 @@ export function CheckinCalendarCard({
   /* eslint-enable @tanstack/query/exhaustive-deps */
 
   const checkinRecordsMap = useMemo(() => {
-    const map: Record<string, number> = {}
+    const map: Record<string, bigint> = {}
     const records = checkinData?.stats?.records || []
     records.forEach((record: CheckinRecord) => {
-      map[record.checkin_date] = record.quota_awarded
+      map[record.checkin_date] = BigInt(
+        record.quota_awarded_raw ?? record.quota_awarded
+      )
     })
     return map
   }, [checkinData?.stats?.records])
@@ -108,8 +110,9 @@ export function CheckinCalendarCard({
   const monthlyQuota = useMemo(() => {
     const records = checkinData?.stats?.records || []
     return records.reduce(
-      (sum: number, record: CheckinRecord) => sum + (record.quota_awarded || 0),
-      0
+      (sum: bigint, record: CheckinRecord) =>
+        sum + BigInt(record.quota_awarded_raw ?? record.quota_awarded),
+      0n
     )
   }, [checkinData?.stats?.records])
 
@@ -145,7 +148,7 @@ export function CheckinCalendarCard({
         const res = await performCheckin(token)
         if (res.success && res.data) {
           toast.success(
-            `${t('Check-in successful! Received')} ${formatQuotaWithCurrency(res.data.quota_awarded)}`
+            `${t('Check-in successful! Received')} ${formatQuotaWithCurrency(res.data.quota_awarded_raw ?? res.data.quota_awarded)}`
           )
           refetch()
           setTurnstileModalVisible(false)

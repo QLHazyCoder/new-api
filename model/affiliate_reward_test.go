@@ -17,7 +17,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func setRegistrationAffiliateSettingsForTest(t *testing.T, newUserQuota, inviteeQuota, inviterQuota int, complianceConfirmed bool) {
+func setRegistrationAffiliateSettingsForTest(t *testing.T, newUserQuota, inviteeQuota, inviterQuota int64, complianceConfirmed bool) {
 	t.Helper()
 	paymentSetting := operation_setting.GetPaymentSetting()
 	oldNewUserQuota := common.QuotaForNewUser
@@ -95,13 +95,13 @@ func TestInsertWithTxPersistsRegistrationRewardAndLedgerAtomically(t *testing.T)
 	var storedInviter User
 	require.NoError(t, DB.First(&storedInviter, inviter.Id).Error)
 	assert.Equal(t, 1, storedInviter.AffCount)
-	assert.Equal(t, 250, storedInviter.AffQuota)
-	assert.Equal(t, 250, storedInviter.AffHistoryQuota)
+	assert.EqualValues(t, 250, storedInviter.AffQuota)
+	assert.EqualValues(t, 250, storedInviter.AffHistoryQuota)
 
 	var storedInvitee User
 	require.NoError(t, DB.First(&storedInvitee, invitee.Id).Error)
 	assert.Equal(t, inviter.Id, storedInvitee.InviterId)
-	assert.Equal(t, 600, storedInvitee.Quota)
+	assert.EqualValues(t, 600, storedInvitee.Quota)
 
 	events := findAffiliateRewardEventsForTest(t)
 	require.Len(t, events, 1)
@@ -207,7 +207,7 @@ func TestCompleteTopUpUsesFixedLengthIdempotencyKeyForMaximumTradeNumber(t *test
 
 func TestTransferAffQuotaToQuotaPersistsBalancedLedgerEvent(t *testing.T) {
 	truncateTables(t)
-	transferQuota := int(common.QuotaPerUnit)
+	transferQuota := int64(common.QuotaPerUnit)
 	user := User{
 		Id:       541,
 		Username: "affiliate_transfer",
@@ -219,8 +219,8 @@ func TestTransferAffQuotaToQuotaPersistsBalancedLedgerEvent(t *testing.T) {
 	require.NoError(t, DB.Create(&user).Error)
 
 	require.NoError(t, user.TransferAffQuotaToQuota(transferQuota))
-	assert.Equal(t, 100+transferQuota, user.Quota)
-	assert.Equal(t, 50, user.AffQuota)
+	assert.EqualValues(t, 100+transferQuota, user.Quota)
+	assert.EqualValues(t, 50, user.AffQuota)
 
 	events := findAffiliateRewardEventsForTest(t)
 	require.Len(t, events, 1)

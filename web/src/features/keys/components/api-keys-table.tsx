@@ -42,7 +42,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
-import { formatQuota } from '@/lib/format'
+import { formatQuota, quotaToBigInt } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { getApiKeys, searchApiKeys } from '../api'
@@ -130,7 +130,11 @@ function ApiKeysMobileList({
       {rows.map((row) => {
         const apiKey = row.original
         const statusConfig = API_KEY_STATUSES[apiKey.status]
-        const total = apiKey.used_quota + apiKey.remain_quota
+        const used = quotaToBigInt(apiKey.used_quota_raw ?? apiKey.used_quota)
+        const remaining = quotaToBigInt(
+          apiKey.remain_quota_raw ?? apiKey.remain_quota
+        )
+        const total = used + remaining
 
         return (
           <div
@@ -168,10 +172,10 @@ function ApiKeysMobileList({
             <div className='flex items-center justify-between gap-2 text-xs'>
               <span className='text-muted-foreground'>{t('Quota')}</span>
               {apiKey.unlimited_quota ? (
-                <UnlimitedQuotaBadge used={apiKey.used_quota} />
+                <UnlimitedQuotaBadge used={used} />
               ) : (
                 <span className='font-medium tabular-nums'>
-                  {formatQuota(apiKey.remain_quota)}
+                  {formatQuota(remaining)}
                   <span className='text-muted-foreground font-normal'>
                     {' / '}
                     {formatQuota(total)}

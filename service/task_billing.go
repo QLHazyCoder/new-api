@@ -99,9 +99,9 @@ func taskAdjustFunding(task *model.Task, delta int) error {
 		return model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
 	}
 	if delta > 0 {
-		return model.DecreaseUserQuota(task.UserId, delta, false)
+		return model.DecreaseUserQuota(task.UserId, int64(delta), false)
 	}
-	return model.IncreaseUserQuota(task.UserId, -delta, false)
+	return model.IncreaseUserQuota(task.UserId, int64(-delta), false)
 }
 
 func taskAdjustMixedFunding(task *model.Task, delta int) error {
@@ -109,7 +109,7 @@ func taskAdjustMixedFunding(task *model.Task, delta int) error {
 		return nil
 	}
 	if delta > 0 {
-		if err := model.DecreaseUserQuota(task.UserId, delta, false); err != nil {
+		if err := model.DecreaseUserQuota(task.UserId, int64(delta), false); err != nil {
 			return err
 		}
 		addWalletTaskAllocation(&task.PrivateData.BillingAllocations, delta)
@@ -131,7 +131,7 @@ func taskAdjustMixedFunding(task *model.Task, delta int) error {
 			continue
 		}
 		amount := min(remaining, allocation.Quota)
-		if err := model.IncreaseUserQuota(task.UserId, amount, false); err != nil {
+		if err := model.IncreaseUserQuota(task.UserId, int64(amount), false); err != nil {
 			return err
 		}
 		allocation.Quota -= amount

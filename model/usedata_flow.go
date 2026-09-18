@@ -19,7 +19,7 @@ type FlowQuotaData struct {
 	ModelName   string `json:"model_name" gorm:"column:model_name"`
 	TokenUsed   int    `json:"token_used" gorm:"column:token_used"`
 	Count       int    `json:"count" gorm:"column:count"`
-	Quota       int    `json:"quota" gorm:"column:quota"`
+	Quota       int64  `json:"quota" gorm:"type:bigint;column:quota"`
 }
 
 func GetFlowQuotaData(startTime int64, endTime int64, username string, userID int, role int) ([]*FlowQuotaData, error) {

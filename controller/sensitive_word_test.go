@@ -174,7 +174,7 @@ func TestRelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery(t *testin
 
 	var stored model.User
 	require.NoError(t, db.First(&stored, user.Id).Error)
-	require.Equal(t, 4567890, stored.Quota)
+	require.EqualValues(t, 4567890, stored.Quota)
 	require.Equal(t, 1, stored.SensitiveWordViolationCount)
 	var consumeCount int64
 	require.NoError(t, db.Model(&model.Log{}).Where("type = ?", model.LogTypeConsume).Count(&consumeCount).Error)

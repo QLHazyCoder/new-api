@@ -169,7 +169,7 @@ func getMinTopup() int64 {
 	return int64(minTopup)
 }
 
-func getTopUpQuota(amount int64) (int, error) {
+func getTopUpQuota(amount int64) (int64, error) {
 	quota := decimal.NewFromInt(amount)
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
@@ -177,7 +177,7 @@ func getTopUpQuota(amount int64) (int, error) {
 	} else {
 		quota = quota.Mul(decimal.NewFromFloat(common.QuotaPerUnit))
 	}
-	return common.QuotaFromDecimalStrict(quota)
+	return common.WalletQuotaFromDecimal(quota)
 }
 
 func getMaxTopUpAmount() int64 {
@@ -185,7 +185,7 @@ func getMaxTopUpAmount() int64 {
 		return 0
 	}
 	quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-	maxStoredAmount := decimal.NewFromInt(common.MaxQuota - 1).
+	maxStoredAmount := decimal.NewFromInt(common.MaxWalletQuota).
 		Div(quotaPerUnit).
 		Floor()
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
@@ -198,8 +198,8 @@ func getMaxTopUpAmount() int64 {
 	return maxStoredAmount.IntPart()
 }
 
-func validateCreditedQuota(quota decimal.Decimal) (int, error) {
-	value, err := common.QuotaFromDecimalStrict(quota)
+func validateCreditedQuota(quota decimal.Decimal) (int64, error) {
+	value, err := common.WalletQuotaFromDecimal(quota)
 	if err != nil {
 		return 0, errors.New("充值额度超出系统可表示范围")
 	}
@@ -209,7 +209,7 @@ func validateCreditedQuota(quota decimal.Decimal) (int, error) {
 	return value, nil
 }
 
-func validateTopUpQuota(amount int64) (int, error) {
+func validateTopUpQuota(amount int64) (int64, error) {
 	quota, err := getTopUpQuota(amount)
 	if err == nil && quota > 0 {
 		return quota, nil
@@ -464,7 +464,7 @@ func EpayNotify(c *gin.Context) {
 		}
 		if !result.AlreadyCompleted {
 			logger.LogInfo(c.Request.Context(), fmt.Sprintf("Epay topup completed trade_no=%s user_id=%d client_ip=%s quota_to_add=%d money=%.2f", result.TradeNo, result.UserId, c.ClientIP(), result.QuotaToAdd, result.PayMoney))
-			model.RecordTopupLog(result.UserId, fmt.Sprintf("Epay topup succeeded, quota: %v, amount: %.2f", logger.LogQuota(result.QuotaToAdd), result.PayMoney), c.ClientIP(), result.PaymentMethod, "epay")
+			model.RecordTopupLog(result.UserId, fmt.Sprintf("Epay topup succeeded, quota: %v, amount: %.2f", logger.LogQuota64(result.QuotaToAdd), result.PayMoney), c.ClientIP(), result.PaymentMethod, "epay")
 		}
 		if _, writeErr := c.Writer.Write([]byte("success")); writeErr != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 webhook 响应写入失败 trade_no=%s client_ip=%s error=%q", verifyInfo.ServiceTradeNo, c.ClientIP(), writeErr.Error()))

@@ -261,6 +261,9 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
+	if err := inspectWalletQuotaRangeBeforeMigration(); err != nil {
+		return err
+	}
 
 	err := DB.AutoMigrate(
 		&Channel{},
@@ -308,6 +311,9 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := validateWalletQuotaSchema(); err != nil {
+		return err
+	}
 	if err := seedRequiredOptions(DB); err != nil {
 		return err
 	}
@@ -340,6 +346,9 @@ func migrateDBFast() error {
 	// backed by multiple connections. Running AutoMigrate concurrently can
 	// race on CREATE TABLE (and makes startup nondeterministic). Keep the fast
 	// migration path ordered; the rest of startup remains unchanged.
+	if err := inspectWalletQuotaRangeBeforeMigration(); err != nil {
+		return err
+	}
 	migrations := []struct {
 		model interface{}
 		name  string
@@ -390,6 +399,9 @@ func migrateDBFast() error {
 		if err := DB.AutoMigrate(m.model); err != nil {
 			return fmt.Errorf("failed to migrate %s: %v", m.name, err)
 		}
+	}
+	if err := validateWalletQuotaSchema(); err != nil {
+		return err
 	}
 	if err := seedRequiredOptions(DB); err != nil {
 		return err

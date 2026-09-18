@@ -106,6 +106,8 @@ export interface CurrencyFormatOptions {
   locale?: Intl.LocalesArgument | undefined
 }
 
+export type RawQuotaValue = number | string | bigint
+
 type ResolvedCurrencyFormatOptions = Omit<
   Required<CurrencyFormatOptions>,
   'locale'
@@ -515,13 +517,15 @@ export function formatBillingCurrencyFromUSD(
  * - Payment amounts → use formatLocalCurrencyAmount()
  */
 export function formatQuotaWithCurrency(
-  quota: number | null | undefined,
+  quota: RawQuotaValue | null | undefined,
   options?: CurrencyFormatOptions
 ): string {
-  if (quota == null || Number.isNaN(quota)) return '-'
+  if (quota == null) return '-'
+  const numericQuota = Number(quota)
+  if (!Number.isFinite(numericQuota)) return '-'
 
   const { config } = getCurrencyDisplay()
-  const amountUSD = quota / config.quotaPerUnit
+  const amountUSD = numericQuota / config.quotaPerUnit
   return formatCurrencyFromUSD(amountUSD, options)
 }
 

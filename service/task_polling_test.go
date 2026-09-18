@@ -192,7 +192,7 @@ func TestUpdateVideoTasksDefaultSleepWaitsBetweenTasks(t *testing.T) {
 	})
 
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	assert.Equal(t, 1, adaptor.fetchCount())
+	assert.EqualValues(t, 1, adaptor.fetchCount())
 }
 
 func TestUpdateVideoTasksCanSkipPollingSleepPerChannel(t *testing.T) {
@@ -222,7 +222,7 @@ func TestUpdateVideoTasksCanSkipPollingSleepPerChannel(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, 2, adaptor.fetchCount())
+	assert.EqualValues(t, 2, adaptor.fetchCount())
 }
 
 func TestUpdateVideoTasksDefaultSleepDoesNotBlockOtherChannels(t *testing.T) {
@@ -421,9 +421,9 @@ func TestUpdateSunoTasksStalePollsRefundExactlyOnce(t *testing.T) {
 	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
 	assert.EqualValues(t, model.TaskStatusFailure, reloaded.Status)
 	assert.Zero(t, reloaded.Quota)
-	assert.Equal(t, initialUserQuota+taskQuota, getUserQuota(t, userID))
-	assert.Equal(t, initialTokenQuota+taskQuota, getTokenRemainQuota(t, tokenID))
-	assert.Equal(t, int64(1), countLogs(t))
+	assert.EqualValues(t, initialUserQuota+taskQuota, getUserQuota(t, userID))
+	assert.EqualValues(t, initialTokenQuota+taskQuota, getTokenRemainQuota(t, tokenID))
+	assert.EqualValues(t, int64(1), countLogs(t))
 }
 
 func TestRunTaskPollingOnceDoesNotRefundHistoricalFailedTask(t *testing.T) {
@@ -449,9 +449,9 @@ func TestRunTaskPollingOnceDoesNotRefundHistoricalFailedTask(t *testing.T) {
 	summary := RunTaskPollingOnce(context.Background(), nil)
 
 	assert.Zero(t, summary.UnfinishedTasks)
-	assert.Equal(t, initialQuota, getUserQuota(t, userID))
-	assert.Equal(t, taskQuota, getTaskQuota(t, task.ID))
-	assert.Equal(t, int64(0), countLogs(t))
+	assert.EqualValues(t, initialQuota, getUserQuota(t, userID))
+	assert.EqualValues(t, taskQuota, getTaskQuota(t, task.ID))
+	assert.EqualValues(t, int64(0), countLogs(t))
 }
 
 func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
@@ -493,6 +493,6 @@ func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
 	assert.Zero(t, reloadedModern.Quota)
 	assert.Contains(t, reloadedLegacy.FailReason, "旧系统遗留任务")
 	assert.Contains(t, reloadedModern.FailReason, "任务超时")
-	assert.Equal(t, initialQuota+modernTaskQuota, getUserQuota(t, userID))
-	assert.Equal(t, int64(1), countLogs(t))
+	assert.EqualValues(t, initialQuota+modernTaskQuota, getUserQuota(t, userID))
+	assert.EqualValues(t, int64(1), countLogs(t))
 }

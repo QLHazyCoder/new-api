@@ -46,29 +46,30 @@ func TestAdministrativeQuotaMutationsKeepDatabaseAndCacheConsistent(t *testing.T
 	require.NoError(t, IncreaseUserQuota(user.Id, 25, true))
 	cached, err := GetUserCache(user.Id)
 	require.NoError(t, err)
-	assert.Equal(t, 125, cached.Quota)
-	assert.Equal(t, 125, mustUserQuota(t, user.Id))
+	assert.EqualValues(t, 125, cached.Quota)
+	assert.EqualValues(t, 125, mustUserQuota(t, user.Id))
 
 	require.NoError(t, DecreaseUserQuota(user.Id, 5, true))
 	cached, err = GetUserCache(user.Id)
 	require.NoError(t, err)
-	assert.Equal(t, 120, cached.Quota)
-	assert.Equal(t, 120, mustUserQuota(t, user.Id))
+	assert.EqualValues(t, 120, cached.Quota)
+	assert.EqualValues(t, 120, mustUserQuota(t, user.Id))
 
 	require.NoError(t, OverrideUserQuota(user.Id, 42))
 	assert.False(t, server.Exists(getUserCacheKey(user.Id)))
 	cached, err = GetUserCache(user.Id)
 	require.NoError(t, err)
-	assert.Equal(t, 42, cached.Quota)
+	assert.EqualValues(t, 42, cached.Quota)
 
-	require.NoError(t, OverrideUserQuota(user.Id, common.MaxQuota))
+	require.NoError(t, OverrideUserQuota(user.Id, common.MaxWalletQuota-1))
+	require.NoError(t, IncreaseUserQuota(user.Id, 1, true))
 	assert.Error(t, IncreaseUserQuota(user.Id, 1, true))
-	assert.Equal(t, common.MaxQuota, mustUserQuota(t, user.Id))
+	assert.Equal(t, common.MaxWalletQuota, mustUserQuota(t, user.Id))
 }
 
-func mustUserQuota(t *testing.T, userID int) int {
+func mustUserQuota(t *testing.T, userID int) int64 {
 	t.Helper()
-	var quota int
+	var quota int64
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", userID).Select("quota").Scan(&quota).Error)
 	return quota
 }

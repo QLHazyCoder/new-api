@@ -30,14 +30,15 @@ import {
   getCurrencyDisplay,
   getCurrencyLabel,
   quotaToDisplayAmount,
+  type RawQuotaValue,
 } from '@/lib/currency'
-import { formatQuota } from '@/lib/format'
+import { formatQuota, quotaToBigInt } from '@/lib/format'
 
 interface TransferDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onConfirm: (amount: number) => Promise<boolean>
-  availableQuota: number
+  onConfirm: (amount: string) => Promise<boolean>
+  availableQuota: RawQuotaValue
   transferring: boolean
 }
 
@@ -55,15 +56,17 @@ export function TransferDialog({
   const currencyLabel = getCurrencyLabel()
   const minQuota = Math.ceil(config.quotaPerUnit)
   const minDisplayAmount = quotaToDisplayAmount(minQuota)
-  const availableDisplayAmount = quotaToDisplayAmount(availableQuota)
+  const availableRaw = quotaToBigInt(availableQuota)
+  const availableDisplayAmount = quotaToDisplayAmount(Number(availableRaw))
   const inputAmount = Number(amount)
   const transferQuota = displayAmountToQuota(inputAmount)
-  const canTransfer = availableQuota >= minQuota
+  const canTransfer = availableRaw >= BigInt(minQuota)
+  const transferQuotaRaw = quotaToBigInt(transferQuota)
   const hasValidAmount =
     amount.trim() !== '' &&
     Number.isFinite(inputAmount) &&
-    transferQuota >= minQuota &&
-    transferQuota <= availableQuota
+    transferQuotaRaw >= BigInt(minQuota) &&
+    transferQuotaRaw <= availableRaw
   const step = meta.kind === 'tokens' ? 1 : 0.000001
 
   useEffect(() => {
@@ -78,7 +81,7 @@ export function TransferDialog({
       toast.error(t('Insufficient rewards to meet the minimum transfer amount'))
       return
     }
-    if (!Number.isFinite(inputAmount) || transferQuota < minQuota) {
+    if (!Number.isFinite(inputAmount) || transferQuotaRaw < BigInt(minQuota)) {
       toast.error(
         t('Transfer amount must be at least {{amount}}', {
           amount: formatQuota(minQuota),
@@ -86,12 +89,12 @@ export function TransferDialog({
       )
       return
     }
-    if (transferQuota > availableQuota) {
+    if (transferQuotaRaw > availableRaw) {
       toast.error(t('Transfer amount exceeds available rewards'))
       return
     }
 
-    const success = await onConfirm(transferQuota)
+    const success = await onConfirm(transferQuotaRaw.toString())
     if (success) {
       onOpenChange(false)
     }
@@ -133,7 +136,7 @@ export function TransferDialog({
             {t('Available Rewards')}
           </Label>
           <div className='text-2xl font-semibold'>
-            {formatQuota(availableQuota)}
+            {formatQuota(availableRaw)}
           </div>
         </div>
 

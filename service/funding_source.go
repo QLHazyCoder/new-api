@@ -62,9 +62,9 @@ func (w *WalletFunding) Settle(delta int) error {
 		return nil
 	}
 	if delta > 0 {
-		return model.DecreaseUserQuota(w.userId, delta, false)
+		return model.DecreaseUserQuota(w.userId, int64(delta), false)
 	}
-	return model.IncreaseUserQuota(w.userId, -delta, false)
+	return model.IncreaseUserQuota(w.userId, int64(-delta), false)
 }
 
 func (w *WalletFunding) Refund() error {
@@ -73,7 +73,7 @@ func (w *WalletFunding) Refund() error {
 	}
 	// IncreaseUserQuota 是 quota += N 的非幂等操作，不能重试，否则会多退额度。
 	// 订阅的 RefundSubscriptionPreConsume 有 requestId 幂等保护所以可以重试。
-	return model.IncreaseUserQuota(w.userId, w.consumed, false)
+	return model.IncreaseUserQuota(w.userId, int64(w.consumed), false)
 }
 
 // ---------------------------------------------------------------------------
@@ -187,9 +187,9 @@ func (m *MixedFunding) PreConsume(amount int) error {
 			_ = m.subscription.Refund()
 			return err
 		}
-		if userQuota < m.walletAmount {
+		if userQuota < int64(m.walletAmount) {
 			_ = m.subscription.Refund()
-			return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(m.walletAmount))
+			return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota64(userQuota), logger.FormatQuota(m.walletAmount))
 		}
 		if err := m.wallet.PreConsume(m.walletAmount); err != nil {
 			if m.subscription != nil && m.subscription.preConsumed > 0 {

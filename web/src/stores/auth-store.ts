@@ -35,12 +35,16 @@ export interface AuthUser {
   status?: number
   group?: string
   quota?: number
+  quota_raw?: string
   used_quota?: number
+  used_quota_raw?: string
   request_count?: number
   aff_code?: string
   aff_count?: number
   aff_quota?: number
+  aff_quota_raw?: string
   aff_history_quota?: number
+  aff_history_quota_raw?: string
   inviter_id?: number
   github_id?: string
   discord_id?: string

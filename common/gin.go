@@ -170,6 +170,31 @@ func GetContextKeyInt(c *gin.Context, key constant.ContextKey) int {
 	return c.GetInt(string(key))
 }
 
+func GetContextKeyInt64(c *gin.Context, key constant.ContextKey) int64 {
+	value, exists := c.Get(string(key))
+	if !exists || value == nil {
+		return 0
+	}
+	switch typed := value.(type) {
+	case int64:
+		return typed
+	case int:
+		return int64(typed)
+	case int32:
+		return int64(typed)
+	case uint:
+		return int64(typed)
+	case uint64:
+		if typed > uint64(^uint64(0)>>1) {
+			return 0
+		}
+		return int64(typed)
+	case uint32:
+		return int64(typed)
+	}
+	return 0
+}
+
 func GetContextKeyBool(c *gin.Context, key constant.ContextKey) bool {
 	return c.GetBool(string(key))
 }

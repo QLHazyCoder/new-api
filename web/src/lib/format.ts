@@ -24,7 +24,30 @@ import {
   formatQuotaWithCurrency,
   getCurrencyDisplay,
   getCurrencyFractionDigits,
+  type RawQuotaValue,
 } from './currency'
+
+export type { RawQuotaValue } from './currency'
+
+export function quotaToBigInt(value: RawQuotaValue | null | undefined): bigint {
+  if (value == null || value === '') return 0n
+  if (typeof value === 'bigint') return value
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return 0n
+    return BigInt(Math.trunc(value))
+  }
+  try {
+    return BigInt(value.trim())
+  } catch {
+    return 0n
+  }
+}
+
+export function quotaToRawString(
+  value: RawQuotaValue | null | undefined
+): string {
+  return quotaToBigInt(value).toString()
+}
 
 // ============================================================================
 // Number Formatting
@@ -71,7 +94,7 @@ export function formatCurrencyUSD(value: number | null | undefined): string {
  * Format quota into the configured display amount.
  * Quota is stored in units where `quotaPerUnit` equals 1 USD.
  */
-export function formatQuota(quota: number): string {
+export function formatQuota(quota: RawQuotaValue): string {
   return formatQuotaWithCurrency(quota, {
     digitsLarge: 2,
     digitsSmall: 4,
@@ -104,21 +127,22 @@ export function parseQuotaFromDollars(amount: number): number {
  * Convert quota units to the configured display amount.
  * Reverse of parseQuotaFromDollars.
  */
-export function quotaUnitsToDollars(units: number): number {
+export function quotaUnitsToDollars(units: RawQuotaValue): number {
   const { config, meta } = getCurrencyDisplay()
   return quotaUnitsToDisplayAmount(units, config.quotaPerUnit, meta)
 }
 
 function quotaUnitsToDisplayAmount(
-  units: number,
+  units: RawQuotaValue,
   quotaPerUnit: number,
   meta: ReturnType<typeof getCurrencyDisplay>['meta']
 ): number {
+  const numericUnits = Number(units)
   if (meta.kind === 'tokens') {
-    return units
+    return numericUnits
   }
 
-  return (units / quotaPerUnit) * meta.exchangeRate
+  return (numericUnits / quotaPerUnit) * meta.exchangeRate
 }
 
 /**

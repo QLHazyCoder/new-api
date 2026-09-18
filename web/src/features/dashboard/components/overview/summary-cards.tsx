@@ -165,10 +165,10 @@ export function SummaryCards() {
 
   const summaryValues = useMemo(() => {
     return {
-      usedDisplay: formatQuota(usedQuota),
+      usedDisplay: formatQuota(user?.used_quota_raw ?? usedQuota),
       requestCountDisplay: formatNumber(requestCount),
     }
-  }, [requestCount, usedQuota])
+  }, [requestCount, usedQuota, user?.used_quota_raw])
 
   const currencyEnabledFromStore = isCurrencyDisplayEnabled()
   const statusCurrencyFlag =
@@ -303,7 +303,7 @@ export function SummaryCards() {
             </div>
 
             <div className='font-mono text-xl font-semibold tracking-tight sm:text-2xl'>
-              {formatQuota(remainQuota)}
+              {formatQuota(user?.quota_raw ?? remainQuota)}
             </div>
 
             <div className='grid grid-cols-2 gap-2'>

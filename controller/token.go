@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -36,6 +37,36 @@ type tokenRequest struct {
 	AutoGroups tokenAutoGroupsInput `json:"auto_groups"`
 }
 
+// UnmarshalJSON keeps the existing token request shape while allowing
+// remain_quota to arrive as a decimal string from clients that cannot safely
+// represent all signed int64 values as a JavaScript number.
+func (request *tokenRequest) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	quota, hasQuota := fields["remain_quota"]
+	delete(fields, "remain_quota")
+	cleanData, err := common.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	type tokenRequestAlias tokenRequest
+	var decoded tokenRequestAlias
+	if err := common.Unmarshal(cleanData, &decoded); err != nil {
+		return err
+	}
+	*request = tokenRequest(decoded)
+	if hasQuota {
+		var value common.Int64Value
+		if err := common.Unmarshal(quota, &value); err != nil {
+			return err
+		}
+		request.RemainQuota = value.Int64()
+	}
+	return nil
+}
+
 type tokenResponse struct {
 	*model.Token
 	AutoGroups []string `json:"auto_groups"`
@@ -46,6 +77,7 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 		return nil
 	}
 	maskedToken := *token
+	maskedToken.SyncQuotaRawFields()
 	maskedToken.Key = token.GetMaskedKey()
 	autoGroups, err := token.GetAutoGroups()
 	if err != nil {
@@ -204,11 +236,14 @@ func GetTokenStatus(c *gin.Context) {
 		expiredAt = 0
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"object":          "credit_summary",
-		"total_granted":   token.RemainQuota,
-		"total_used":      0, // not supported currently
-		"total_available": token.RemainQuota,
-		"expires_at":      expiredAt * 1000,
+		"object":              "credit_summary",
+		"total_granted":       token.RemainQuota,
+		"total_granted_raw":   strconv.FormatInt(token.RemainQuota, 10),
+		"total_used":          0, // not supported currently
+		"total_used_raw":      "0",
+		"total_available":     token.RemainQuota,
+		"total_available_raw": strconv.FormatInt(token.RemainQuota, 10),
+		"expires_at":          expiredAt * 1000,
 	})
 }
 
@@ -244,15 +279,23 @@ func GetTokenUsage(c *gin.Context) {
 		expiredAt = 0
 	}
 
+	totalGranted, err := common.AddWalletQuota(token.RemainQuota, token.UsedQuota)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"code":    true,
 		"message": "ok",
 		"data": gin.H{
 			"object":               "token_usage",
 			"name":                 token.Name,
-			"total_granted":        token.RemainQuota + token.UsedQuota,
+			"total_granted":        totalGranted,
+			"total_granted_raw":    strconv.FormatInt(totalGranted, 10),
 			"total_used":           token.UsedQuota,
+			"total_used_raw":       strconv.FormatInt(token.UsedQuota, 10),
 			"total_available":      token.RemainQuota,
+			"total_available_raw":  strconv.FormatInt(token.RemainQuota, 10),
 			"unlimited_quota":      token.UnlimitedQuota,
 			"model_limits":         token.GetModelLimitsMap(),
 			"model_limits_enabled": token.ModelLimitsEnabled,
@@ -277,11 +320,6 @@ func AddToken(c *gin.Context) {
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
 			common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
-			return
-		}
-		maxQuotaValue := common.QuotaFromFloat(1000000000 * common.QuotaPerUnit)
-		if token.RemainQuota > maxQuotaValue {
-			common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
 			return
 		}
 	}
@@ -371,11 +409,6 @@ func UpdateToken(c *gin.Context) {
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
 			common.ApiErrorI18n(c, i18n.MsgTokenQuotaNegative)
-			return
-		}
-		maxQuotaValue := common.QuotaFromFloat(1000000000 * common.QuotaPerUnit)
-		if token.RemainQuota > maxQuotaValue {
-			common.ApiErrorI18n(c, i18n.MsgTokenQuotaExceedMax, map[string]any{"Max": maxQuotaValue})
 			return
 		}
 	}

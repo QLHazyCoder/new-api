@@ -80,12 +80,12 @@ func TestUserUpdateDoesNotOverwriteConcurrentAccountingOrTokenChanges(t *testing
 	var got User
 	require.NoError(t, DB.First(&got, user.Id).Error)
 	assert.Equal(t, "after", got.DisplayName)
-	assert.Equal(t, 600, got.Quota)
-	assert.Equal(t, 420, got.UsedQuota)
+	assert.EqualValues(t, 600, got.Quota)
+	assert.EqualValues(t, 420, got.UsedQuota)
 	assert.Equal(t, 4, got.RequestCount)
 	assert.Equal(t, 3, got.AffCount)
-	assert.Equal(t, 300, got.AffQuota)
-	assert.Equal(t, 1700, got.AffHistoryQuota)
+	assert.EqualValues(t, 300, got.AffQuota)
+	assert.EqualValues(t, 1700, got.AffHistoryQuota)
 	assert.Equal(t, "rotated-token", got.GetAccessToken())
 }
 
@@ -118,7 +118,7 @@ func TestUsageAccountingSupportsSignedDirectAndBatchDeltas(t *testing.T) {
 
 	var got User
 	require.NoError(t, DB.Select("used_quota", "request_count").First(&got, user.Id).Error)
-	assert.Equal(t, 850, got.UsedQuota)
+	assert.EqualValues(t, 850, got.UsedQuota)
 	assert.Equal(t, 3, got.RequestCount)
 	var gotChannel Channel
 	require.NoError(t, DB.Select("used_quota").First(&gotChannel, channel.Id).Error)
@@ -131,14 +131,14 @@ func TestUsageAccountingSupportsSignedDirectAndBatchDeltas(t *testing.T) {
 	UpdateChannelUsedQuota(channel.Id, -100)
 
 	require.NoError(t, DB.Select("used_quota", "request_count").First(&got, user.Id).Error)
-	assert.Equal(t, 850, got.UsedQuota, "batch deltas must remain queued until flush")
+	assert.EqualValues(t, 850, got.UsedQuota, "batch deltas must remain queued until flush")
 	assert.Equal(t, 3, got.RequestCount)
 	require.NoError(t, DB.Select("used_quota").First(&gotChannel, channel.Id).Error)
 	assert.Equal(t, int64(850), gotChannel.UsedQuota, "batch deltas must remain queued until flush")
 
 	batchUpdate()
 	require.NoError(t, DB.Select("used_quota", "request_count").First(&got, user.Id).Error)
-	assert.Equal(t, 1150, got.UsedQuota)
+	assert.EqualValues(t, 1150, got.UsedQuota)
 	assert.Equal(t, 3, got.RequestCount)
 	require.NoError(t, DB.Select("used_quota").First(&gotChannel, channel.Id).Error)
 	assert.Equal(t, int64(1150), gotChannel.UsedQuota)
@@ -171,9 +171,9 @@ func TestUpdateUserAccessTokenOnlyUpdatesAccessToken(t *testing.T) {
 	require.NoError(t, DB.First(&got, user.Id).Error)
 	assert.Equal(t, "rotated-token", got.GetAccessToken())
 	assert.Equal(t, "concurrent-update", got.DisplayName)
-	assert.Equal(t, 1500, got.Quota)
-	assert.Equal(t, 300, got.AffQuota)
-	assert.Equal(t, 1200, got.AffHistoryQuota)
+	assert.EqualValues(t, 1500, got.Quota)
+	assert.EqualValues(t, 300, got.AffQuota)
+	assert.EqualValues(t, 1200, got.AffHistoryQuota)
 }
 
 func TestUpdateUserAccessTokenRejectsSoftDeletedUser(t *testing.T) {
@@ -228,8 +228,8 @@ func TestUpdateSelfProfilePreservesAccountingFields(t *testing.T) {
 	var got User
 	require.NoError(t, DB.First(&got, user.Id).Error)
 	assert.Equal(t, "after", got.DisplayName)
-	assert.Equal(t, 500, got.Quota)
-	assert.Equal(t, 520, got.UsedQuota)
+	assert.EqualValues(t, 500, got.Quota)
+	assert.EqualValues(t, 520, got.UsedQuota)
 	assert.Equal(t, 5, got.RequestCount)
 	assert.Equal(t, int64(2), got.AuthVersion)
 	assert.True(t, common.ValidatePasswordAndHash("new-password", got.Password))
@@ -259,8 +259,8 @@ func TestUpdateUserSettingOnlyUpdatesSetting(t *testing.T) {
 
 	var got User
 	require.NoError(t, DB.First(&got, user.Id).Error)
-	assert.Equal(t, 750, got.Quota)
-	assert.Equal(t, 270, got.UsedQuota)
+	assert.EqualValues(t, 750, got.Quota)
+	assert.EqualValues(t, 270, got.UsedQuota)
 	assert.Equal(t, 4, got.RequestCount)
 	assert.Equal(t, "zh", got.GetSetting().Language)
 }

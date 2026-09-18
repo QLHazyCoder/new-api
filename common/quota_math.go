@@ -8,12 +8,12 @@ import (
 )
 
 // Quota conversions are centralized here so every billing path shares one
-// saturation + logging policy. Quota columns (user/token/log) are 32-bit
-// integers in the database, so an oversized product must clamp to the int32
-// range instead of wrapping around and turning a charge into a credit.
+// saturation + logging policy. These conversions are for a single request's
+// charge domain; wallet balances use the checked int64 helpers in
+// wallet_quota.go instead.
 const (
-	MaxQuota = math.MaxInt32
-	MinQuota = math.MinInt32
+	MaxChargeQuota = math.MaxInt32
+	MinChargeQuota = math.MinInt32
 )
 
 // QuotaClampKind identifies why a quota conversion had to be saturated.
@@ -74,10 +74,10 @@ func saturateQuota(value float64, op string) (int, *QuotaClamp) {
 	switch {
 	case math.IsNaN(value):
 		clamp = &QuotaClamp{Op: op, Kind: QuotaClampNaN, Original: value, Clamped: 0}
-	case value >= MaxQuota:
-		clamp = &QuotaClamp{Op: op, Kind: QuotaClampOverflow, Original: value, Clamped: MaxQuota}
-	case value <= MinQuota:
-		clamp = &QuotaClamp{Op: op, Kind: QuotaClampUnderflow, Original: value, Clamped: MinQuota}
+	case value >= MaxChargeQuota:
+		clamp = &QuotaClamp{Op: op, Kind: QuotaClampOverflow, Original: value, Clamped: MaxChargeQuota}
+	case value <= MinChargeQuota:
+		clamp = &QuotaClamp{Op: op, Kind: QuotaClampUnderflow, Original: value, Clamped: MinChargeQuota}
 	default:
 		return int(value), nil
 	}

@@ -193,7 +193,7 @@ func TestModelPriceHelperRequestBillingRatiosOnlyApplyToFixedPrice(t *testing.T)
 	modelPrices, err := common.Marshal(map[string]float64{
 		"fixed-image-price":      0.04,
 		"fractional-image-price": 0.0000012,
-		"overflow-image-price":   float64(common.MaxQuota) / common.QuotaPerUnit / 2,
+		"overflow-image-price":   float64(common.MaxChargeQuota) / common.QuotaPerUnit / 2,
 	})
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(string(modelPrices)))

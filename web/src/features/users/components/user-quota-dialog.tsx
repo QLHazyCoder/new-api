@@ -25,7 +25,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
-import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
+import {
+  formatQuota,
+  parseQuotaFromDollars,
+  quotaToBigInt,
+  quotaToRawString,
+  type RawQuotaValue,
+} from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { adjustUserQuota } from '../api'
@@ -35,7 +41,7 @@ interface UserQuotaDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   userId: number
-  currentQuota: number
+  currentQuota: RawQuotaValue
   onSuccess: () => void
 }
 
@@ -53,8 +59,8 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
   const quotaValue = parseQuotaFromDollars(Math.abs(amountValue))
 
   const getPreviewText = () => {
-    const current = props.currentQuota
-    const val = quotaValue
+    const current = quotaToBigInt(props.currentQuota)
+    const val = quotaToBigInt(quotaValue)
     switch (mode) {
       case 'add':
         return `${t('Current quota')}: ${formatQuota(current)}  +${formatQuota(val)} = ${formatQuota(current + val)}`
@@ -81,7 +87,10 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
         id: props.userId,
         action: 'add_quota',
         mode,
-        value: mode === 'override' ? value : Math.abs(value),
+        value:
+          mode === 'override'
+            ? quotaToRawString(value)
+            : quotaToRawString(Math.abs(value)),
       })
       if (result.success) {
         toast.success(t('Quota adjusted successfully'))

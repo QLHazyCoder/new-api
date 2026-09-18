@@ -43,13 +43,17 @@ export const userSchema = z.object({
   telegram_id: z.string().optional(),
   email: z.string().optional(),
   quota: z.number(),
+  quota_raw: z.string().optional(),
   used_quota: z.number(),
+  used_quota_raw: z.string().optional(),
   request_count: z.number(),
   group: z.string(),
   aff_code: z.string().optional(),
   aff_count: z.number().optional(),
   aff_quota: z.number().optional(),
+  aff_quota_raw: z.string().optional(),
   aff_history_quota: z.number().optional(),
+  aff_history_quota_raw: z.string().optional(),
   inviter_id: z.number().optional(),
   linux_do_id: z.string().optional(),
   status: userStatusSchema,
@@ -147,7 +151,7 @@ export interface ManageUserQuotaPayload {
   id: number
   action: 'add_quota'
   mode: QuotaAdjustMode
-  value: number
+  value: number | string
 }
 
 // ============================================================================

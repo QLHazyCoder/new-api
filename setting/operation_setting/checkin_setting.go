@@ -4,16 +4,16 @@ import "github.com/QuantumNous/new-api/setting/config"
 
 // CheckinSetting 签到功能配置
 type CheckinSetting struct {
-	Enabled  bool `json:"enabled"`   // 是否启用签到功能
-	MinQuota int  `json:"min_quota"` // 签到最小额度奖励
-	MaxQuota int  `json:"max_quota"` // 签到最大额度奖励
+	Enabled        bool  `json:"enabled"`   // 是否启用签到功能
+	MinChargeQuota int64 `json:"min_quota"` // 签到最小额度奖励
+	MaxChargeQuota int64 `json:"max_quota"` // 签到最大额度奖励
 }
 
 // 默认配置
 var checkinSetting = CheckinSetting{
-	Enabled:  false, // 默认关闭
-	MinQuota: 1000,  // 默认最小额度 1000 (约 0.002 USD)
-	MaxQuota: 10000, // 默认最大额度 10000 (约 0.02 USD)
+	Enabled:        false, // 默认关闭
+	MinChargeQuota: 1000,  // 默认最小额度 1000 (约 0.002 USD)
+	MaxChargeQuota: 10000, // 默认最大额度 10000 (约 0.02 USD)
 }
 
 func init() {
@@ -32,6 +32,6 @@ func IsCheckinEnabled() bool {
 }
 
 // GetCheckinQuotaRange 获取签到额度范围
-func GetCheckinQuotaRange() (min, max int) {
-	return checkinSetting.MinQuota, checkinSetting.MaxQuota
+func GetCheckinQuotaRange() (min, max int64) {
+	return checkinSetting.MinChargeQuota, checkinSetting.MaxChargeQuota
 }

@@ -26,7 +26,7 @@ func TestAttachQuotaSaturationNestsUnderAdminInfo(t *testing.T) {
 			Op:       "QuotaFromDecimal",
 			Kind:     common.QuotaClampOverflow,
 			Original: 1.8e19,
-			Clamped:  common.MaxQuota,
+			Clamped:  common.MaxChargeQuota,
 		},
 	}
 
@@ -39,7 +39,7 @@ func TestAttachQuotaSaturationNestsUnderAdminInfo(t *testing.T) {
 	require.True(t, ok, "quota_saturation should be nested under admin_info")
 	require.Equal(t, "QuotaFromDecimal", sat["op"])
 	require.Equal(t, common.QuotaClampOverflow, sat["kind"])
-	require.Equal(t, common.MaxQuota, sat["clamped"])
+	require.Equal(t, common.MaxChargeQuota, sat["clamped"])
 }
 
 // TestAttachQuotaSaturationPreservesExistingAdminInfo verifies the marker is
@@ -49,7 +49,7 @@ func TestAttachQuotaSaturationPreservesExistingAdminInfo(t *testing.T) {
 	ctx, _ := gin.CreateTestContext(nil)
 
 	relayInfo := &relaycommon.RelayInfo{
-		QuotaClamp: &common.QuotaClamp{Op: "QuotaFromFloat", Kind: common.QuotaClampUnderflow, Clamped: common.MinQuota},
+		QuotaClamp: &common.QuotaClamp{Op: "QuotaFromFloat", Kind: common.QuotaClampUnderflow, Clamped: common.MinChargeQuota},
 	}
 	other := map[string]interface{}{
 		"admin_info": map[string]interface{}{"admin_username": "root"},
@@ -83,11 +83,11 @@ func TestPreConsumeBillingRejectsSaturatedQuotaBeforeDeduction(t *testing.T) {
 			Op:       "QuotaFromFloat",
 			Kind:     common.QuotaClampOverflow,
 			Original: 1e30,
-			Clamped:  common.MaxQuota,
+			Clamped:  common.MaxChargeQuota,
 		},
 	}
 
-	apiErr := PreConsumeBilling(c, common.MaxQuota, info)
+	apiErr := PreConsumeBilling(c, common.MaxChargeQuota, info)
 
 	require.NotNil(t, apiErr)
 	require.Equal(t, types.ErrorCodeModelPriceError, apiErr.GetErrorCode())

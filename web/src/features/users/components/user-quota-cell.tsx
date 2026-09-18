@@ -25,12 +25,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { formatQuota } from '@/lib/format'
+import { formatQuota, quotaToBigInt } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 type UserQuotaCellProps = {
   used: number
   remaining: number
+  usedRaw?: string
+  remainingRaw?: string
 }
 
 function getQuotaProgressColor(percentage: number): string {
@@ -41,12 +43,14 @@ function getQuotaProgressColor(percentage: number): string {
 
 export function UserQuotaCell(props: UserQuotaCellProps) {
   const { t } = useTranslation()
-  const total = props.used + props.remaining
-  const percentage = total > 0 ? (props.remaining / total) * 100 : 0
-  const formattedRemaining = formatQuota(props.remaining)
+  const used = quotaToBigInt(props.usedRaw ?? props.used)
+  const remaining = quotaToBigInt(props.remainingRaw ?? props.remaining)
+  const total = used + remaining
+  const percentage = total > 0n ? Number((remaining * 10000n) / total) / 100 : 0
+  const formattedRemaining = formatQuota(remaining)
   const formattedTotal = formatQuota(total)
 
-  if (total === 0) {
+  if (total === 0n) {
     return (
       <StatusBadge
         label={t('No Quota')}
@@ -80,7 +84,7 @@ export function UserQuotaCell(props: UserQuotaCellProps) {
       <TooltipContent>
         <div className='space-y-1 text-xs'>
           <div>
-            {t('Used:')} {formatQuota(props.used)}
+            {t('Used:')} {formatQuota(used)}
           </div>
           <div>
             {t('Remaining:')} {formattedRemaining}

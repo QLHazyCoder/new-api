@@ -34,7 +34,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { copyToClipboard } from '@/lib/copy-to-clipboard'
-import { formatQuota } from '@/lib/format'
+import { formatQuota, type RawQuotaValue } from '@/lib/format'
 
 import type { ApiKey } from '../types'
 import { useApiKeys } from './api-keys-provider'
@@ -143,7 +143,7 @@ export function ApiKeyCell({ apiKey }: { apiKey: ApiKey }) {
 }
 
 type UnlimitedQuotaBadgeProps = {
-  used: number
+  used: RawQuotaValue
 }
 
 export function UnlimitedQuotaBadge(props: UnlimitedQuotaBadgeProps) {

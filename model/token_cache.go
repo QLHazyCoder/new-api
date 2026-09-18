@@ -103,5 +103,6 @@ func cacheGetTokenByKey(key string) (*Token, error) {
 		return nil, fmt.Errorf("token cache is incomplete")
 	}
 	token.Key = key
+	token.syncQuotaRawFields()
 	return &token, nil
 }

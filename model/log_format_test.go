@@ -19,7 +19,7 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 			"quota_saturation": map[string]interface{}{
 				"op":      "QuotaFromDecimal",
 				"kind":    "overflow",
-				"clamped": common.MaxQuota,
+				"clamped": common.MaxChargeQuota,
 			},
 		},
 	})

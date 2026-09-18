@@ -365,7 +365,7 @@ export function Wallet(props: WalletProps) {
   }
 
   // Handle transfer
-  const handleTransfer = async (amount: number) => {
+  const handleTransfer = async (amount: number | string) => {
     const success = await transferQuota(amount)
     if (success) {
       await fetchUser()
@@ -522,7 +522,7 @@ export function Wallet(props: WalletProps) {
         open={transferDialogOpen}
         onOpenChange={setTransferDialogOpen}
         onConfirm={handleTransfer}
-        availableQuota={user?.aff_quota ?? 0}
+        availableQuota={user?.aff_quota_raw ?? user?.aff_quota ?? 0}
         transferring={transferring}
       />
 

@@ -47,8 +47,10 @@ export interface UserProfile {
   group: string
   /** Current quota balance */
   quota: number
+  quota_raw?: string
   /** Total used quota */
   used_quota: number
+  used_quota_raw?: string
   /** Total request count */
   request_count: number
   /** Account status (1=启用, 2=禁用, 3=待审核, 4=已删除) */
@@ -61,8 +63,10 @@ export interface UserProfile {
   aff_count: number
   /** Affiliate quota (pending rewards) */
   aff_quota: number
+  aff_quota_raw?: string
   /** Total affiliate quota earned (historical) */
   aff_history_quota: number
+  aff_history_quota_raw?: string
   /** Invite user ID */
   invite_user_id?: number
   /** Account creation timestamp */
@@ -196,7 +200,8 @@ export interface CheckinRecord {
   /** Check-in date (YYYY-MM-DD) */
   checkin_date: string
   /** Quota awarded for this check-in */
-  quota_awarded: number
+  quota_awarded: number | string
+  quota_awarded_raw?: string
 }
 
 /**
@@ -208,7 +213,8 @@ export interface CheckinStats {
   /** Total number of check-ins */
   total_checkins: number
   /** Total quota earned from check-ins */
-  total_quota: number
+  total_quota: number | string
+  total_quota_raw?: string
   /** Current month check-in count */
   checkin_count: number
   /** Check-in records for the queried month */
@@ -230,5 +236,6 @@ export interface CheckinStatusResponse {
  */
 export interface CheckinResponse {
   /** Quota awarded for this check-in */
-  quota_awarded: number
+  quota_awarded: number | string
+  quota_awarded_raw?: string
 }

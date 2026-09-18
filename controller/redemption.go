@@ -61,44 +61,51 @@ func GetRedemption(c *gin.Context) {
 	return
 }
 
+type redemptionCreateRequest struct {
+	Name        string            `json:"name"`
+	Count       int               `json:"count"`
+	Quota       common.Int64Value `json:"quota"`
+	ExpiredTime int64             `json:"expired_time"`
+}
+
 func AddRedemption(c *gin.Context) {
 	if !operation_setting.IsPaymentComplianceConfirmed() {
 		common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
 		return
 	}
 
-	redemption := model.Redemption{}
-	err := c.ShouldBindJSON(&redemption)
+	var request redemptionCreateRequest
+	err := c.ShouldBindJSON(&request)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if utf8.RuneCountInString(redemption.Name) == 0 || utf8.RuneCountInString(redemption.Name) > 20 {
+	if utf8.RuneCountInString(request.Name) == 0 || utf8.RuneCountInString(request.Name) > 20 {
 		common.ApiErrorI18n(c, i18n.MsgRedemptionNameLength)
 		return
 	}
-	if redemption.Count <= 0 {
+	if request.Count <= 0 {
 		common.ApiErrorI18n(c, i18n.MsgRedemptionCountPositive)
 		return
 	}
-	if redemption.Count > 100 {
+	if request.Count > 100 {
 		common.ApiErrorI18n(c, i18n.MsgRedemptionCountMax)
 		return
 	}
-	if valid, msg := validateExpiredTime(c, redemption.ExpiredTime); !valid {
+	if valid, msg := validateExpiredTime(c, request.ExpiredTime); !valid {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 		return
 	}
 	var keys []string
-	for i := 0; i < redemption.Count; i++ {
+	for i := 0; i < request.Count; i++ {
 		key := common.GetUUID()
 		cleanRedemption := model.Redemption{
 			UserId:      c.GetInt("id"),
-			Name:        redemption.Name,
+			Name:        request.Name,
 			Key:         key,
 			CreatedTime: common.GetTimestamp(),
-			Quota:       redemption.Quota,
-			ExpiredTime: redemption.ExpiredTime,
+			Quota:       request.Quota.Int64(),
+			ExpiredTime: request.ExpiredTime,
 		}
 		err = cleanRedemption.Insert()
 		if err != nil {
@@ -113,9 +120,9 @@ func AddRedemption(c *gin.Context) {
 		keys = append(keys, key)
 	}
 	recordManageAudit(c, "redemption.create", map[string]interface{}{
-		"name":  redemption.Name,
-		"count": redemption.Count,
-		"quota": logger.LogQuota(redemption.Quota),
+		"name":  request.Name,
+		"count": request.Count,
+		"quota": logger.LogQuota64(request.Quota.Int64()),
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

@@ -25,7 +25,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { IconBadge } from '@/components/ui/icon-badge'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatQuota } from '@/lib/format'
+import { formatQuota, quotaToBigInt } from '@/lib/format'
 
 import type { UserWalletData } from '../types'
 
@@ -62,7 +62,10 @@ export function AffiliateRewardsCard({
     )
   }
 
-  const hasRewards = (user?.aff_quota ?? 0) > 0
+  const pendingQuota = quotaToBigInt(
+    user?.aff_quota_raw ?? user?.aff_quota ?? 0
+  )
+  const hasRewards = pendingQuota > 0n
 
   return (
     <Card data-card-hover='false' className='bg-muted/20 py-0'>
@@ -92,8 +95,13 @@ export function AffiliateRewardsCard({
 
         <div className='grid grid-cols-3 gap-1.5 text-center'>
           {[
-            [t('Pending'), formatQuota(user?.aff_quota ?? 0)],
-            [t('Total Earned'), formatQuota(user?.aff_history_quota ?? 0)],
+            [t('Pending'), formatQuota(pendingQuota)],
+            [
+              t('Total Earned'),
+              formatQuota(
+                user?.aff_history_quota_raw ?? user?.aff_history_quota ?? 0
+              ),
+            ],
             [t('Invites'), String(user?.aff_count ?? 0)],
           ].map(([label, value]) => (
             <div key={label}>

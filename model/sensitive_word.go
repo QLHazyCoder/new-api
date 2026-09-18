@@ -144,8 +144,8 @@ type SensitiveWordAuditEvent struct {
 	ObserveOnly       bool                     `json:"observe_only"`
 	UserStatusBefore  int                      `json:"user_status_before"`
 	UserStatusAfter   int                      `json:"user_status_after"`
-	QuotaBefore       int                      `json:"quota_before"`
-	QuotaAfter        int                      `json:"quota_after"`
+	QuotaBefore       int64                    `json:"quota_before" gorm:"type:bigint;default:0"`
+	QuotaAfter        int64                    `json:"quota_after" gorm:"type:bigint;default:0"`
 	RuleVersion       int64                    `json:"rule_version"`
 	CreatedAt         time.Time                `json:"created_at" gorm:"index"`
 }
@@ -200,8 +200,8 @@ type SensitiveCheckResult struct {
 	Message           string
 	UserStatusBefore  int
 	UserStatusAfter   int
-	QuotaBefore       int
-	QuotaAfter        int
+	QuotaBefore       int64
+	QuotaAfter        int64
 	ObserveOnly       bool
 }
 
@@ -1292,10 +1292,10 @@ type SensitiveWordEnableResetResult struct {
 	ViolationCountAfter  int   `json:"violation_count_after"`
 	AuthVersionBefore    int64 `json:"auth_version_before"`
 	AuthVersionAfter     int64 `json:"auth_version_after"`
-	QuotaBefore          int   `json:"quota_before"`
-	QuotaAfter           int   `json:"quota_after"`
-	UsedQuotaBefore      int   `json:"used_quota_before"`
-	UsedQuotaAfter       int   `json:"used_quota_after"`
+	QuotaBefore          int64 `json:"quota_before"`
+	QuotaAfter           int64 `json:"quota_after"`
+	UsedQuotaBefore      int64 `json:"used_quota_before"`
+	UsedQuotaAfter       int64 `json:"used_quota_after"`
 	StatusChanged        bool  `json:"status_changed"`
 	ViolationCountReset  bool  `json:"violation_count_reset"`
 	SessionsRevoked      int64 `json:"sessions_revoked"`

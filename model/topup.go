@@ -55,11 +55,11 @@ type TopUpCompletionResult struct {
 	TradeNo            string
 	UserId             int
 	Amount             int64
-	QuotaToAdd         int
+	QuotaToAdd         int64
 	PayMoney           float64
 	PaymentMethod      string
 	PaymentProvider    string
-	InviteRewardQuota  int
+	InviteRewardQuota  int64
 	InviteRewardUserId int
 	AlreadyCompleted   bool
 }
@@ -79,17 +79,17 @@ func (topUp *TopUp) Insert() error {
 	return err
 }
 
-func topUpQuotaMaxCurrent(creditedQuota int) (int, error) {
-	if creditedQuota <= 0 || creditedQuota >= common.MaxQuota {
+func topUpQuotaMaxCurrent(creditedQuota int64) (int64, error) {
+	if creditedQuota <= 0 || creditedQuota > common.MaxWalletQuota {
 		return 0, ErrInvalidTopUpQuota
 	}
-	return common.MaxQuota - 1 - creditedQuota, nil
+	return common.MaxWalletQuota - creditedQuota, nil
 }
 
 // ValidateTopUpQuotaCapacity performs the user-facing pre-payment check. The
 // settlement path repeats the same invariant with an atomic conditional
 // update, because the wallet balance can change after checkout creation.
-func ValidateTopUpQuotaCapacity(userId int, creditedQuota int) error {
+func ValidateTopUpQuotaCapacity(userId int, creditedQuota int64) error {
 	maxCurrentQuota, err := topUpQuotaMaxCurrent(creditedQuota)
 	if err != nil {
 		return err
@@ -105,11 +105,11 @@ func ValidateTopUpQuotaCapacity(userId int, creditedQuota int) error {
 	return nil
 }
 
-// creditTopUpQuota atomically enforces the int32 wallet ceiling while adding
+// creditTopUpQuota atomically enforces the int64 storage ceiling while adding
 // quota. Keeping the predicate and increment in one UPDATE prevents two
 // concurrent callbacks from both passing a separate read/check.
-func creditTopUpQuota(tx *gorm.DB, userId int, creditedQuota int, updates map[string]interface{}) error {
-	maxCurrentQuota, err := topUpQuotaMaxCurrent(creditedQuota)
+func creditTopUpQuota(tx *gorm.DB, userId int, creditedQuota int64, updates map[string]interface{}) error {
+	_, err := topUpQuotaMaxCurrent(creditedQuota)
 	if err != nil {
 		return err
 	}
@@ -118,26 +118,15 @@ func creditTopUpQuota(tx *gorm.DB, userId int, creditedQuota int, updates map[st
 	for key, value := range updates {
 		updateFields[key] = value
 	}
-	updateFields["quota"] = gorm.Expr("quota + ?", creditedQuota)
-
-	result := tx.Model(&User{}).
-		Where("id = ? AND quota <= ?", userId, maxCurrentQuota).
-		Updates(updateFields)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 1 {
+	if err := updateUserQuotaWithDeltaTx(tx, userId, creditedQuota, updateFields); err == nil {
 		return nil
-	}
-
-	var count int64
-	if err := tx.Model(&User{}).Where("id = ?", userId).Count(&count).Error; err != nil {
+	} else if errors.Is(err, common.ErrWalletQuotaOverflow) {
+		return ErrTopUpQuotaLimitExceeded
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
+		return gorm.ErrRecordNotFound
+	} else {
 		return err
 	}
-	if count == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return ErrTopUpQuotaLimitExceeded
 }
 
 func (topUp *TopUp) Update() error {
@@ -193,14 +182,14 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 	})
 }
 
-func getTopUpQuotaToAdd(topUp *TopUp) (int, error) {
+func getTopUpQuotaToAdd(topUp *TopUp) (int64, error) {
 	switch topUp.PaymentProvider {
 	case PaymentProviderStripe:
-		return common.QuotaFromDecimalStrict(decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+		return common.WalletQuotaFromDecimal(decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
 	case PaymentProviderCreem:
-		return common.QuotaFromDecimalStrict(decimal.NewFromInt(topUp.Amount))
+		return common.WalletQuotaFromDecimal(decimal.NewFromInt(topUp.Amount))
 	default:
-		return common.QuotaFromDecimalStrict(decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
+		return common.WalletQuotaFromDecimal(decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)))
 	}
 }
 
@@ -220,7 +209,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 	return result.AlreadyCompleted, nil
 }
 
-func calculateTopUpInviteReward(quotaToAdd int) (int, string) {
+func calculateTopUpInviteReward(quotaToAdd int64) (int64, string) {
 	if quotaToAdd <= 0 || !operation_setting.IsPaymentComplianceConfirmed() {
 		return 0, ""
 	}
@@ -228,13 +217,16 @@ func calculateTopUpInviteReward(quotaToAdd int) (int, string) {
 		return 0, ""
 	}
 	percent := decimal.NewFromFloat(common.TopUpInviteRewardPercent)
-	reward := common.QuotaFromDecimal(decimal.NewFromInt(int64(quotaToAdd)).
+	reward, err := common.WalletQuotaFromDecimal(decimal.NewFromInt(quotaToAdd).
 		Mul(percent).
 		Div(decimal.NewFromInt(100)))
+	if err != nil {
+		return 0, percent.String()
+	}
 	return reward, percent.String()
 }
 
-func grantTopUpInviteRewardTx(tx *gorm.DB, inviterId int, topUp *TopUp, quotaToAdd int) (reward int, rewardUserId int, err error) {
+func grantTopUpInviteRewardTx(tx *gorm.DB, inviterId int, topUp *TopUp, quotaToAdd int64) (reward int64, rewardUserId int, err error) {
 	if inviterId <= 0 || inviterId == topUp.UserId {
 		return 0, 0, nil
 	}
@@ -242,15 +234,14 @@ func grantTopUpInviteRewardTx(tx *gorm.DB, inviterId int, topUp *TopUp, quotaToA
 	if reward <= 0 {
 		return 0, 0, nil
 	}
-	result := tx.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
-		"aff_quota":   gorm.Expr("aff_quota + ?", reward),
-		"aff_history": gorm.Expr("aff_history + ?", reward),
-	})
-	if result.Error != nil {
-		return 0, 0, result.Error
+	if err := updateUserQuotaFieldDeltaTx(tx, inviterId, "aff_quota", reward); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, 0, nil
+		}
+		return 0, 0, err
 	}
-	if result.RowsAffected == 0 {
-		return 0, 0, nil
+	if err := updateUserQuotaFieldDeltaTx(tx, inviterId, "aff_history", reward); err != nil {
+		return 0, 0, err
 	}
 	idempotencyKey := affiliateRewardIdempotencyKey("topup", topUp.TradeNo)
 	if err := createAffiliateRewardEventTx(tx, &AffiliateRewardEvent{
@@ -260,10 +251,10 @@ func grantTopUpInviteRewardTx(tx *gorm.DB, inviterId int, topUp *TopUp, quotaToA
 		SourceType:     AffiliateRewardSourceTypeTopUp,
 		SourceId:       topUp.TradeNo,
 		IdempotencyKey: &idempotencyKey,
-		BaseQuota:      int64(quotaToAdd),
+		BaseQuota:      quotaToAdd,
 		RewardPercent:  rewardPercent,
-		RewardQuota:    int64(reward),
-		AffQuotaDelta:  int64(reward),
+		RewardQuota:    reward,
+		AffQuotaDelta:  reward,
 	}); err != nil {
 		return 0, 0, err
 	}
@@ -362,7 +353,7 @@ func CompleteTopUp(opts CompleteTopUpOptions) (*TopUpCompletionResult, error) {
 			RecordLog(
 				completion.InviteRewardUserId,
 				LogTypeSystem,
-				fmt.Sprintf("Referral topup reward %s (topup_user_id=%d, trade_no=%s)", logger.LogQuota(completion.InviteRewardQuota), completion.UserId, completion.TradeNo),
+				fmt.Sprintf("Referral topup reward %s (topup_user_id=%d, trade_no=%s)", logger.LogQuota64(completion.InviteRewardQuota), completion.UserId, completion.TradeNo),
 			)
 		}
 	}
@@ -381,7 +372,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		return err
 	}
 	if !result.AlreadyCompleted {
-		RecordTopupLog(result.UserId, fmt.Sprintf("Stripe topup succeeded, quota: %v, amount: %d", logger.FormatQuota(result.QuotaToAdd), result.Amount), callerIp, result.PaymentMethod, PaymentMethodStripe)
+		RecordTopupLog(result.UserId, fmt.Sprintf("Stripe topup succeeded, quota: %v, amount: %d", logger.FormatQuota64(result.QuotaToAdd), result.Amount), callerIp, result.PaymentMethod, PaymentMethodStripe)
 	}
 	return nil
 }
@@ -553,7 +544,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		return err
 	}
 	if !result.AlreadyCompleted {
-		RecordTopupLog(result.UserId, fmt.Sprintf("Admin completed topup, quota: %v, amount: %f", logger.FormatQuota(result.QuotaToAdd), result.PayMoney), callerIp, result.PaymentMethod, "admin")
+		RecordTopupLog(result.UserId, fmt.Sprintf("Admin completed topup, quota: %v, amount: %f", logger.FormatQuota64(result.QuotaToAdd), result.PayMoney), callerIp, result.PaymentMethod, "admin")
 	}
 	return nil
 }
@@ -570,7 +561,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		return err
 	}
 	if !result.AlreadyCompleted {
-		RecordTopupLog(result.UserId, fmt.Sprintf("Creem topup succeeded, quota: %v, amount: %.2f", logger.FormatQuota(result.QuotaToAdd), result.PayMoney), callerIp, result.PaymentMethod, PaymentMethodCreem)
+		RecordTopupLog(result.UserId, fmt.Sprintf("Creem topup succeeded, quota: %v, amount: %.2f", logger.FormatQuota64(result.QuotaToAdd), result.PayMoney), callerIp, result.PaymentMethod, PaymentMethodCreem)
 	}
 	return nil
 }
@@ -586,7 +577,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 		return err
 	}
 	if !result.AlreadyCompleted {
-		RecordTopupLog(result.UserId, fmt.Sprintf("Waffo topup succeeded, quota: %v, amount: %.2f", logger.FormatQuota(result.QuotaToAdd), result.PayMoney), callerIp, result.PaymentMethod, PaymentMethodWaffo)
+		RecordTopupLog(result.UserId, fmt.Sprintf("Waffo topup succeeded, quota: %v, amount: %.2f", logger.FormatQuota64(result.QuotaToAdd), result.PayMoney), callerIp, result.PaymentMethod, PaymentMethodWaffo)
 	}
 	return nil
 }
@@ -601,7 +592,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		return err
 	}
 	if !result.AlreadyCompleted {
-		RecordLog(result.UserId, LogTypeTopup, fmt.Sprintf("Waffo Pancake topup succeeded, quota: %v, amount: %.2f", logger.FormatQuota(result.QuotaToAdd), result.PayMoney))
+		RecordLog(result.UserId, LogTypeTopup, fmt.Sprintf("Waffo Pancake topup succeeded, quota: %v, amount: %.2f", logger.FormatQuota64(result.QuotaToAdd), result.PayMoney))
 	}
 	return nil
 }

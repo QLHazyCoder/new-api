@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -76,6 +77,12 @@ func GetStatus(c *gin.Context) {
 		"docs_link":                   operation_setting.GetGeneralSetting().DocsLink,
 		"quota_per_unit":              common.QuotaPerUnit,
 		"quota_remind_threshold":      common.QuotaRemindThreshold,
+		"quota_limits": gin.H{
+			"wallet_min": strconv.FormatInt(common.MinWalletQuota, 10),
+			"wallet_max": strconv.FormatInt(common.MaxWalletQuota, 10),
+			"charge_min": common.MinChargeQuota,
+			"charge_max": common.MaxChargeQuota,
+		},
 		// 兼容旧前端：保留 display_in_currency，同时提供新的 quota_display_type
 		"display_in_currency":           operation_setting.IsCurrencyDisplay(),
 		"quota_display_type":            operation_setting.GetQuotaDisplayType(),

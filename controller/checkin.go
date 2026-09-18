@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -36,8 +37,8 @@ func GetCheckinStatus(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"enabled":   setting.Enabled,
-			"min_quota": setting.MinQuota,
-			"max_quota": setting.MaxQuota,
+			"min_quota": setting.MinChargeQuota,
+			"max_quota": setting.MaxChargeQuota,
 			"stats":     stats,
 		},
 	})
@@ -61,12 +62,13 @@ func DoCheckin(c *gin.Context) {
 		})
 		return
 	}
-	model.RecordLog(userId, model.LogTypeSystem, fmt.Sprintf("用户签到，获得额度 %s", logger.LogQuota(checkin.QuotaAwarded)))
+	model.RecordLog(userId, model.LogTypeSystem, fmt.Sprintf("用户签到，获得额度 %s", logger.LogQuota64(checkin.QuotaAwarded)))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "签到成功",
 		"data": gin.H{
-			"quota_awarded": checkin.QuotaAwarded,
-			"checkin_date":  checkin.CheckinDate},
+			"quota_awarded":     checkin.QuotaAwarded,
+			"quota_awarded_raw": strconv.FormatInt(checkin.QuotaAwarded, 10),
+			"checkin_date":      checkin.CheckinDate},
 	})
 }

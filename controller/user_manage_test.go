@@ -2,7 +2,6 @@ package controller
 
 import (
 	"fmt"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -133,8 +132,8 @@ func TestManageUserEnableResetsSensitiveWordViolationsWithoutChangingBalance(t *
 	require.Equal(t, common.UserStatusEnabled, updated.Status)
 	require.Zero(t, updated.SensitiveWordViolationCount)
 	require.EqualValues(t, 3, updated.AuthVersion)
-	require.Equal(t, 87654321, updated.Quota)
-	require.Equal(t, 12345, updated.UsedQuota)
+	require.EqualValues(t, 87654321, updated.Quota)
+	require.EqualValues(t, 12345, updated.UsedQuota)
 	require.True(t, updated.SensitiveWordWhitelist)
 	var session model.UserSession
 	require.NoError(t, db.First(&session, "sid = ?", "managed-enable-stale-session").Error)
@@ -200,8 +199,8 @@ func TestSensitiveWordUnbanEndpointUsesSameEnableResetSemantics(t *testing.T) {
 	require.Equal(t, common.UserStatusEnabled, updated.Status)
 	require.Zero(t, updated.SensitiveWordViolationCount)
 	require.EqualValues(t, 5, updated.AuthVersion)
-	require.Equal(t, 314159, updated.Quota)
-	require.Equal(t, 2718, updated.UsedQuota)
+	require.EqualValues(t, 314159, updated.Quota)
+	require.EqualValues(t, 2718, updated.UsedQuota)
 
 	var found bool
 	var logs []model.Log
@@ -296,7 +295,7 @@ func TestManageUserDeleteReturnsImmediatelyAndUnknownActionFails(t *testing.T) {
 	assert.Equal(t, common.UserStatusEnabled, unchanged.Status)
 }
 
-func TestManageUserQuotaRejectsDeletedUsersAndOutOfRangeValues(t *testing.T) {
+func TestManageUserQuotaRejectsDeletedUsersAndProtectsInt64Overflow(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	deleted := model.User{
 		Username: "managed-deleted-quota-user", Password: "password", Role: common.RoleCommonUser,
@@ -309,18 +308,20 @@ func TestManageUserQuotaRejectsDeletedUsersAndOutOfRangeValues(t *testing.T) {
 	assert.Contains(t, recorder.Body.String(), `"success":false`)
 	var stored model.User
 	require.NoError(t, db.Unscoped().First(&stored, deleted.Id).Error)
-	assert.Equal(t, 100, stored.Quota)
+	assert.EqualValues(t, 100, stored.Quota)
 
 	active := model.User{
 		Username: "managed-overflow-quota-user", Password: "password", Role: common.RoleCommonUser,
-		Status: common.UserStatusEnabled, Group: "default", Quota: math.MaxInt32, AuthVersion: 1, AffCode: "overflow-quota-aff",
+		Status: common.UserStatusEnabled, Group: "default", Quota: common.MaxWalletQuota - 1, AuthVersion: 1, AffCode: "overflow-quota-aff",
 	}
 	require.NoError(t, db.Create(&active).Error)
 	recorder = performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":"add","value":1}`, active.Id))
-	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
 	stored = model.User{}
 	require.NoError(t, db.First(&stored, active.Id).Error)
-	assert.Equal(t, math.MaxInt32, stored.Quota)
+	assert.Equal(t, common.MaxWalletQuota, stored.Quota)
+	recorder = performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":"add","value":1}`, active.Id))
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
 }
 
 func TestManageUserQuotaModesPersistExpectedValues(t *testing.T) {
@@ -344,7 +345,7 @@ func TestManageUserQuotaModesPersistExpectedValues(t *testing.T) {
 		assert.Contains(t, recorder.Body.String(), `"success":true`)
 		var stored model.User
 		require.NoError(t, db.First(&stored, user.Id).Error)
-		assert.Equal(t, test.want, stored.Quota)
+		assert.EqualValues(t, test.want, stored.Quota)
 	}
 }
 
@@ -390,7 +391,7 @@ func TestUpdateUserPersistsSensitiveWordControlsWithoutChangingQuota(t *testing.
 	require.NoError(t, db.First(&updated, user.Id).Error)
 	require.Equal(t, 4, updated.SensitiveWordViolationCount)
 	require.True(t, updated.SensitiveWordWhitelist)
-	require.Equal(t, 7654321, updated.Quota, "用户编辑内容安全字段不得修改余额或内部额度")
+	require.EqualValues(t, 7654321, updated.Quota, "用户编辑内容安全字段不得修改余额或内部额度")
 
 	var auditLogs []model.Log
 	require.NoError(t, db.Where("type = ?", model.LogTypeManage).Find(&auditLogs).Error)

@@ -80,7 +80,7 @@ func saveSensitiveWordTestConfig(t *testing.T, mode string, auditEnabled bool, t
 	}))
 }
 
-func createSensitiveWordTestUser(t *testing.T, quota int, whitelisted bool) *User {
+func createSensitiveWordTestUser(t *testing.T, quota int64, whitelisted bool) *User {
 	t.Helper()
 	id := time.Now().UnixNano()
 	user := &User{
@@ -452,7 +452,7 @@ func TestSensitiveWordFifthViolationBansWithoutChangingBalance(t *testing.T) {
 	require.NoError(t, DB.First(&persisted, user.Id).Error)
 	require.Equal(t, common.UserStatusDisabled, persisted.Status)
 	require.Equal(t, 6, persisted.SensitiveWordViolationCount)
-	require.Equal(t, 88800000, persisted.Quota, "敏感词封禁绝不能清理用户余额或内部额度")
+	require.EqualValues(t, 88800000, persisted.Quota, "敏感词封禁绝不能清理用户余额或内部额度")
 	require.Equal(t, int64(2), persisted.AuthVersion)
 
 	var persistedSession UserSession
@@ -467,8 +467,8 @@ func TestSensitiveWordFifthViolationBansWithoutChangingBalance(t *testing.T) {
 	require.Equal(t, int64(6), logCount)
 	fifthEvent := getSensitiveWordTestAudit(t, "violation-5")
 	require.True(t, fifthEvent.AutoBanned)
-	require.Equal(t, 88800000, fifthEvent.QuotaBefore)
-	require.Equal(t, 88800000, fifthEvent.QuotaAfter)
+	require.EqualValues(t, 88800000, fifthEvent.QuotaBefore)
+	require.EqualValues(t, 88800000, fifthEvent.QuotaAfter)
 	fifthLog := getSensitiveWordTestLog(t, "violation-5")
 	require.Contains(t, fifthLog.Other, fmt.Sprintf("\"audit_id\":%d", fifthEvent.ID))
 	require.Contains(t, fifthLog.Other, "\"balance_changed\":false")
@@ -492,8 +492,8 @@ func TestSensitiveWordEnableResetsCounterIdempotentlyAndPreservesEvidence(t *tes
 	require.NoError(t, DB.First(&before, user.Id).Error)
 	require.Equal(t, common.UserStatusDisabled, before.Status)
 	require.Equal(t, SensitiveWordBanThreshold, before.SensitiveWordViolationCount)
-	require.Equal(t, 91827364, before.Quota)
-	require.Equal(t, 123456, before.UsedQuota)
+	require.EqualValues(t, 91827364, before.Quota)
+	require.EqualValues(t, 123456, before.UsedQuota)
 	var evidenceBefore int64
 	require.NoError(t, DB.Model(&SensitiveWordAuditEvent{}).Where("user_id = ?", user.Id).Count(&evidenceBefore).Error)
 
@@ -588,7 +588,7 @@ func TestSensitiveWordEnableResetsManuallyDisabledUserAndPreservesWhitelist(t *t
 	require.Equal(t, common.UserStatusEnabled, updated.Status)
 	require.Zero(t, updated.SensitiveWordViolationCount)
 	require.True(t, updated.SensitiveWordWhitelist, "启用操作不得改变白名单状态")
-	require.Equal(t, 456789, updated.Quota)
+	require.EqualValues(t, 456789, updated.Quota)
 }
 
 func TestSensitiveWordEnableOnlyClearsAlreadyEnabledUserWithoutRevokingSession(t *testing.T) {

@@ -74,8 +74,8 @@ func TestUpdateSelfBranchesNeverOverwriteAccountingFields(t *testing.T) {
 
 			var got model.User
 			require.NoError(t, db.First(&got, user.Id).Error)
-			assert.Equal(t, 1000-debit, got.Quota)
-			assert.Equal(t, 20+debit, got.UsedQuota)
+			assert.EqualValues(t, 1000-debit, got.Quota)
+			assert.EqualValues(t, 20+debit, got.UsedQuota)
 			assert.Equal(t, 4, got.RequestCount)
 			assert.Equal(t, common.UserStatusEnabled, got.Status)
 			assert.Equal(t, "default", got.Group)

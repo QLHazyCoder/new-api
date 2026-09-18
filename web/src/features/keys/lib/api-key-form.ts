@@ -143,7 +143,7 @@ export function transformFormDataToPayload(
     name: data.name,
     remain_quota: data.unlimited_quota
       ? 0
-      : parseQuotaFromDollars(data.remain_quota_dollars || 0),
+      : String(parseQuotaFromDollars(data.remain_quota_dollars || 0)),
     expired_time: data.expired_time
       ? Math.floor(data.expired_time.getTime() / 1000)
       : -1,
@@ -179,7 +179,7 @@ export function transformApiKeyToFormDefaults(
     name: apiKey.name,
     remain_quota_dollars: apiKey.unlimited_quota
       ? 0
-      : quotaUnitsToDollars(apiKey.remain_quota),
+      : quotaUnitsToDollars(apiKey.remain_quota_raw ?? apiKey.remain_quota),
     expired_time:
       apiKey.expired_time > 0
         ? new Date(apiKey.expired_time * 1000)
