@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { useState, useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -37,30 +37,12 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { getUserModels } from '@/lib/api'
 
-const APP_CONFIGS = {
-  claude: {
-    label: 'Claude',
-    defaultName: 'My Claude',
-    modelFields: [
-      { key: 'model', labelKey: 'Primary Model', required: true },
-      { key: 'haikuModel', labelKey: 'Haiku Model', required: false },
-      { key: 'sonnetModel', labelKey: 'Sonnet Model', required: false },
-      { key: 'opusModel', labelKey: 'Opus Model', required: false },
-    ],
-  },
-  codex: {
-    label: 'Codex',
-    defaultName: 'My Codex',
-    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
-  },
-  gemini: {
-    label: 'Gemini',
-    defaultName: 'My Gemini',
-    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
-  },
-} as const
+import {
+  buildCCSwitchURL,
+  CCSWITCH_SOURCES,
+  type CCSwitchApp,
+} from '../../lib/cc-switch-sources'
 
-type AppType = keyof typeof APP_CONFIGS
 type ModelOption = {
   value: string
   label: string
@@ -75,37 +57,28 @@ type ModelComboboxProps = {
   emptyText?: string
 }
 
-function ModelCombobox({
-  id,
-  options,
-  value,
-  onValueChange,
-  placeholder,
-  emptyText,
-}: ModelComboboxProps) {
+function ModelCombobox(props: ModelComboboxProps) {
   const labelMap = useMemo(() => {
     const map = new Map<string, string>()
-    for (const option of options) {
-      map.set(option.value, option.label)
-    }
+    for (const option of props.options) map.set(option.value, option.label)
     return map
-  }, [options])
+  }, [props.options])
 
   return (
     <Combobox
-      items={options.map((option) => option.value)}
-      value={value || null}
-      inputValue={value}
-      onInputValueChange={onValueChange}
-      onValueChange={(nextValue) => onValueChange(nextValue ?? '')}
+      items={props.options.map((option) => option.value)}
+      value={props.value || null}
+      inputValue={props.value}
+      onInputValueChange={props.onValueChange}
+      onValueChange={(nextValue) => props.onValueChange(nextValue ?? '')}
       itemToStringLabel={(item) => labelMap.get(item) ?? item}
       itemToStringValue={(item) => item}
     >
       <ComboboxInput
-        id={id}
-        placeholder={placeholder}
+        id={props.id}
+        placeholder={props.placeholder}
         className='w-full'
-        showClear={value.length > 0}
+        showClear={props.value.length > 0}
       />
       <ComboboxContent>
         <ComboboxList>
@@ -117,7 +90,7 @@ function ModelCombobox({
             )}
           </ComboboxCollection>
         </ComboboxList>
-        <ComboboxEmpty>{emptyText}</ComboboxEmpty>
+        <ComboboxEmpty>{props.emptyText}</ComboboxEmpty>
       </ComboboxContent>
     </Combobox>
   )
@@ -127,35 +100,15 @@ function getServerAddress(): string {
   try {
     const raw = localStorage.getItem('status')
     if (raw) {
-      const status = JSON.parse(raw)
-      if (status.server_address) return status.server_address
+      const status = JSON.parse(raw) as { server_address?: unknown }
+      if (typeof status.server_address === 'string' && status.server_address) {
+        return status.server_address
+      }
     }
   } catch {
-    /* empty */
+    // Fall back to the browser origin when the cached status is unavailable.
   }
   return window.location.origin
-}
-
-function buildCCSwitchURL(
-  app: string,
-  name: string,
-  models: Record<string, string>,
-  apiKey: string
-): string {
-  const serverAddress = getServerAddress()
-  const endpoint = app === 'codex' ? `${serverAddress}/v1` : serverAddress
-  const params = new URLSearchParams()
-  params.set('resource', 'provider')
-  params.set('app', app)
-  params.set('name', name)
-  params.set('endpoint', endpoint)
-  params.set('apiKey', apiKey)
-  for (const [k, v] of Object.entries(models)) {
-    if (v) params.set(k, v)
-  }
-  params.set('homepage', serverAddress)
-  params.set('enabled', 'true')
-  return `ccswitch://v1/import?${params.toString()}`
 }
 
 interface Props {
@@ -166,8 +119,8 @@ interface Props {
 
 export function CCSwitchDialog(props: Props) {
   const { t } = useTranslation()
-  const [app, setApp] = useState<AppType>('claude')
-  const [name, setName] = useState<string>(APP_CONFIGS.claude.defaultName)
+  const [app, setApp] = useState<CCSwitchApp>('claude')
+  const [name, setName] = useState<string>('')
   const [models, setModels] = useState<Record<string, string>>({})
 
   const { data: modelsData } = useQuery({
@@ -179,38 +132,46 @@ export function CCSwitchDialog(props: Props) {
 
   const modelOptions = useMemo(() => {
     const items = modelsData?.data ?? []
-    return items.map((m) => ({ value: m, label: m }))
+    return items.map((model) => ({ value: model, label: model }))
   }, [modelsData?.data])
 
   useEffect(() => {
-    if (props.open) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setModels({})
+    if (!props.open) return
+    setModels({})
+    setApp('claude')
+    setName(t('My Claude Code'))
+  }, [props.open, t])
 
-      setApp('claude')
+  const currentSource =
+    CCSWITCH_SOURCES.find((source) => source.appId === app) ??
+    CCSWITCH_SOURCES[0]
 
-      setName(APP_CONFIGS.claude.defaultName)
-    }
-  }, [props.open])
-
-  const currentConfig = APP_CONFIGS[app]
-
-  const handleAppChange = (val: string) => {
-    const appVal = val as AppType
-    setApp(appVal)
-    setName(APP_CONFIGS[appVal].defaultName)
+  const handleAppChange = (value: string) => {
+    const source = CCSWITCH_SOURCES.find((item) => item.appId === value)
+    if (!source) return
+    setApp(source.appId)
+    setName(t(source.defaultNameKey))
     setModels({})
   }
 
   const handleSubmit = () => {
-    if (!models.model) {
+    if (!currentSource.supported) return
+    if (!models.model?.trim()) {
       toast.warning(t('Please select a primary model'))
       return
     }
+
     const key = props.tokenKey.startsWith('sk-')
       ? props.tokenKey
       : `sk-${props.tokenKey}`
-    const url = buildCCSwitchURL(app, name, models, key)
+    const url = buildCCSwitchURL(
+      currentSource,
+      name,
+      models,
+      key,
+      getServerAddress()
+    )
+    if (!url) return
     window.open(url, '_blank')
     props.onOpenChange(false)
   }
@@ -223,14 +184,18 @@ export function CCSwitchDialog(props: Props) {
       contentClassName='sm:max-w-md'
       contentHeight='auto'
       bodyClassName={
-        currentConfig.modelFields.length === 1 ? 'space-y-4 pb-52' : 'space-y-4'
+        currentSource.modelFields.length === 1 ? 'space-y-4 pb-52' : 'space-y-4'
       }
       footer={
         <>
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>
             {t('Cancel')}
           </Button>
-          <Button onClick={handleSubmit}>{t('Open CC Switch')}</Button>
+          <Button onClick={handleSubmit} disabled={!currentSource.supported}>
+            {currentSource.supported
+              ? t('Open CC Switch')
+              : t('CC Switch temporarily unavailable')}
+          </Button>
         </>
       }
     >
@@ -240,34 +205,47 @@ export function CCSwitchDialog(props: Props) {
           <RadioGroup
             value={app}
             onValueChange={handleAppChange}
-            className='flex gap-4'
+            className='grid grid-cols-2 gap-2 sm:grid-cols-4'
           >
-            {(
-              Object.entries(APP_CONFIGS) as [
-                AppType,
-                (typeof APP_CONFIGS)[AppType],
-              ][]
-            ).map(([key, cfg]) => (
-              <div key={key} className='flex items-center gap-2'>
-                <RadioGroupItem value={key} id={`app-${key}`} />
-                <Label htmlFor={`app-${key}`} className='cursor-pointer'>
-                  {cfg.label}
+            {CCSWITCH_SOURCES.map((source) => (
+              <div
+                key={source.appId}
+                className='flex min-w-0 items-center gap-2'
+              >
+                <RadioGroupItem
+                  value={source.appId}
+                  id={`app-${source.appId}`}
+                />
+                <Label
+                  htmlFor={`app-${source.appId}`}
+                  className='cursor-pointer truncate'
+                >
+                  {t(source.labelKey)}
                 </Label>
               </div>
             ))}
           </RadioGroup>
         </div>
 
-        <div className='space-y-2'>
-          <Label>{t('Name')}</Label>
-          <Input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={currentConfig.defaultName}
-          />
-        </div>
+        {!currentSource.supported ? (
+          <p
+            role='alert'
+            className='rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-6 text-amber-700 dark:text-amber-300'
+          >
+            {t(currentSource.unsupportedReasonKey ?? '')}
+          </p>
+        ) : (
+          <div className='space-y-2'>
+            <Label>{t('Name')}</Label>
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder={t(currentSource.defaultNameKey)}
+            />
+          </div>
+        )}
 
-        {currentConfig.modelFields.map((field) => (
+        {currentSource.modelFields.map((field) => (
           <div key={field.key} className='space-y-2'>
             <Label>
               {t(field.labelKey)}
@@ -277,9 +255,9 @@ export function CCSwitchDialog(props: Props) {
             </Label>
             <ModelCombobox
               options={modelOptions}
-              value={models[field.key] || ''}
-              onValueChange={(v) =>
-                setModels((prev) => ({ ...prev, [field.key]: v }))
+              value={models[field.key] ?? ''}
+              onValueChange={(value) =>
+                setModels((previous) => ({ ...previous, [field.key]: value }))
               }
               placeholder={t('Select or enter model name')}
               emptyText={t('No models found')}
