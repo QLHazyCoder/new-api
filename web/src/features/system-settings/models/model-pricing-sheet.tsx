@@ -335,9 +335,6 @@ export const ModelPricingEditorPanel = forwardRef<
   const handleModeChange = (value: string) => {
     const nextMode = value as PricingMode
     setPricingMode(nextMode)
-    if (nextMode === 'tiered_expr' && !billingExpr) {
-      setBillingExpr('tier("base", p * 0 + c * 0)')
-    }
   }
 
   const watchedValues = form.watch()

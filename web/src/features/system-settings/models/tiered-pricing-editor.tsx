@@ -22,7 +22,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ChangeEvent,
   type FocusEvent,
@@ -90,7 +89,6 @@ import {
   type TierConditionInput,
   type VisualConfig,
   type VisualTier,
-  createDefaultVisualConfig,
   evalExprLocally,
   exprUsesExtraVars,
   generateExprFromVisualConfig,
@@ -100,6 +98,10 @@ import {
   tryParseVisualConfig,
 } from '@/features/pricing/lib/tier-expr'
 import { cn } from '@/lib/utils'
+import {
+  getInitialTieredPricingEditorState,
+  type EditorMode,
+} from './tiered-pricing-editor-state'
 
 const PRICE_SUFFIX = '$/1M tokens'
 const CACHE_PRICE_VARS = BILLING_EXTRA_VARS.filter(
@@ -1620,8 +1622,6 @@ export type TieredPricingEditorProps = {
   onRequestRuleExprChange: (next: string) => void
 }
 
-type EditorMode = 'visual' | 'raw'
-
 export const TieredPricingEditor = memo(function TieredPricingEditor({
   modelName,
   billingExpr: currentExpr,
@@ -1630,41 +1630,22 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
   onRequestRuleExprChange,
 }: TieredPricingEditorProps) {
   const { t } = useTranslation()
-  const [editorMode, setEditorMode] = useState<EditorMode>('visual')
-  const [visualConfig, setVisualConfig] = useState<VisualConfig | null>(() =>
-    tryParseVisualConfig(currentExpr)
+  const initialState = useState(() =>
+    getInitialTieredPricingEditorState(currentExpr, currentRequestRuleExpr)
+  )[0]
+  const [editorMode, setEditorMode] = useState<EditorMode>(
+    initialState.editorMode
   )
-  const [rawExpr, setRawExpr] = useState(() =>
-    combineBillingExpr(currentExpr || '', currentRequestRuleExpr || '')
+  const [visualConfig, setVisualConfig] = useState<VisualConfig | null>(
+    initialState.visualConfig
   )
+  const [visualConfigDirty, setVisualConfigDirty] = useState(
+    initialState.visualConfigDirty
+  )
+  const [rawExpr, setRawExpr] = useState(initialState.rawExpr)
   const [requestRuleGroups, setRequestRuleGroups] = useState<
     RequestRuleGroup[]
-  >(() => tryParseRequestRuleExpr(currentRequestRuleExpr) || [])
-  const initRef = useRef(false)
-
-  useEffect(() => {
-    if (initRef.current) return
-    initRef.current = true
-    const parsedConfig = tryParseVisualConfig(currentExpr)
-    if (parsedConfig) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setVisualConfig(parsedConfig)
-      setEditorMode('visual')
-    } else if (currentExpr) {
-      setVisualConfig(null)
-      setEditorMode('raw')
-    } else {
-      setVisualConfig(createDefaultVisualConfig())
-    }
-    setRawExpr(
-      combineBillingExpr(currentExpr || '', currentRequestRuleExpr || '')
-    )
-    setRequestRuleGroups(tryParseRequestRuleExpr(currentRequestRuleExpr) || [])
-  }, [currentExpr, currentRequestRuleExpr])
-
-  useEffect(() => {
-    initRef.current = false
-  }, [modelName])
+  >(initialState.requestRuleGroups)
 
   const canUseVisualRules = useMemo(() => {
     if (!currentRequestRuleExpr) return true
@@ -1673,11 +1654,12 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
 
   const effectiveExpr = useMemo(() => {
     if (editorMode === 'visual') {
+      if (!visualConfigDirty) return currentExpr
       return generateExprFromVisualConfig(visualConfig)
     }
     const { billingExpr } = splitBillingExprAndRequestRules(rawExpr)
     return billingExpr
-  }, [editorMode, visualConfig, rawExpr])
+  }, [currentExpr, editorMode, rawExpr, visualConfig, visualConfigDirty])
 
   useEffect(() => {
     if (effectiveExpr !== currentExpr) {
@@ -1700,6 +1682,7 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
 
   const handleVisualChange = useCallback((next: VisualConfig) => {
     setVisualConfig(next)
+    setVisualConfigDirty(true)
   }, [])
 
   const handleRawChange = useCallback(
@@ -1718,22 +1701,28 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
         const { billingExpr, requestRuleExpr: ruleStr } =
           splitBillingExprAndRequestRules(rawExpr)
         const parsed = tryParseVisualConfig(billingExpr)
-        if (parsed) {
-          setVisualConfig(parsed)
-        } else {
-          setVisualConfig(createDefaultVisualConfig())
-        }
         const parsedGroups = tryParseRequestRuleExpr(ruleStr)
-        setRequestRuleGroups(parsedGroups || [])
-        onRequestRuleExprChange(ruleStr)
+        if (!parsed || parsedGroups === null) {
+          toast.error(
+            t(
+              'This expression is too complex for the visual editor. Please switch to expression mode to edit.'
+            )
+          )
+          return
+        }
+        setVisualConfig(parsed)
+        setVisualConfigDirty(true)
+        setRequestRuleGroups(parsedGroups)
       } else {
-        const expr = generateExprFromVisualConfig(visualConfig)
+        const expr = visualConfigDirty
+          ? generateExprFromVisualConfig(visualConfig)
+          : currentExpr
         const ruleExpr = buildRequestRuleExpr(requestRuleGroups)
         setRawExpr(combineBillingExpr(expr, ruleExpr) || expr)
       }
       setEditorMode(next)
     },
-    [rawExpr, visualConfig, requestRuleGroups, onRequestRuleExprChange]
+    [currentExpr, rawExpr, requestRuleGroups, t, visualConfig, visualConfigDirty]
   )
 
   const applyPreset = useCallback(
@@ -1745,10 +1734,12 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
       const parsed = tryParseVisualConfig(preset.expr)
       if (parsed) {
         setVisualConfig(parsed)
+        setVisualConfigDirty(true)
         setEditorMode('visual')
       } else {
         setEditorMode('raw')
         setVisualConfig(null)
+        setVisualConfigDirty(false)
       }
       setRequestRuleGroups(presetGroups)
       onRequestRuleExprChange(ruleExpr)
