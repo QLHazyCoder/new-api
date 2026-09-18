@@ -32,6 +32,16 @@
 - 本次新增 P-30 敏感词与内容审计保护项，功能提交为 `21cc64f46`、`7f17b6307`、
   `ab37d8b51`、`384e4988c`；本轮实时查找功能提交为 `416fabe52`；
   `84daf8a43` 仅回填发布记录，不新增产品契约。
+- P-30 的后续实现修复包括 `b24c6ad95`（跨数据库方言正确读取敏感词配置）和
+  `52d68cb40`（长提示词存储、UTF-8 截断以及 observe/block 审计失败语义）；它们属于
+  现行 P-30 契约，不能在合并时只保留最初的拦截逻辑。
+- P-13/P-16 的后续 Playground 提交包括 `889436b78`、`734b60163` 和 `4cd9c9460`；
+  前者保护图片历史清理的查询边界，后两者把图片能力配置外置并统一 GPT 图片模型能力。
+- 清单上次更新后新增的独立自研功能提交为 `b2e905185`（CC Switch 多来源导入）、
+  `afab95b53`（钱包额度 int64 迁移）和 `66759ee72`（分层定价表达式编辑器保留）。
+- `955243896` 与 `d1529b6eb`、`22eeed171` 与 `4c9c5209f` 分别是已回滚的功能/回滚对，
+  当前主分支不保留其注册提示或自动封禁后重试文案契约；`78ae12181`、`3dda71a37` 等
+  仅记录该回滚过程的文档提交也不新增保护项。
 - 本文档与 [upstream-merge-v1.0.0-rc.22.md](./upstream-merge-v1.0.0-rc.22.md)、
   `upstream-merge-v1.0.0-rc.23.md`、`upstream-merge-v1.0.0-rc.24.md` 配套使用：
   各审计文件保留对应上游标签的逐提交迁移证据，本文件是以后每次合并的验收入口。
@@ -212,6 +222,12 @@
 - 必须保留：Playground 图片模式支持本项目已接入的多供应商能力；模型可见性、
   OpenAI/Gemini/xAI 的图片路由和模型名保持一致，不能因上游模型识别变化错误地把
   图片请求送到文本渠道或重新开放已明确移除的 Grok 图片路径。
+- 必须保留：图片能力规则从代码外置到 `/data/image-capabilities.json`，首次启动生成持久化
+  配置，支持 `IMAGE_CAPABILITY_CONFIG_FILE`、精确/前缀/包含匹配、渠道白/黑名单、固定
+  分辨率后缀和每秒检查一次的热加载；无效 JSON 必须继续使用最后一份有效配置和内置默认值，
+  不能因配置错误让已有图片模型从页面消失。配置只影响能力展示，不能改写实际路由模型名。
+- 必须保留：`gpt-image-2`、`gpt-image-2.5`、其变体和 `chatgpt-image-latest` 共享完整的
+  GPT 图片分辨率能力，包括横竖 4K 规格；能力注册、前端模型选项和图片 relay 必须保持一致。
 - 当前位置：`pkg/imagecapability/**`、`/data/image-capabilities.json`、`service/image_capability.go`、
   `controller/playground.go`、`relay/channel/gemini/**`、`relay/channel/xai/**`、
   `web/src/features/playground/**`。
@@ -220,7 +236,8 @@
 - 验证入口：`pkg/imagecapability/registry_test.go`、`service/image_capability_test.go`、
   `controller/playground_test.go`、Gemini/xAI 图片 relay 测试。
 - 来源提交：`a7b870b0`、`f3018f4f`、`99f171da`、`fce66558`、`31dce377`、
-  `dfe64ed2`、`cc64bf3b`、`4e40cd8a`、`3ea4788d`、`2209a200`。
+  `dfe64ed2`、`cc64bf3b`、`4e40cd8a`、`3ea4788d`、`2209a200`、`734b60163`、
+  `4cd9c9460`。
 
 ### P-14 Playground 图片请求构造、编辑与规格选项
 
@@ -263,6 +280,9 @@
   不同任务的独立删除。
 - 必须保留：任务卡的重试、刷新、下载、完整预览、生成中占位、控件可用性和布局保持
   可操作，不因上游 UI 改动丢失。
+- 必须保留：成功图片的保留清理在每次事务中最多读取固定批次（当前为 500 条），并在
+  保留上限之后使用显式 SQL `LIMIT`；不能恢复无界的 `OFFSET` 查询，避免用户图片历史
+  增长后造成大查询或锁事务失控。
 - 当前位置：`model/playground_image.go`、`controller/playground_image_task.go`、
   `service/playground_image_worker.go`、
   `web/src/features/playground/components/playground-image-task-grid.tsx`、
@@ -272,7 +292,7 @@
   前端 Playground 图片库测试。
 - 来源提交：`72c401ed`、`f042ea22`、`fe04dbd2`、`0f00ee3a`、`1df5a78d`、
   `78364808`、`325726da`、`3df68604`、`4284ca06`、`089f7e9a`、`6347b97e`、
-  `d39cc0bc`、`5c6cfd85`、`6a978443`、`51cd6ec4`。
+  `d39cc0bc`、`5c6cfd85`、`6a978443`、`51cd6ec4`、`889436b78`。
 
 ### P-17 邀请奖励账本与额度换算
 
@@ -484,6 +504,8 @@
 - 必须保留：审计完整提示词在 MySQL 使用 `MEDIUMTEXT`、在 PostgreSQL/SQLite 使用 `TEXT`，
   写入前执行合法 UTF-8 的字符/字节双重截断。`observe` 模式仅对明确的审计落库失败放行并记录
   降级；规则、用户或其他事务错误以及 `block` 模式仍失败关闭返回 503，不能借故绕过策略。
+- 必须保留：读取 `SensitiveWordConfig` 时对 SQL 保留字 `key` 使用方言兼容的引用；配置
+  读取失败不能静默改变规则启用、模式、分组或审计保留策略。
 - 当前位置：`model/sensitive_word.go`、`model/user.go`、`model/main.go`、
   `service/sensitive.go`、`controller/relay.go`、`controller/sensitive_word.go`、
   `controller/user.go`、`controller/log.go`、`model/log.go`、`router/api-router.go`、
@@ -500,9 +522,61 @@
 - 验证入口：`model/sensitive_word_test.go`、`controller/sensitive_word_test.go`、
   `controller/relay_test.go`、`controller/user_manage_test.go`、
   `relaykit/**`，以及敏感词页面、用户抽屉和使用日志的前端 typecheck/build/lint。
-- 来源提交：`21cc64f46`、`7f17b6307`、`ab37d8b51`。
-- 本轮长提示词/观察模式故障修复随本次提交交付，涉及：`model/sensitive_word.go`、
-  `controller/relay.go` 及其模型/控制器回归测试；提交号以 Git 历史为准。
+- 来源提交：`21cc64f46`、`7f17b6307`、`ab37d8b51`、`384e4988c`、`416fabe52`、
+  `b24c6ad95`、`52d68cb40`。
+- 长提示词/观察模式故障修复涉及 `model/sensitive_word.go`、`controller/relay.go` 及其
+  模型/控制器回归测试；完整提示词字段、UTF-8 截断和审计失败类型必须继续保持。
+
+### P-31 CC Switch 多来源导入
+
+- 必须保留：密钥页面的 CC Switch 导入支持由集中来源注册表驱动；当前支持 Claude、Codex、
+  Gemini、Grok Build、OpenCode、OpenClaw、Hermes 七个来源，并保留 Claude Desktop 的
+  不支持说明，不生成错误的深链。
+- 必须保留：来源专属 endpoint、模型字段和默认名称保持独立；服务地址规范化会去除尾部
+  `/v1` 和斜杠，深链参数必须进行 URL 编码，缺少必填模型时不能生成导入链接。
+- 当前位置：`web/src/features/keys/lib/cc-switch-sources.ts`、
+  `web/src/features/keys/components/dialogs/cc-switch-dialog.tsx`、相关 locale 和测试。
+- 数据/配置：无数据库迁移；新增来源必须同步更新注册表、界面选择、国际化静态键和来源
+  构造测试，不能把来源配置重新散落回弹窗组件。
+- 验证入口：`web/src/features/keys/lib/__tests__/cc-switch-sources.test.ts`、
+  `web/src/features/keys/components/__tests__/cc-switch-dialog.test.tsx`。
+- 来源提交：`b2e905185`。
+
+### P-32 钱包额度 int64 与计费额度边界分离
+
+- 必须保留：用户钱包、Token 剩余额度/已用额度、充值、兑换码、签到、邀请奖励、返利、
+  审计累计字段使用有符号 `int64`/`BIGINT`；`MaxWalletQuota` 和 `MinWalletQuota` 只是
+  防止技术溢出的边界，不重新设置 int32 产品余额上限。现有额度单位和 `QuotaPerUnit` 不变。
+- 必须保留：单次请求费用、任务费用和历史消费日志仍在 int32 charge domain 中，异常价格
+  或请求参数经过饱和/严格错误处理，不能为了放开钱包而取消单次计费溢出保护。
+- 必须保留：钱包增减、覆盖、预扣、退款回补和批量更新经过统一的 checked SQL/CAS 入口；
+  Redis 额度使用十进制字符串比较与原子 `HINCRBY`，接近 int64 边界时拒绝操作，Token
+  双字段更新失败必须回补。缓存失效和数据库降级路径不能绕过边界检查。
+- 必须保留：旧数据库值不缩放、不重算；标准/快速迁移后校验所有钱包字段为有符号 BIGINT，
+  并记录超出旧 int32 范围但被保留的历史值。API 写入兼容 JSON number/string，查询提供
+  `quota_raw`、`used_quota_raw`、`remain_quota_raw` 等精确字符串字段，前端使用 BigInt。
+- 当前位置：`common/wallet_quota.go`、`common/quota_math.go`、`model/wallet_quota.go`、
+  `model/wallet_quota_schema.go`、`model/quota_reserve.go`、`model/user.go`、
+  `model/token.go`、`controller/misc.go`、`controller/user.go`、`web/src/lib/format.ts`。
+- 数据/迁移：钱包字段迁移必须保留默认值、索引、空值行为和历史 raw quota；写入大额度后不能
+  回滚到仍带有旧钱包 int32 校验的版本。
+- 验证入口：`common/wallet_quota_test.go`、`model/wallet_quota_test.go`、
+  `model/quota_reserve_test.go`、`controller/user_manage_test.go`、
+  `controller/topup_quota_limit_test.go`、相关前端额度格式化测试。
+- 来源提交：`afab95b53`。
+
+### P-33 分层定价表达式编辑器保留语义
+
+- 必须保留：模型定价编辑器加载已有复杂 `tiered_expr` 时，不能自动替换成默认表达式；
+  无法解析为可视化配置时必须进入 raw 表达式模式并保留原文，提示用户切换编辑方式。
+- 必须保留：只有用户实际修改可视化配置后才重新生成表达式；在 visual/raw 模式切换、
+  模型切换和保存过程中保留原始计费表达式及 request rule expression，不能因 React 初始化
+  或模式切换丢失分层、倍率或条件规则。
+- 当前位置：`web/src/features/system-settings/models/model-pricing-sheet.tsx`、
+  `web/src/features/system-settings/models/tiered-pricing-editor.tsx`、
+  `web/src/features/system-settings/models/tiered-pricing-editor-state.ts`。
+- 验证入口：`web/src/features/system-settings/models/__tests__/tiered-pricing-editor.test.tsx`。
+- 来源提交：`66759ee72`。
 
 ## 5. 提交映射完整性
 
@@ -524,10 +598,10 @@
 | P-10 | `076da1ef`, `dd3b02c3`, `2dab0f32` |
 | P-11 | `cf386058`, `51e0b058`, `d81c294f` |
 | P-12 | `89c2d59a`, `45f4e67f`, `d565eea6`, `504e193f` |
-| P-13 | `a7b870b0`, `f3018f4f`, `99f171da`, `fce66558`, `31dce377`, `dfe64ed2`, `cc64bf3b`, `4e40cd8a`, `3ea4788d`, `2209a200` |
+| P-13 | `a7b870b0`, `f3018f4f`, `99f171da`, `fce66558`, `31dce377`, `dfe64ed2`, `cc64bf3b`, `4e40cd8a`, `3ea4788d`, `2209a200`, `734b60163`, `4cd9c9460` |
 | P-14 | `30515cc6`, `99853f90`, `a934a149`, `2c9a61cb`, `f3a181fb`, `93aaa3c2` |
 | P-15 | `19d9bb7e`, `ae0dc6be`, `8ce14f79`, `9b7fd1ca`, `441ea707` |
-| P-16 | `72c401ed`, `f042ea22`, `fe04dbd2`, `0f00ee3a`, `1df5a78d`, `78364808`, `325726da`, `3df68604`, `4284ca06`, `089f7e9a`, `6347b97e`, `d39cc0bc`, `5c6cfd85`, `6a978443`, `51cd6ec4` |
+| P-16 | `72c401ed`, `f042ea22`, `fe04dbd2`, `0f00ee3a`, `1df5a78d`, `78364808`, `325726da`, `3df68604`, `4284ca06`, `089f7e9a`, `6347b97e`, `d39cc0bc`, `5c6cfd85`, `6a978443`, `51cd6ec4`, `889436b78` |
 | P-17 | `b5fb25e1`, `4190de6e`, `ba3b9be6`, `6adf6ffb` |
 | P-18 | `db10c428`, `71bfa129`, `a4a43c99` |
 | P-19 | `3c7df8f5`, `46423a16`, `3219bde1`, `3eb2c6ed` |
@@ -541,7 +615,10 @@
 | P-27 | `571b38f03` |
 | P-28 | `b44e6971e` |
 | P-29 | `e1765fd8e`, `4173af597` |
-| P-30 | `21cc64f46`, `7f17b6307`, `ab37d8b51`, `384e4988c`, `416fabe52` |
+| P-30 | `21cc64f46`, `7f17b6307`, `ab37d8b51`, `384e4988c`, `416fabe52`, `b24c6ad95`, `52d68cb40` |
+| P-31 | `b2e905185` |
+| P-32 | `afab95b53` |
+| P-33 | `66759ee72` |
 
 ## 6. 本次及以后维护记录模板
 
@@ -577,3 +654,8 @@ GitHub Actions 的 amd64、arm64 与 manifest 均成功。
   `main-384e498`；该不可变版本标签的 GHCR manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
 - 2026-08-30：在 P-30 增加规则弹窗实时查找契约及其辅助函数/组件测试；搜索仅作用于
   未保存草稿，不改变保存 payload 或后端数据结构。功能提交为 `416fabe52`。
+- 2026-09-18：以 `main@66759ee72` 反向核对清单；补录 P-13 的外置图片能力与 GPT
+  能力统一、P-16 的图片历史清理查询边界、P-30 的 SQL/审计存储修复，并新增 P-31
+  CC Switch 多来源导入、P-32 钱包 int64 额度域和 P-33 分层定价表达式编辑器保护项。
+  已明确登记 `955243896`/`d1529b6eb` 与 `22eeed171`/`4c9c5209f` 为已回滚对，
+  不把它们误计入当前产品契约。

@@ -1,6 +1,6 @@
 # new-api 维护与更新指南
 
-本文档面向后续维护、排障和版本更新。代码根目录为 /opt/qlh-main/new-api；线上发布脚本位于 /opt/qlh-main/deploy；公网入口配置位于 /opt/qlh-main/caddy。
+本文档面向后续维护、排障和版本更新。代码根目录为 /opt/qlh-main/new-api；线上发布说明位于 /opt/qlh-main/deploy/项目更新标准流程.md；公网入口配置位于 /opt/qlh-main/caddy。new-api 不再使用专用发布脚本，发布由 AI/执行者按现场状态手工判断。
 
 敏感词子系统的完整架构、字段和接口见 [sensitive-word-content-audit-redesign.md](./sensitive-word-content-audit-redesign.md)。任何修改该功能的提交都必须同步更新那份文档和 [sensitive-word-refactor-checklist.md](./sensitive-word-refactor-checklist.md)。
 
@@ -140,12 +140,7 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
 
 ### 4.2 蓝绿发布
 
-标准脚本位于 /opt/qlh-main/deploy：
-
-    bash /opt/qlh-main/deploy/update-new-api-standby.sh
-    bash /opt/qlh-main/deploy/switch-new-api.sh
-
-脚本顺序不能颠倒：
+当前没有 new-api 专用发布脚本；完整命令和 Caddy 候选配置校验见 `/opt/qlh-main/deploy/项目更新标准流程.md`。现场顺序不能颠倒：
 
 1. 从 Caddyfile 读取当前在线槽位。
 2. 只拉取和重建备用槽位，不能停止在线槽位。
@@ -153,7 +148,7 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
 4. 再次确认公网旧槽位健康。
 5. 修改 Caddy 上游并验证、平滑 reload。
 6. 检查公网 /api/status 和根路径 HTTP 状态。
-7. 保留旧槽位作为回滚入口，观察稳定后再由运维决定停止。
+7. 切流后至少观测 120 秒，确认公网、内部依赖、日志和数据库行为稳定，再按优雅关闭时间停止旧槽位。
 
 备用实例可能执行共享数据库迁移。任何迁移、数据库连接或健康检查错误都意味着不能切流量。
 
@@ -199,8 +194,7 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
 - 代码提交：`384e4988c5a453b0c000cc4f85d7866e2729f3e6`，已推送 `main`。
 - GitHub Actions：`33313133592` 成功完成 amd64、arm64、manifest 和 cosign；不可变镜像标签
   `main-384e498` 的 GHCR manifest digest 为 `sha256:314616ab408bb92bdf579d814e043881dc953b5c510e6ddfe354979bc0ed8ebc`。
-- 发布顺序：active blue 保持在线，`update-new-api-standby.sh` 更新 green 并健康检查，
-  `switch-new-api.sh` 平滑切换到 green；两槽均为 healthy，Caddy 三处上游为 green。
+- 发布顺序：active blue 保持在线，现场更新并健康检查 green，候选 Caddy 配置通过校验后平滑切换到 green；两槽均为 healthy，Caddy 三处上游为 green。该记录描述的是当时的实际发布，当前后续发布不再调用专用脚本。
 - 线上核对：容器 revision 为 `384e4988c`，公网 `/api/status` 连续 HTTP 200，版本
   `main-384e498`；切流后短观察窗口无 panic、fatal 或 error 日志。
 - 数据边界：启用/解封只恢复状态并清零当前敏感词违规次数；历史审计、使用日志、白名单、
