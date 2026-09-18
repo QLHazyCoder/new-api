@@ -36,7 +36,7 @@ export type CCSwitchModelField = {
 export type CCSwitchSource = {
   appId: CCSwitchApp
   labelKey: string
-  defaultNameKey: string
+  defaultName: string
   endpointSuffix: '' | '/v1'
   modelFields: readonly CCSwitchModelField[]
   supported: boolean
@@ -62,7 +62,7 @@ export const CCSWITCH_SOURCES: readonly CCSwitchSource[] = [
   {
     appId: 'claude',
     labelKey: 'Claude Code',
-    defaultNameKey: 'My Claude Code',
+    defaultName: 'coder',
     endpointSuffix: '',
     modelFields: CLAUDE_MODEL_FIELDS,
     supported: true,
@@ -70,7 +70,7 @@ export const CCSWITCH_SOURCES: readonly CCSwitchSource[] = [
   {
     appId: 'claude-desktop',
     labelKey: 'Claude Desktop',
-    defaultNameKey: 'My Claude Desktop',
+    defaultName: 'coder',
     endpointSuffix: '',
     modelFields: [],
     supported: false,
@@ -79,7 +79,7 @@ export const CCSWITCH_SOURCES: readonly CCSwitchSource[] = [
   {
     appId: 'codex',
     labelKey: 'Codex',
-    defaultNameKey: 'My Codex',
+    defaultName: 'coder',
     endpointSuffix: '/v1',
     modelFields: SINGLE_MODEL_FIELDS,
     supported: true,
@@ -87,7 +87,7 @@ export const CCSWITCH_SOURCES: readonly CCSwitchSource[] = [
   {
     appId: 'gemini',
     labelKey: 'Gemini',
-    defaultNameKey: 'My Gemini',
+    defaultName: 'coder',
     endpointSuffix: '',
     modelFields: SINGLE_MODEL_FIELDS,
     supported: true,
@@ -95,7 +95,7 @@ export const CCSWITCH_SOURCES: readonly CCSwitchSource[] = [
   {
     appId: 'grokbuild',
     labelKey: 'Grok Build',
-    defaultNameKey: 'My Grok Build',
+    defaultName: 'coder',
     endpointSuffix: '/v1',
     modelFields: SINGLE_MODEL_FIELDS,
     supported: true,
@@ -103,7 +103,7 @@ export const CCSWITCH_SOURCES: readonly CCSwitchSource[] = [
   {
     appId: 'opencode',
     labelKey: 'OpenCode',
-    defaultNameKey: 'My OpenCode',
+    defaultName: 'coder',
     endpointSuffix: '/v1',
     modelFields: SINGLE_MODEL_FIELDS,
     supported: true,
@@ -111,7 +111,7 @@ export const CCSWITCH_SOURCES: readonly CCSwitchSource[] = [
   {
     appId: 'openclaw',
     labelKey: 'OpenClaw',
-    defaultNameKey: 'My OpenClaw',
+    defaultName: 'coder',
     endpointSuffix: '/v1',
     modelFields: SINGLE_MODEL_FIELDS,
     supported: true,
@@ -119,7 +119,7 @@ export const CCSWITCH_SOURCES: readonly CCSwitchSource[] = [
   {
     appId: 'hermes',
     labelKey: 'Hermes',
-    defaultNameKey: 'My Hermes',
+    defaultName: 'coder',
     endpointSuffix: '/v1',
     modelFields: SINGLE_MODEL_FIELDS,
     supported: true,

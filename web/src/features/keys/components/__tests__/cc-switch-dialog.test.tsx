@@ -16,7 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
 vi.mock('@/lib/api', () => ({
@@ -51,14 +57,6 @@ await i18n.use(initReactI18next).init({
         Gemini: 'Gemini',
         Hermes: 'Hermes',
         'Import to CC Switch': 'Import to CC Switch',
-        'My Claude Code': 'My Claude Code',
-        'My Claude Desktop': 'My Claude Desktop',
-        'My Codex': 'My Codex',
-        'My Gemini': 'My Gemini',
-        'My Grok Build': 'My Grok Build',
-        'My Hermes': 'My Hermes',
-        'My OpenClaw': 'My OpenClaw',
-        'My OpenCode': 'My OpenCode',
         Name: 'Name',
         'No models found': 'No models found',
         'Open CC Switch': 'Open CC Switch',
@@ -79,7 +77,10 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-function renderDialog() {
+function renderDialog(apiKey?: {
+  model_limits_enabled: boolean
+  model_limits: string
+}) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -90,6 +91,7 @@ function renderDialog() {
           open
           onOpenChange={() => undefined}
           tokenKey='token-value'
+          apiKey={apiKey}
         />
       </I18nextProvider>
     </QueryClientProvider>
@@ -126,7 +128,7 @@ describe('CC Switch dialog', () => {
   test('resets the name and model fields when switching sources', async () => {
     renderDialog()
     await waitFor(() =>
-      expect(screen.getByDisplayValue('My Claude Code')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('coder')).toBeInTheDocument()
     )
 
     const [modelInput] = screen.getAllByPlaceholderText(
@@ -137,7 +139,7 @@ describe('CC Switch dialog', () => {
     expect(modelInput).toHaveValue('custom-model')
 
     fireEvent.click(screen.getByRole('radio', { name: 'Codex' }))
-    expect(screen.getByDisplayValue('My Codex')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('coder')).toBeInTheDocument()
     expect(
       screen.getByPlaceholderText('Select or enter model name')
     ).toHaveValue('')
@@ -145,9 +147,31 @@ describe('CC Switch dialog', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'Claude Desktop' }))
     expect(screen.getByRole('alert')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('radio', { name: 'Claude Code' }))
-    expect(screen.getByDisplayValue('My Claude Code')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('coder')).toBeInTheDocument()
     expect(
       screen.getAllByPlaceholderText('Select or enter model name')[0]
     ).toHaveValue('')
+  }, 15_000)
+
+  test('shows only models configured for the current API key', async () => {
+    renderDialog({
+      model_limits_enabled: true,
+      model_limits: 'key-only-model, model-b',
+    })
+
+    const [modelInput] = await waitFor(() => {
+      const inputs = screen.getAllByPlaceholderText(
+        'Select or enter model name'
+      )
+      expect(inputs.length).toBeGreaterThan(0)
+      return inputs
+    })
+    const modelInputGroup = modelInput.parentElement
+    if (!modelInputGroup) throw new Error('Expected a model input group')
+    fireEvent.click(within(modelInputGroup).getByRole('button'))
+
+    expect(await screen.findByText('key-only-model')).toBeInTheDocument()
+    expect(screen.getByText('model-b')).toBeInTheDocument()
+    expect(screen.queryByText('model-a')).not.toBeInTheDocument()
   }, 15_000)
 })

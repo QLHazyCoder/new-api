@@ -45,6 +45,9 @@ describe('CC Switch source registry', () => {
     expect(CCSWITCH_SOURCES.filter((source) => source.supported)).toHaveLength(
       7
     )
+    expect(
+      new Set(CCSWITCH_SOURCES.map((source) => source.defaultName))
+    ).toEqual(new Set(['coder']))
 
     const desktop = CCSWITCH_SOURCES.find(
       (source) => source.appId === 'claude-desktop'
@@ -107,7 +110,7 @@ describe('CC Switch source registry', () => {
     for (const source of CCSWITCH_SOURCES.filter((item) => item.supported)) {
       const url = buildCCSwitchURL(
         source,
-        source.defaultNameKey,
+        source.defaultName,
         { model: 'model-a' },
         'sk-test',
         'https://api.example.com/v1/'

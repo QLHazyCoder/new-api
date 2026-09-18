@@ -42,6 +42,7 @@ import {
   CCSWITCH_SOURCES,
   type CCSwitchApp,
 } from '../../lib/cc-switch-sources'
+import type { ApiKey } from '../../types'
 
 type ModelOption = {
   value: string
@@ -115,6 +116,7 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   tokenKey: string
+  apiKey?: Pick<ApiKey, 'model_limits_enabled' | 'model_limits'> | null
 }
 
 export function CCSwitchDialog(props: Props) {
@@ -130,17 +132,30 @@ export function CCSwitchDialog(props: Props) {
     staleTime: 5 * 60 * 1000,
   })
 
+  const keyModelOptions = useMemo(() => {
+    if (!props.apiKey?.model_limits_enabled || !props.apiKey.model_limits) {
+      return null
+    }
+
+    return props.apiKey.model_limits
+      .split(',')
+      .map((model) => model.trim())
+      .filter(Boolean)
+  }, [props.apiKey?.model_limits, props.apiKey?.model_limits_enabled])
+
   const modelOptions = useMemo(() => {
-    const items = modelsData?.data ?? []
-    return items.map((model) => ({ value: model, label: model }))
-  }, [modelsData?.data])
+    const items = keyModelOptions ?? modelsData?.data ?? []
+    return [...new Set(items.map((model) => model.trim()).filter(Boolean))].map(
+      (model) => ({ value: model, label: model })
+    )
+  }, [keyModelOptions, modelsData?.data])
 
   useEffect(() => {
     if (!props.open) return
     setModels({})
     setApp('claude')
-    setName(t('My Claude Code'))
-  }, [props.open, t])
+    setName('coder')
+  }, [props.open])
 
   const currentSource =
     CCSWITCH_SOURCES.find((source) => source.appId === app) ??
@@ -150,7 +165,7 @@ export function CCSwitchDialog(props: Props) {
     const source = CCSWITCH_SOURCES.find((item) => item.appId === value)
     if (!source) return
     setApp(source.appId)
-    setName(t(source.defaultNameKey))
+    setName(source.defaultName)
     setModels({})
   }
 
@@ -240,7 +255,7 @@ export function CCSwitchDialog(props: Props) {
             <Input
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder={t(currentSource.defaultNameKey)}
+              placeholder={currentSource.defaultName}
             />
           </div>
         )}
