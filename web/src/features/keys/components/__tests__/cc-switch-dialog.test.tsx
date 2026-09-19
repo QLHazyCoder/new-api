@@ -23,14 +23,13 @@ import {
   waitFor,
   within,
 } from '@testing-library/react'
-import { afterEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-vi.mock('@/lib/api', () => ({
-  getUserModels: vi.fn(async () => ({
-    success: true,
-    data: ['model-a', 'model-b'],
-  })),
+const { getApiKeyModelsMock } = vi.hoisted(() => ({
+  getApiKeyModelsMock: vi.fn(),
 }))
+
+vi.mock('../../api', () => ({ getApiKeyModels: getApiKeyModelsMock }))
 
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
@@ -77,13 +76,16 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-function renderDialog(apiKey?: {
-  model_limits_enabled: boolean
-  model_limits: string
-}) {
-  const queryClient = new QueryClient({
+beforeEach(() => {
+  getApiKeyModelsMock.mockResolvedValue(['model-a', 'model-b'])
+})
+
+function renderDialog(
+  apiKey: { id: number } = { id: 1 },
+  queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+) {
   render(
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
@@ -131,9 +133,13 @@ describe('CC Switch dialog', () => {
       expect(screen.getByDisplayValue('coder')).toBeInTheDocument()
     )
 
-    const [modelInput] = screen.getAllByPlaceholderText(
-      'Select or enter model name'
-    )
+    const [modelInput] = await waitFor(() => {
+      const inputs = screen.getAllByPlaceholderText(
+        'Select or enter model name'
+      )
+      expect(inputs[0]).not.toBeDisabled()
+      return inputs
+    })
     if (!modelInput) throw new Error('Expected a Claude primary model input')
     fireEvent.input(modelInput, { target: { value: 'custom-model' } })
     expect(modelInput).toHaveValue('custom-model')
@@ -153,25 +159,74 @@ describe('CC Switch dialog', () => {
     ).toHaveValue('')
   }, 15_000)
 
-  test('shows only models configured for the current API key', async () => {
-    renderDialog({
-      model_limits_enabled: true,
-      model_limits: 'key-only-model, model-b',
-    })
+  test('shows models returned for the selected API key', async () => {
+    getApiKeyModelsMock.mockResolvedValue(['key-group-model', 'model-b'])
+    renderDialog({ id: 42 })
 
     const [modelInput] = await waitFor(() => {
       const inputs = screen.getAllByPlaceholderText(
         'Select or enter model name'
       )
       expect(inputs.length).toBeGreaterThan(0)
+      expect(inputs[0]).not.toBeDisabled()
       return inputs
     })
     const modelInputGroup = modelInput.parentElement
     if (!modelInputGroup) throw new Error('Expected a model input group')
     fireEvent.click(within(modelInputGroup).getByRole('button'))
 
-    expect(await screen.findByText('key-only-model')).toBeInTheDocument()
+    expect(getApiKeyModelsMock).toHaveBeenCalledWith('token-value')
+    expect(await screen.findByText('key-group-model')).toBeInTheDocument()
     expect(screen.getByText('model-b')).toBeInTheDocument()
     expect(screen.queryByText('model-a')).not.toBeInTheDocument()
+  }, 15_000)
+
+  test('does not expose a cached model list while refreshing the selected key', async () => {
+    let resolveModels!: (models: string[]) => void
+    getApiKeyModelsMock.mockImplementation(
+      () =>
+        new Promise<string[]>((resolve) => {
+          resolveModels = resolve
+        })
+    )
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    queryClient.setQueryData(['cc-switch-models', 42], ['wrong-group-model'])
+
+    renderDialog({ id: 42 }, queryClient)
+
+    const [modelInput] = await screen.findAllByPlaceholderText(
+      'Select or enter model name'
+    )
+    if (!modelInput) throw new Error('Expected a Claude primary model input')
+    expect(modelInput).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: 'Open CC Switch' })
+    ).toBeDisabled()
+
+    resolveModels(['key-group-model'])
+
+    await waitFor(() => expect(modelInput).not.toBeDisabled())
+    const modelInputGroup = modelInput.parentElement
+    if (!modelInputGroup) throw new Error('Expected a model input group')
+    fireEvent.click(within(modelInputGroup).getByRole('button'))
+
+    expect(await screen.findByText('key-group-model')).toBeInTheDocument()
+    expect(screen.queryByText('wrong-group-model')).not.toBeInTheDocument()
+  }, 15_000)
+
+  test('keeps the import action disabled when the selected key models cannot be loaded', async () => {
+    getApiKeyModelsMock.mockRejectedValue(new Error('models unavailable'))
+    renderDialog({ id: 42 })
+
+    const [modelInput] = await screen.findAllByPlaceholderText(
+      'Select or enter model name'
+    )
+    if (!modelInput) throw new Error('Expected a Claude primary model input')
+    await waitFor(() => expect(modelInput).toBeDisabled())
+    expect(
+      screen.getByRole('button', { name: 'Open CC Switch' })
+    ).toBeDisabled()
   }, 15_000)
 })

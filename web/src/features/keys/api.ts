@@ -69,6 +69,38 @@ export async function getTokenAutoGroups(): Promise<
   return res.data
 }
 
+type ApiKeyModelListItem = {
+  id?: unknown
+}
+
+type ApiKeyModelListResponse = {
+  success: boolean
+  data?: ApiKeyModelListItem[]
+}
+
+// The relay models endpoint is the single source of truth for a key's group,
+// Auto snapshot, model limits, and runtime model visibility.
+export async function getApiKeyModels(apiKey: string): Promise<string[]> {
+  const key = apiKey.startsWith('sk-') ? apiKey : `sk-${apiKey}`
+  const res = await api.get<ApiKeyModelListResponse>('/v1/models', {
+    headers: { Authorization: `Bearer ${key}` },
+    disableDuplicate: true,
+    skipAuthRefresh: true,
+    skipBusinessError: true,
+    skipErrorHandler: true,
+    skipSessionAuthorization: true,
+  })
+  if (!res.data.success || !Array.isArray(res.data.data)) return []
+
+  const models = new Set<string>()
+  for (const model of res.data.data) {
+    if (typeof model?.id === 'string' && model.id.trim()) {
+      models.add(model.id.trim())
+    }
+  }
+  return [...models]
+}
+
 // Create a new API key
 export async function createApiKey(
   data: ApiKeyFormData

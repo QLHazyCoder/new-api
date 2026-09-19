@@ -35,8 +35,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { getUserModels } from '@/lib/api'
 
+import { getApiKeyModels } from '../../api'
 import {
   buildCCSwitchURL,
   CCSWITCH_SOURCES,
@@ -56,6 +56,7 @@ type ModelComboboxProps = {
   onValueChange: (value: string) => void
   placeholder?: string
   emptyText?: string
+  disabled?: boolean
 }
 
 function ModelCombobox(props: ModelComboboxProps) {
@@ -80,6 +81,7 @@ function ModelCombobox(props: ModelComboboxProps) {
         placeholder={props.placeholder}
         className='w-full'
         showClear={props.value.length > 0}
+        disabled={props.disabled}
       />
       <ComboboxContent>
         <ComboboxList>
@@ -116,7 +118,7 @@ interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
   tokenKey: string
-  apiKey?: Pick<ApiKey, 'model_limits_enabled' | 'model_limits'> | null
+  apiKey?: Pick<ApiKey, 'id'> | null
 }
 
 export function CCSwitchDialog(props: Props) {
@@ -125,30 +127,31 @@ export function CCSwitchDialog(props: Props) {
   const [name, setName] = useState<string>('')
   const [models, setModels] = useState<Record<string, string>>({})
 
-  const { data: modelsData } = useQuery({
-    queryKey: ['user-models-ccswitch'],
-    queryFn: getUserModels,
-    enabled: props.open,
-    staleTime: 5 * 60 * 1000,
+  const {
+    data: modelsData,
+    isError: isModelsError,
+    isFetching: isModelsFetching,
+  } = useQuery({
+    queryKey: ['cc-switch-models', props.apiKey?.id],
+    queryFn: () => getApiKeyModels(props.tokenKey),
+    enabled: props.open && !!props.apiKey?.id && !!props.tokenKey,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 
-  const keyModelOptions = useMemo(() => {
-    if (!props.apiKey?.model_limits_enabled || !props.apiKey.model_limits) {
-      return null
-    }
-
-    return props.apiKey.model_limits
-      .split(',')
-      .map((model) => model.trim())
-      .filter(Boolean)
-  }, [props.apiKey?.model_limits, props.apiKey?.model_limits_enabled])
+  const canUseModels =
+    !!props.apiKey?.id &&
+    !!props.tokenKey &&
+    !isModelsFetching &&
+    !isModelsError
 
   const modelOptions = useMemo(() => {
-    const items = keyModelOptions ?? modelsData?.data ?? []
+    if (!canUseModels) return []
+    const items = modelsData ?? []
     return [...new Set(items.map((model) => model.trim()).filter(Boolean))].map(
       (model) => ({ value: model, label: model })
     )
-  }, [keyModelOptions, modelsData?.data])
+  }, [canUseModels, modelsData])
 
   useEffect(() => {
     if (!props.open) return
@@ -161,6 +164,13 @@ export function CCSwitchDialog(props: Props) {
     CCSWITCH_SOURCES.find((source) => source.appId === app) ??
     CCSWITCH_SOURCES[0]
 
+  let modelEmptyText = t('No models found')
+  if (isModelsFetching) {
+    modelEmptyText = t('Loading...')
+  } else if (isModelsError) {
+    modelEmptyText = t('Failed to load')
+  }
+
   const handleAppChange = (value: string) => {
     const source = CCSWITCH_SOURCES.find((item) => item.appId === value)
     if (!source) return
@@ -170,7 +180,7 @@ export function CCSwitchDialog(props: Props) {
   }
 
   const handleSubmit = () => {
-    if (!currentSource.supported) return
+    if (!currentSource.supported || !canUseModels) return
     if (!models.model?.trim()) {
       toast.warning(t('Please select a primary model'))
       return
@@ -206,7 +216,10 @@ export function CCSwitchDialog(props: Props) {
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>
             {t('Cancel')}
           </Button>
-          <Button onClick={handleSubmit} disabled={!currentSource.supported}>
+          <Button
+            onClick={handleSubmit}
+            disabled={!currentSource.supported || !canUseModels}
+          >
             {currentSource.supported
               ? t('Open CC Switch')
               : t('CC Switch temporarily unavailable')}
@@ -275,7 +288,8 @@ export function CCSwitchDialog(props: Props) {
                 setModels((previous) => ({ ...previous, [field.key]: value }))
               }
               placeholder={t('Select or enter model name')}
-              emptyText={t('No models found')}
+              emptyText={modelEmptyText}
+              disabled={!canUseModels}
             />
           </div>
         ))}

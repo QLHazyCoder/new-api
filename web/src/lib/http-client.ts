@@ -33,6 +33,7 @@ declare module 'axios' {
     skipBusinessError?: boolean
     skipErrorHandler?: boolean
     disableDuplicate?: boolean
+    skipSessionAuthorization?: boolean
     skipAuthRefresh?: boolean
     authRetry?: boolean
     acceptAuthRotation?: boolean
@@ -143,7 +144,7 @@ api.interceptors.response.use(
 
 api.interceptors.request.use((config) => {
   const accessToken = useAuthStore.getState().auth.accessToken
-  if (accessToken) {
+  if (accessToken && !config.skipSessionAuthorization) {
     config.headers.Authorization = `Bearer ${accessToken}`
   }
   return config
