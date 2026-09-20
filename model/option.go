@@ -1,7 +1,9 @@
 package model
 
 import (
+	"fmt"
 	"maps"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +23,16 @@ import (
 type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
 	Value string `json:"value"`
+}
+
+// normalizeLegacyOptionValue repairs the historical nil sentinel emitted by
+// older deployments for this JSON-backed option. Passing it to the ratio map
+// loader would clear the current map before JSON decoding fails.
+func normalizeLegacyOptionValue(key, value string) (string, bool) {
+	if key == "AudioCompletionRatio" && strings.TrimSpace(value) == "<nil>" {
+		return ratio_setting.DefaultAudioCompletionRatio2JSONString(), true
+	}
+	return value, false
 }
 
 func AllOption() ([]*Option, error) {
@@ -51,10 +63,12 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticDisableChannelEnabled"] = strconv.FormatBool(common.AutomaticDisableChannelEnabled)
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
+	common.OptionMap["LogRetentionDays"] = strconv.Itoa(common.LogRetentionDays)
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
 	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
 	common.OptionMap["TaskEnabled"] = strconv.FormatBool(common.TaskEnabled)
+	common.OptionMap[playgroundImageConcurrencyKey] = strconv.Itoa(playgroundImageDefaultMaxConcurrency)
 	common.OptionMap["TaskPluginEnabled"] = strconv.FormatBool(constant.TaskPluginEnabled)
 	jsplugin.DefaultRegistry.SetEnabled(constant.TaskPluginEnabled)
 	common.OptionMap[setting.TaskPluginMarketplaceSourcesKey] = setting.TaskPluginMarketplaceSources2JsonString()
@@ -140,10 +154,11 @@ func InitOptionMap() {
 	common.OptionMap["WeChatAccountQRCodeImageURL"] = ""
 	common.OptionMap["TurnstileSiteKey"] = ""
 	common.OptionMap["TurnstileSecretKey"] = ""
-	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
-	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
-	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
-	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
+	common.OptionMap["QuotaForNewUser"] = strconv.FormatInt(common.QuotaForNewUser, 10)
+	common.OptionMap["QuotaForInviter"] = strconv.FormatInt(common.QuotaForInviter, 10)
+	common.OptionMap["QuotaForInvitee"] = strconv.FormatInt(common.QuotaForInvitee, 10)
+	common.OptionMap["TopUpInviteRewardPercent"] = strconv.FormatFloat(common.TopUpInviteRewardPercent, 'f', -1, 64)
+	common.OptionMap["QuotaRemindThreshold"] = strconv.FormatInt(common.QuotaRemindThreshold, 10)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
 	common.OptionMap["ModelRequestRateLimitCount"] = strconv.Itoa(setting.ModelRequestRateLimitCount)
 	common.OptionMap["ModelRequestRateLimitDurationMinutes"] = strconv.Itoa(setting.ModelRequestRateLimitDurationMinutes)
@@ -204,19 +219,34 @@ func loadOptionsFromDatabase() {
 	}()
 	passkeyOptionMutex.Lock()
 	defer passkeyOptionMutex.Unlock()
-	options, _ := AllOption()
+	options, err := AllOption()
+	if err != nil {
+		common.SysError("failed to load options from database: " + err.Error())
+		return
+	}
 	passkeyOptions := make(map[string]string)
 	for _, option := range options {
 		if IsPasskeyDomainOption(option.Key) {
 			passkeyOptions[option.Key] = option.Value
 			continue
 		}
-		err := updateOptionMap(option.Key, option.Value)
+		value, repaired := normalizeLegacyOptionValue(option.Key, option.Value)
+		if repaired {
+			if err := DB.Model(&Option{}).Where(&Option{Key: option.Key, Value: option.Value}).Update("value", value).Error; err != nil {
+				common.SysError("failed to repair legacy option " + option.Key + ": " + err.Error())
+			} else {
+				common.SysLog("repaired legacy option " + option.Key)
+			}
+		}
+		err := updateOptionMap(option.Key, value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
 	}
 	applyPasskeyDomainOptions(passkeyOptions)
+	if err := operation_setting.RefreshAmountDiscountPolicy(); err != nil {
+		common.SysError("failed to refresh amount discount policy: " + err.Error())
+	}
 }
 
 func SyncOptions(frequency int) {
@@ -228,8 +258,19 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == playgroundImageConcurrencyKey {
+		if _, _, err := normalizePlaygroundImageMaxConcurrency(value); err != nil {
+			return err
+		}
+	}
 	if err := operation_setting.ValidateQuotaOption(key, value); err != nil {
 		return err
+	}
+	if key == operation_setting.AmountDiscountOptionKey {
+		return operation_setting.ValidateAmountDiscountJSON(value)
+	}
+	if key == operation_setting.AmountDiscountEligibleGroupsOptionKey {
+		return operation_setting.ValidateAmountDiscountEligibleGroupsJSON(value)
 	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
@@ -243,6 +284,63 @@ func validateOptionValue(key string, value string) error {
 	return nil
 }
 
+func normalizeOptionValue(key string, value string) (string, error) {
+	switch key {
+	case playgroundImageConcurrencyKey:
+		normalizedValue, _, err := normalizePlaygroundImageMaxConcurrency(value)
+		if err != nil {
+			return "", err
+		}
+		value = normalizedValue
+	case "LogRetentionDays":
+		normalizedValue, _, err := normalizeLogRetentionDaysOptionValue(value)
+		if err != nil {
+			return "", err
+		}
+		value = normalizedValue
+	case "TopUpInviteRewardPercent":
+		normalizedValue, _, err := normalizeTopUpInviteRewardPercentOptionValue(value)
+		if err != nil {
+			return "", err
+		}
+		value = normalizedValue
+	}
+	if err := validateOptionValue(key, value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func normalizePlaygroundImageMaxConcurrency(value string) (string, int, error) {
+	normalizedValue := strings.TrimSpace(value)
+	intValue, err := strconv.Atoi(normalizedValue)
+	if err != nil || intValue < 0 {
+		return "", 0, fmt.Errorf("PlaygroundImageMaxConcurrency must be a non-negative integer")
+	}
+	return strconv.Itoa(intValue), intValue, nil
+}
+
+func normalizeLogRetentionDaysOptionValue(value string) (string, int, error) {
+	normalizedValue := strings.TrimSpace(value)
+	intValue, err := strconv.Atoi(normalizedValue)
+	if err != nil || intValue < 0 {
+		return "", 0, fmt.Errorf("LogRetentionDays must be a non-negative integer")
+	}
+	if intValue > common.MaxLogRetentionDays {
+		return "", 0, fmt.Errorf("LogRetentionDays must be less than or equal to %d", common.MaxLogRetentionDays)
+	}
+	return strconv.Itoa(intValue), intValue, nil
+}
+
+func normalizeTopUpInviteRewardPercentOptionValue(value string) (string, float64, error) {
+	normalizedValue := strings.TrimSpace(value)
+	floatValue, err := strconv.ParseFloat(normalizedValue, 64)
+	if err != nil || math.IsNaN(floatValue) || math.IsInf(floatValue, 0) || floatValue < 0 {
+		return "", 0, fmt.Errorf("TopUpInviteRewardPercent must be a non-negative finite number")
+	}
+	return strconv.FormatFloat(floatValue, 'f', -1, 64), floatValue, nil
+}
+
 func UpdateOption(key string, value string) error {
 	if IsRequestPolicyOption(key) {
 		return UpdateRequestPolicyOptions(map[string]string{key: value})
@@ -254,9 +352,11 @@ func UpdateOption(key string, value string) error {
 	if IsModelPricingOption(key) {
 		return UpdateModelPricingOptions(map[string]string{key: value})
 	}
-	if err := validateOptionValue(key, value); err != nil {
+	normalizedValue, err := normalizeOptionValue(key, value)
+	if err != nil {
 		return err
 	}
+	value = normalizedValue
 	// Save to database first
 	option := Option{
 		Key: key,
@@ -287,18 +387,21 @@ func UpdateOptionsBulk(values map[string]string) error {
 			return err
 		}
 	}
+	normalizedValues := make(map[string]string, len(values))
 	for key, value := range values {
-		if err := validateOptionValue(key, value); err != nil {
+		normalizedValue, err := normalizeOptionValue(key, value)
+		if err != nil {
 			return err
 		}
+		normalizedValues[key] = normalizedValue
 	}
 	var policySnapshot *RequestPolicySnapshot
-	for key := range values {
+	for key := range normalizedValues {
 		if IsRequestPolicyOption(key) {
 			requestPolicyOptionMutex.Lock()
 			defer requestPolicyOptionMutex.Unlock()
 			options := maps.Clone(CurrentRequestPolicy().Options)
-			for key, value := range values {
+			for key, value := range normalizedValues {
 				if IsRequestPolicyOption(key) {
 					options[key] = value
 				}
@@ -313,7 +416,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 	}
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		for k, v := range values {
+		for k, v := range normalizedValues {
 			option := Option{Key: k}
 			if err := tx.FirstOrCreate(&option, Option{Key: k}).Error; err != nil {
 				return err
@@ -328,7 +431,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if err != nil {
 		return err
 	}
-	for k, v := range values {
+	for k, v := range normalizedValues {
 		if err := updateOptionMap(k, v); err != nil {
 			return err
 		}
@@ -348,7 +451,39 @@ func updateOptionMap(key string, value string) (err error) {
 	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
+	if key == playgroundImageConcurrencyKey {
+		normalizedValue, _, err := normalizePlaygroundImageMaxConcurrency(value)
+		if err != nil {
+			return err
+		}
+		common.OptionMap[key] = normalizedValue
+		return nil
+	}
+	if key == "LogRetentionDays" {
+		normalizedValue, intValue, err := normalizeLogRetentionDaysOptionValue(value)
+		if err != nil {
+			return err
+		}
+		common.LogRetentionDays = intValue
+		common.OptionMap[key] = normalizedValue
+		return nil
+	}
+	if key == "TopUpInviteRewardPercent" {
+		normalizedValue, floatValue, err := normalizeTopUpInviteRewardPercentOptionValue(value)
+		if err != nil {
+			return err
+		}
+		common.TopUpInviteRewardPercent = floatValue
+		common.OptionMap[key] = normalizedValue
+		return nil
+	}
 	common.OptionMap[key] = value
+	if key == "SensitiveWords" || key == "SensitiveWordConfig" {
+		// Request Policies own the upstream execution framework, while the
+		// advanced sensitive-word engine remains this fork's authoritative
+		// matcher. Invalidate its snapshot on either legacy option change.
+		invalidateSensitiveWordRuntime()
+	}
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
 	if handleConfigUpdate(key, value) {
@@ -603,13 +738,13 @@ func updateOptionMap(key string, value string) (err error) {
 	case "TurnstileSecretKey":
 		common.TurnstileSecretKey = value
 	case "QuotaForNewUser":
-		common.QuotaForNewUser, _ = strconv.Atoi(value)
+		common.QuotaForNewUser, _ = strconv.ParseInt(value, 10, 64)
 	case "QuotaForInviter":
-		common.QuotaForInviter, _ = strconv.Atoi(value)
+		common.QuotaForInviter, _ = strconv.ParseInt(value, 10, 64)
 	case "QuotaForInvitee":
-		common.QuotaForInvitee, _ = strconv.Atoi(value)
+		common.QuotaForInvitee, _ = strconv.ParseInt(value, 10, 64)
 	case "QuotaRemindThreshold":
-		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
+		common.QuotaRemindThreshold, _ = strconv.ParseInt(value, 10, 64)
 	case "PreConsumedQuota":
 		common.PreConsumedQuota, _ = strconv.Atoi(value)
 	case "ModelRequestRateLimitCount":
@@ -711,6 +846,10 @@ func handleConfigUpdate(key, value string) bool {
 	} else if configName == "billing_setting" {
 		InvalidatePricingCache()
 		ratio_setting.InvalidateExposedDataCache()
+	} else if configName == "payment_setting" {
+		if err := operation_setting.RefreshAmountDiscountPolicy(); err != nil {
+			common.SysError("failed to refresh amount discount policy: " + err.Error())
+		}
 	}
 
 	return true // 已处理

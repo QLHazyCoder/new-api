@@ -9,19 +9,30 @@ import (
 
 // Quota conversions are centralized here so every billing path shares one
 // saturation + logging policy. Single-request charges stay bounded to int32;
-// top-ups and wallet-priced purchases use a JavaScript-safe 64-bit domain.
+// wallet/top-up values use the full signed int64 storage domain.
 const (
 	MaxQuota       = math.MaxInt32
 	MinQuota       = math.MinInt32
-	MaxWalletQuota = 1<<53 - 1
+	MaxChargeQuota = MaxQuota
+	MinChargeQuota = MinQuota
 )
 
 // ValidateWalletQuota enforces the upper bound shared by wallet mutations.
 // Negative balances remain valid because billing can temporarily overdraw a
 // wallet; callers that accept credits must apply their own positive check.
 func ValidateWalletQuota(quota int) error {
-	if quota > MaxWalletQuota {
-		return fmt.Errorf("wallet quota exceeds %d", MaxWalletQuota)
+	if quota > MaxWalletQuota || quota < MinWalletQuota {
+		return fmt.Errorf("wallet quota is outside signed int64 range")
+	}
+	return nil
+}
+
+// ValidateWalletQuota64 exists at the persistence boundary. An int64 value is
+// already within the storage domain, but keeping the explicit validator makes
+// callers' intent clear and prevents a future narrowing regression.
+func ValidateWalletQuota64(quota int64) error {
+	if quota > int64(MaxWalletQuota) || quota < int64(MinWalletQuota) {
+		return fmt.Errorf("wallet quota is outside signed int64 range")
 	}
 	return nil
 }
@@ -167,9 +178,8 @@ func QuotaFromDecimalStrict(d decimal.Decimal) (int, error) {
 	return strictQuota(QuotaFromDecimalChecked(d))
 }
 
-// WalletQuotaFromDecimalStrict converts wallet and top-up values within the
-// JavaScript-safe integer range, which is also exactly representable by float64.
-func WalletQuotaFromDecimalStrict(d decimal.Decimal) (int, error) {
-	f, _ := d.Round(0).Float64()
-	return strictQuota(saturateQuotaBounded(f, "WalletQuotaFromDecimal", MaxWalletQuota, -MaxWalletQuota))
+// WalletQuotaFromDecimalStrict converts wallet and top-up values without going
+// through float64, which would lose precision above 2^53.
+func WalletQuotaFromDecimalStrict(d decimal.Decimal) (int64, error) {
+	return WalletQuotaFromDecimal(d)
 }

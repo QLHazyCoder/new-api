@@ -3,6 +3,7 @@ package perfmetrics
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -29,6 +30,16 @@ func ClassifyRelayOutcome(ctx context.Context, info *relaycommon.RelayInfo, apiE
 	}
 	if apiErr != nil && errors.Is(apiErr, context.Canceled) {
 		return OutcomeIgnored
+	}
+	// rc.39 classifies general upstream errors centrally. Keep the local image
+	// metric contract at this narrow boundary: only a raw provider 400 is a
+	// non-health sample. A local 400, a response-parser 400, or a 5xx/429 that
+	// a channel maps to 400 must remain a failed image sample.
+	if info.RelayFormat == types.RelayFormatOpenAIImage && apiErr != nil {
+		if info.LastUpstreamHTTPStatusCode == http.StatusBadRequest {
+			return OutcomeIgnored
+		}
+		return OutcomeFailure
 	}
 	stream := info.StreamStatus.OutcomeSnapshot()
 	if stream.Response == relaycommon.ResponseOutcomeFailed {

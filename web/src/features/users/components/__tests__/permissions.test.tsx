@@ -38,6 +38,8 @@ const target: User = {
   used_quota: 0,
   request_count: 0,
   group: 'default',
+  sensitive_word_violation_count: 0,
+  sensitive_word_whitelist: false,
 }
 const label = "View other accounts' audit logs"
 const description =

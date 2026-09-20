@@ -31,6 +31,23 @@ type ModelRequest struct {
 	Group string `json:"group,omitempty"`
 }
 
+var errPlaygroundGroupAccessDenied = errors.New("playground group access denied")
+
+func isPlaygroundRelayRequest(path string) bool {
+	return strings.HasPrefix(path, "/pg/chat/completions") ||
+		strings.HasPrefix(path, "/pg/images/generations") ||
+		strings.HasPrefix(path, "/pg/images/edits")
+}
+
+func relayEndpointType(path string) constant.EndpointType {
+	switch relayconstant.Path2RelayMode(path) {
+	case relayconstant.RelayModeImagesGenerations, relayconstant.RelayModeImagesEdits:
+		return constant.EndpointTypeImageGeneration
+	default:
+		return ""
+	}
+}
+
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var channel *model.Channel
@@ -44,6 +61,12 @@ func Distribute() func(c *gin.Context) {
 			Kind:        taskdto.FilterRequestPath,
 			RequestPath: c.Request.URL.Path,
 		})
+		if endpointType := relayEndpointType(c.Request.URL.Path); endpointType != "" {
+			constraints.AddFilter(taskdto.ChannelFilter{
+				Kind:         taskdto.FilterEndpointType,
+				EndpointType: endpointType,
+			})
+		}
 		service.AppendTaskPluginIdentityFilter(c, c.GetString("expected_task_plugin_key"))
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
 		if err != nil {
@@ -78,22 +101,13 @@ func Distribute() func(c *gin.Context) {
 					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorModelNameRequired))
 					return
 				}
-				// check path is /pg/chat/completions
-				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
-					usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-					playgroundRequest := &dto.PlayGroundRequest{}
-					err = common.UnmarshalBodyReusable(c, playgroundRequest)
-					if err != nil {
-						abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidPlayground, map[string]any{"Error": err.Error()}))
+				if _, err = applyPlaygroundGroupOverride(c, common.GetContextKeyString(c, constant.ContextKeyUsingGroup)); err != nil {
+					if errors.Is(err, errPlaygroundGroupAccessDenied) {
+						abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
 						return
 					}
-					if playgroundRequest.Group != "" {
-						if !service.GroupInUserUsableGroups(usingGroup, playgroundRequest.Group) && playgroundRequest.Group != usingGroup {
-							abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
-							return
-						}
-						common.SetContextKey(c, constant.ContextKeyUsingGroup, playgroundRequest.Group)
-					}
+					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidPlayground, map[string]any{"Error": err.Error()}))
+					return
 				}
 			}
 		}
@@ -128,6 +142,33 @@ func Distribute() func(c *gin.Context) {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}
+}
+
+// applyPlaygroundGroupOverride is deliberately limited to Playground relay
+// paths. It leaves the upstream constraints/selection pipeline intact while
+// ensuring chat and image requests share the same user-visible group choice.
+func applyPlaygroundGroupOverride(c *gin.Context, usingGroup string) (string, error) {
+	if c == nil || c.Request == nil || !isPlaygroundRelayRequest(c.Request.URL.Path) {
+		return usingGroup, nil
+	}
+
+	playgroundRequest := &dto.PlayGroundRequest{}
+	if err := common.UnmarshalBodyReusable(c, playgroundRequest); err != nil {
+		return usingGroup, err
+	}
+	if playgroundRequest.Group == "" {
+		return usingGroup, nil
+	}
+	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	if userGroup == "" {
+		userGroup = usingGroup
+	}
+	if !service.GroupInUserUsableGroups(userGroup, playgroundRequest.Group) && playgroundRequest.Group != userGroup {
+		return usingGroup, errPlaygroundGroupAccessDenied
+	}
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, playgroundRequest.Group)
+	common.SetContextKey(c, constant.ContextKeyTokenGroup, playgroundRequest.Group)
+	return playgroundRequest.Group, nil
 }
 
 // noAvailableChannelMessage explains a 503 for a task-plugin-claimed model.

@@ -149,7 +149,7 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 			if tc.wallet > 0 {
 				quota = tc.wallet
 			}
-			user := model.User{Username: fmt.Sprintf("fixed_billing_%d", index), Quota: quota, Status: common.UserStatusEnabled}
+			user := model.User{Username: fmt.Sprintf("fixed_billing_%d", index), Quota: int64(quota), Status: common.UserStatusEnabled}
 			require.NoError(t, db.Create(&user).Error)
 			token := model.Token{UserId: user.Id, Key: fmt.Sprintf("fixed-billing-test-%d", index), Name: "fixed-billing", RemainQuota: startingQuota, Status: common.TokenStatusEnabled}
 			require.NoError(t, db.Create(&token).Error)
@@ -191,7 +191,7 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 				require.Nil(t, apiErr)
 				held, err := model.GetUserQuota(user.Id, true)
 				require.NoError(t, err)
-				assert.Equal(t, quota-reservation, held)
+				assert.EqualValues(t, quota-reservation, held)
 				if tc.outboundImages > 0 {
 					reserveErr := PrepareImageBillingForRequest(ctx, info, tc.outboundImages)
 					if tc.reserveInsufficient {
@@ -286,10 +286,10 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 			}
 			require.NoError(t, db.First(&user, user.Id).Error)
 			require.NoError(t, db.First(&token, token.Id).Error)
-			assert.Equal(t, quota-tc.want, user.Quota)
-			assert.Equal(t, startingQuota-tc.want, token.RemainQuota)
-			assert.Equal(t, tc.want, user.UsedQuota)
-			assert.Equal(t, tc.want, token.UsedQuota)
+			assert.EqualValues(t, quota-tc.want, user.Quota)
+			assert.EqualValues(t, startingQuota-tc.want, token.RemainQuota)
+			assert.EqualValues(t, tc.want, user.UsedQuota)
+			assert.EqualValues(t, tc.want, token.UsedQuota)
 			if !tc.refund && !tc.insufficient {
 				assert.Equal(t, 1, user.RequestCount)
 			}

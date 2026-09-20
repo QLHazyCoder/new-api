@@ -232,8 +232,27 @@ function formatCatalogYearMonth(value?: string): string {
   return date.toLocaleString(undefined, { year: 'numeric', month: 'short' })
 }
 
-function normalizeCatalogItems(items?: readonly string[]): string[] {
+function normalizeCatalogItems(items?: readonly string[] | string): string[] {
   if (!items) return []
+  if (typeof items === 'string') {
+    const value = items.trim()
+    if (!value) return []
+    try {
+      const parsed: unknown = JSON.parse(value)
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (item): item is string =>
+            typeof item === 'string' && item.trim().length > 0
+        )
+      }
+    } catch {
+      // Legacy catalog metadata is also stored as a comma-separated string.
+    }
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
   return items.filter((item) => item.trim().length > 0)
 }
 

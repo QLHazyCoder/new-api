@@ -157,21 +157,21 @@ func TestRedeemRejectsWalletOverflow(t *testing.T) {
 
 	var user User
 	require.NoError(t, DB.First(&user, "id = ?", userId).Error)
-	assert.Equal(t, common.MaxWalletQuota-10, user.Quota)
+	assert.EqualValues(t, common.MaxWalletQuota-10, user.Quota)
 
 	var redemption Redemption
 	require.NoError(t, DB.First(&redemption, "key = ?", key).Error)
 	assert.Equal(t, common.RedemptionCodeStatusEnabled, redemption.Status)
 }
 
-func TestRedemptionQuotaRejectsWalletOverflow(t *testing.T) {
+func TestRedemptionQuotaRejectsNonPositiveWalletValue(t *testing.T) {
 	setupRedeemFixture(t, 500)
 
 	redemption := &Redemption{
 		Name:        "overflow-redemption",
 		Key:         "10000000000000000000000000000002",
 		Status:      common.RedemptionCodeStatusEnabled,
-		Quota:       common.MaxWalletQuota + 1,
+		Quota:       common.MinWalletQuota,
 		CreatedTime: common.GetTimestamp(),
 	}
 	require.Error(t, redemption.Insert())

@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	hostdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -150,9 +151,12 @@ func TestImageGenerationEndpointRequiresChannelSpecificSupport(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			channel := &model.Channel{Type: tt.channelType}
-			got := isChannelUsableForEndpoint(channel, constant.EndpointTypeImageGeneration, tt.model)
+			got, _ := model.ChannelSatisfiesFilters(channel, tt.model, []hostdto.ChannelFilter{{
+				Kind:         hostdto.FilterEndpointType,
+				EndpointType: constant.EndpointTypeImageGeneration,
+			}})
 			if got != tt.want {
-				t.Fatalf("isChannelUsableForEndpoint(type=%d, model=%q) = %v, want %v", tt.channelType, tt.model, got, tt.want)
+				t.Fatalf("ChannelSatisfiesFilters(type=%d, model=%q) = %v, want %v", tt.channelType, tt.model, got, tt.want)
 			}
 		})
 	}

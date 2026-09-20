@@ -173,7 +173,7 @@ func TestValidateCreditedQuotaRejectsOverflow(t *testing.T) {
 	require.NoError(t, err)
 	_, err = validateCreditedQuota(decimal.Zero)
 	require.EqualError(t, err, "充值额度必须大于 0")
-	_, err = validateCreditedQuota(decimal.NewFromInt(common.MaxWalletQuota + 1))
+	_, err = validateCreditedQuota(decimal.RequireFromString("9223372036854775808"))
 	require.EqualError(
 		t,
 		err,

@@ -155,8 +155,6 @@ func TestOaiResponsesHandlerCountsCompletedImageGenerationOutputs(t *testing.T) 
 	require.Contains(t, info.ResponsesUsageInfo.BuiltInTools, dto.BuildInToolImageGeneration)
 	assert.Equal(t, 2, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
 	assert.False(t, c.GetBool("image_generation_call"))
-	assert.Equal(t, "low", c.GetString("image_generation_call_quality"))
-	assert.Equal(t, "1024x1536", c.GetString("image_generation_call_size"))
 }
 
 func TestOaiResponsesHandlerIncompleteStatusCommitsZeroImageGeneration(t *testing.T) {
@@ -241,15 +239,13 @@ func runResponsesImageBillingStream(t *testing.T, events ...string) (*relaycommo
 
 func TestOaiResponsesStreamHandlerDeduplicatesCompletedImageOutput(t *testing.T) {
 	item := `{"type":"image_generation_call","id":"img_1","call_id":"call_1","status":"completed","quality":"high","size":"1536x1024","result":"base64-a"}`
-	info, ctx := runResponsesImageBillingStream(
+	info, _ := runResponsesImageBillingStream(
 		t,
 		`{"type":"response.output_item.done","output_index":0,"item":`+item+`}`,
 		`{"type":"response.completed","response":{"status":"completed","output":[`+item+`],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
 	)
 
 	assert.Equal(t, 1, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
-	assert.Equal(t, "high", ctx.GetString("image_generation_call_quality"))
-	assert.Equal(t, "1536x1024", ctx.GetString("image_generation_call_size"))
 }
 
 func TestOaiResponsesStreamHandlerDiscardsImageOutputOnIncomplete(t *testing.T) {

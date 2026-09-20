@@ -37,7 +37,7 @@ func TestWalletQuotaDecimalAndBigIntInputs(t *testing.T) {
 
 	value, err = WalletQuotaFromDecimal(decimal.NewFromBigInt(big.NewInt(MaxWalletQuota), 0))
 	require.NoError(t, err)
-	require.Equal(t, MaxWalletQuota, value)
+	require.Equal(t, int64(MaxWalletQuota), value)
 
 	value, err = WalletQuotaFromBigInt(new(big.Int).Add(big.NewInt(MaxWalletQuota), big.NewInt(1)))
 	require.ErrorIs(t, err, ErrWalletQuotaOverflow)

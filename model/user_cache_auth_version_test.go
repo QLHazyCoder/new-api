@@ -64,7 +64,7 @@ func TestAdministrativeQuotaMutationsKeepDatabaseAndCacheConsistent(t *testing.T
 	require.NoError(t, OverrideUserQuota(user.Id, common.MaxWalletQuota-1))
 	require.NoError(t, IncreaseUserQuota(user.Id, 1, true))
 	assert.Error(t, IncreaseUserQuota(user.Id, 1, true))
-	assert.Equal(t, common.MaxWalletQuota, mustUserQuota(t, user.Id))
+	assert.EqualValues(t, common.MaxWalletQuota, mustUserQuota(t, user.Id))
 }
 
 func mustUserQuota(t *testing.T, userID int) int64 {

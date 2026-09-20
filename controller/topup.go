@@ -178,7 +178,7 @@ func getPayMoney(amount int64, group string) float64 {
 }
 
 func getMinTopup() int64 {
-	minTopup := operation_setting.MinTopUp
+	minTopup := int64(operation_setting.MinTopUp)
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		dMinTopup := decimal.NewFromInt(int64(minTopup))
 		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
@@ -188,10 +188,10 @@ func getMinTopup() int64 {
 		}
 		minTopup = quota
 	}
-	return int64(minTopup)
+	return minTopup
 }
 
-func getTopUpQuota(amount int64) (int, error) {
+func getTopUpQuota(amount int64) (int64, error) {
 	quota := decimal.NewFromInt(amount)
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
@@ -220,7 +220,7 @@ func getMaxTopUpAmount() int64 {
 	return maxStoredAmount.IntPart()
 }
 
-func validateCreditedQuota(quota decimal.Decimal) (int, error) {
+func validateCreditedQuota(quota decimal.Decimal) (int64, error) {
 	value, err := common.WalletQuotaFromDecimalStrict(quota)
 	if err != nil {
 		return 0, errors.New("充值额度超出系统可表示范围")
@@ -231,7 +231,7 @@ func validateCreditedQuota(quota decimal.Decimal) (int, error) {
 	return value, nil
 }
 
-func validateTopUpQuota(amount int64) (int, error) {
+func validateTopUpQuota(amount int64) (int64, error) {
 	quota, err := getTopUpQuota(amount)
 	if err == nil && quota > 0 {
 		return quota, nil
@@ -557,9 +557,39 @@ func GetAllTopUps(c *gin.Context) {
 		return
 	}
 
+	adminTopUps := make([]adminTopUpRecord, 0, len(topups))
+	for _, topUp := range topups {
+		record, parseErr := newAdminTopUpRecord(topUp)
+		if parseErr != nil {
+			logger.LogWarn(c.Request.Context(), fmt.Sprintf("充值订单计价快照解析失败 trade_no=%s error=%q", topUp.TradeNo, parseErr.Error()))
+		}
+		adminTopUps = append(adminTopUps, record)
+	}
+
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(topups)
+	pageInfo.SetItems(adminTopUps)
 	common.ApiSuccess(c, pageInfo)
+}
+
+// adminTopUpRecord exposes the immutable pricing snapshot only to the admin
+// history endpoint. User-facing top-up history keeps the snapshot out of its
+// JSON payload to avoid leaking internal pricing/group details.
+type adminTopUpRecord struct {
+	*model.TopUp
+	PricingSnapshot *model.TopUpPricingSnapshot `json:"pricing_snapshot,omitempty"`
+}
+
+func newAdminTopUpRecord(topUp *model.TopUp) (adminTopUpRecord, error) {
+	record := adminTopUpRecord{TopUp: topUp}
+	if topUp == nil {
+		return record, nil
+	}
+	snapshot, err := model.ParseTopUpPricingSnapshot(topUp.PricingSnapshot)
+	if err != nil {
+		return record, err
+	}
+	record.PricingSnapshot = snapshot
+	return record, nil
 }
 
 type AdminCompleteTopupRequest struct {

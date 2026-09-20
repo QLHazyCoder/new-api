@@ -31,7 +31,7 @@ interface TimestampCellProps {
   timestamp: number
   now?: number
   format?: 'relative' | 'absolute'
-  locale?: string
+  locale?: Intl.LocalesArgument
   justNowLabel: string
   className?: string
 }

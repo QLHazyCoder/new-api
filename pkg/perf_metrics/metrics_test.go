@@ -3,6 +3,7 @@ package perfmetrics
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,6 +48,15 @@ func TestClassifyRelayOutcome(t *testing.T) {
 		})
 	}
 	assert.Equal(t, OutcomeIgnored, ClassifyRelayOutcome(context.Background(), &relaycommon.RelayInfo{PerformanceBusinessRejection: true}, nil))
+
+	imageInfo := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAIImage}
+	upstream400 := types.InitOpenAIError("unknown", http.StatusBadRequest)
+	imageInfo.LastUpstreamHTTPStatusCode = http.StatusBadRequest
+	assert.Equal(t, OutcomeIgnored, ClassifyRelayOutcome(context.Background(), imageInfo, upstream400))
+	imageInfo.LastUpstreamHTTPStatusCode = http.StatusInternalServerError
+	assert.Equal(t, OutcomeFailure, ClassifyRelayOutcome(context.Background(), imageInfo, upstream400))
+	imageInfo.LastUpstreamHTTPStatusCode = 0
+	assert.Equal(t, OutcomeFailure, ClassifyRelayOutcome(context.Background(), imageInfo, upstream400))
 }
 
 func TestStreamOutcomeClassification(t *testing.T) {

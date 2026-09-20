@@ -560,7 +560,7 @@ export function buildQueryRequest(){throw new Error("completed submissions must 
 				_, _ = w.Write(encoded)
 			}))
 			defer server.Close()
-			initial := int(20 * common.QuotaPerUnit)
+			initial := int64(20 * common.QuotaPerUnit)
 			user := model.User{Username: fmt.Sprintf("task_user_%d", index), AffCode: fmt.Sprintf("task_aff_%d", index), Quota: initial}
 			require.NoError(t, db.Create(&user).Error)
 			ch := model.Channel{Name: "test provider", Type: constant.ChannelTypeTaskPlugin}
@@ -600,7 +600,7 @@ export function buildQueryRequest(){throw new Error("completed submissions must 
 			}
 			var updated model.User
 			require.NoError(t, db.First(&updated, user.Id).Error)
-			assert.Equal(t, initial-want, updated.Quota)
+			assert.Equal(t, initial-int64(want), updated.Quota)
 			assert.Equal(t, want, updated.UsedQuota)
 			var logs []model.Log
 			require.NoError(t, db.Where("user_id = ?", user.Id).Find(&logs).Error)
@@ -615,7 +615,7 @@ export function buildQueryRequest(){throw new Error("completed submissions must 
 			require.NoError(t, info.Billing.Settle(want))
 			info.Billing.Refund(c)
 			require.NoError(t, db.First(&updated, user.Id).Error)
-			assert.Equal(t, initial-want, updated.Quota, "terminal settlement is idempotent")
+			assert.Equal(t, initial-int64(want), updated.Quota, "terminal settlement is idempotent")
 		})
 	}
 }

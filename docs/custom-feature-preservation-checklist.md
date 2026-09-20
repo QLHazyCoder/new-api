@@ -682,3 +682,10 @@ GitHub Actions 的 amd64、arm64 与 manifest 均成功。
   CC Switch 多来源导入、P-32 钱包 int64 额度域和 P-33 分层定价表达式编辑器保护项。
   已明确登记 `955243896`/`d1529b6eb` 与 `22eeed171`/`4c9c5209f` 为已回滚对，
   不把它们误计入当前产品契约。
+- 2026-09-20：在集成分支 `codex/merge-v1.0.0-rc.39` 完成固定标签
+  `v1.0.0-rc.39@9978ee1e` 的一次性祖先合并（合并提交 `fd74c42d9`）。按“上游等价或
+  更好则直接采用”原则，P-31 采用上游 Portal/Combobox，P-30 采用上游 Request Policies
+  外壳并保留本地高级引擎，P-32 采用上游 billing session 并保留 signed BIGINT 精度。
+  旧任务适配器、简单 RequestChecksSection、GPT 图片动态加价等重复实现已退休；保留项
+  均收敛为窄适配或本地唯一契约。专项 Go/前端测试、构建和格式检查已执行；真实 MySQL
+  克隆迁移、旧版兼容、候选镜像 CI 和主线/生产发布仍未执行，不得视为发布完成。

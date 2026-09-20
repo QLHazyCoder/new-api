@@ -39,6 +39,23 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type AmountDiscountGroupsResponse = {
+  success: boolean
+  message: string
+  data?: { groups: string[] }
+}
+
+export type UpdateAmountDiscountPolicyRequest = {
+  amount_discount: Record<string, number>
+  eligible_groups: string[]
+}
+
+export type UpdateAmountDiscountPolicyResponse = {
+  success: boolean
+  message: string
+  data?: UpdateAmountDiscountPolicyRequest
+}
+
 export interface PasskeyDomainChange {
   rp_id: string
   legacy_rp_ids: string
@@ -224,6 +241,7 @@ export type ContentSettings = {
   MjForwardUrlEnabled: boolean
   MjModeClearEnabled: boolean
   MjActionCheckSuccessEnabled: boolean
+  PlaygroundImageMaxConcurrency: number
 }
 
 export type ModelSettings = {
@@ -261,6 +279,7 @@ export type ModelSettings = {
   TopupGroupRatio: string
   GroupRatio: string
   UserUsableGroups: string
+  'group_ratio_setting.group_descriptions': string
   GroupGroupRatio: string
   AutoGroups: string
   MaxTokenAutoGroups: number
@@ -274,6 +293,7 @@ export type BillingSettings = {
   QuotaForNewUser: number
   QuotaForInviter: number
   QuotaForInvitee: number
+  TopUpInviteRewardPercent: number
   TopUpLink: string
   'quota_setting.enable_free_model_pre_consume': boolean
   'quota_setting.trust_quota_usd': number
@@ -301,6 +321,7 @@ export type BillingSettings = {
   TopupGroupRatio: string
   GroupRatio: string
   UserUsableGroups: string
+  'group_ratio_setting.group_descriptions': string
   GroupGroupRatio: string
   AutoGroups: string
   MaxTokenAutoGroups: number
@@ -315,6 +336,8 @@ export type BillingSettings = {
   PayMethods: string
   'payment_setting.amount_options': string
   'payment_setting.amount_discount': string
+  'payment_setting.amount_discount_eligible_groups': string
+  'payment_setting.default_topup_amount': number
   'payment_setting.compliance_confirmed': boolean
   'payment_setting.compliance_terms_version': string
   'payment_setting.compliance_confirmed_at': number
@@ -375,6 +398,7 @@ export type OperationsSettings = {
   WorkerValidKey: string
   WorkerAllowHttpImageRequestEnabled: boolean
   LogConsumeEnabled: boolean
+  LogRetentionDays: number
   'performance_setting.disk_cache_enabled': boolean
   'performance_setting.disk_cache_threshold_mb': number
   'performance_setting.disk_cache_max_size_mb': number

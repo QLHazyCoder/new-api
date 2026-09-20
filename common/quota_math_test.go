@@ -131,16 +131,19 @@ func TestQuotaFromDecimalChecked(t *testing.T) {
 func TestWalletQuotaFromDecimalStrict(t *testing.T) {
 	quota, err := WalletQuotaFromDecimalStrict(decimal.NewFromInt(4_294_500_000))
 	require.NoError(t, err)
-	assert.Equal(t, 4_294_500_000, quota)
+	assert.Equal(t, int64(4_294_500_000), quota)
 
 	quota, err = WalletQuotaFromDecimalStrict(decimal.NewFromInt(MaxWalletQuota))
 	require.NoError(t, err)
-	assert.Equal(t, MaxWalletQuota, quota)
+	assert.Equal(t, int64(MaxWalletQuota), quota)
 
-	quota, err = WalletQuotaFromDecimalStrict(decimal.NewFromInt(MaxWalletQuota + 1))
+	// 2^53 is exactly representable by JavaScript, but it is not the wallet
+	// ceiling. Verify that the conversion stays exact past that boundary.
+	quota, err = WalletQuotaFromDecimalStrict(decimal.RequireFromString("9007199254740993"))
+	require.NoError(t, err)
+	assert.Equal(t, int64(9007199254740993), quota)
+
+	quota, err = WalletQuotaFromDecimalStrict(decimal.RequireFromString("9223372036854775808"))
 	assert.Zero(t, quota)
-	var clamp *QuotaClamp
-	require.ErrorAs(t, err, &clamp)
-	assert.Equal(t, "WalletQuotaFromDecimal", clamp.Op)
-	assert.Equal(t, QuotaClampOverflow, clamp.Kind)
+	require.ErrorIs(t, err, ErrWalletQuotaOverflow)
 }

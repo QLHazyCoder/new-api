@@ -16,6 +16,8 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -53,7 +55,9 @@ func TestMain(m *testing.M) {
 		&model.Channel{},
 		&model.Midjourney{},
 		&model.TopUp{},
+		&model.SubscriptionPlan{},
 		&model.UserSubscription{},
+		&model.SubscriptionPreConsumeRecord{},
 		&model.SystemTask{},
 		&model.SystemTaskLock{},
 	); err != nil {
@@ -77,19 +81,21 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM channels")
 		model.DB.Exec("DELETE FROM midjourneys")
 		model.DB.Exec("DELETE FROM top_ups")
+		model.DB.Exec("DELETE FROM subscription_pre_consume_records")
 		model.DB.Exec("DELETE FROM user_subscriptions")
+		model.DB.Exec("DELETE FROM subscription_plans")
 		model.DB.Exec("DELETE FROM system_task_locks")
 		model.DB.Exec("DELETE FROM system_tasks")
 	})
 }
 
-func seedUser(t *testing.T, id int, quota int) {
+func seedUser(t *testing.T, id int, quota int64) {
 	t.Helper()
 	user := &model.User{Id: id, Username: "test_user", Quota: quota, Status: common.UserStatusEnabled}
 	require.NoError(t, model.DB.Create(user).Error)
 }
 
-func seedToken(t *testing.T, id int, userId int, key string, remainQuota int) {
+func seedToken(t *testing.T, id int, userId int, key string, remainQuota int64) {
 	t.Helper()
 	token := &model.Token{
 		Id:          id,
@@ -113,6 +119,36 @@ func seedSubscription(t *testing.T, id int, userId int, amountTotal int64, amoun
 		Status:      "active",
 		StartTime:   time.Now().Unix(),
 		EndTime:     time.Now().Add(30 * 24 * time.Hour).Unix(),
+	}
+	require.NoError(t, model.DB.Create(sub).Error)
+}
+
+func seedSubscriptionPlan(t *testing.T, id int, allowWalletOverflow bool) {
+	t.Helper()
+	plan := &model.SubscriptionPlan{
+		Id:                  id,
+		Title:               "test subscription",
+		DurationUnit:        model.SubscriptionDurationMonth,
+		DurationValue:       1,
+		AllowWalletOverflow: common.GetPointer(allowWalletOverflow),
+		QuotaResetPeriod:    model.SubscriptionResetNever,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
+	model.InvalidateSubscriptionPlanCache(id)
+}
+
+func seedSubscriptionWithPlan(t *testing.T, id, userID, planID int, amountTotal, amountUsed int64, allowWalletOverflow bool) {
+	t.Helper()
+	sub := &model.UserSubscription{
+		Id:                  id,
+		UserId:              userID,
+		PlanId:              planID,
+		AmountTotal:         amountTotal,
+		AmountUsed:          amountUsed,
+		Status:              "active",
+		StartTime:           time.Now().Unix(),
+		EndTime:             time.Now().Add(30 * 24 * time.Hour).Unix(),
+		AllowWalletOverflow: allowWalletOverflow,
 	}
 	require.NoError(t, model.DB.Create(sub).Error)
 }
@@ -162,6 +198,145 @@ func makeTask(userId, channelId, quota, tokenId int, billingSource string, subsc
 			},
 		},
 	}
+}
+
+func newBillingTestContext(tokenQuota int) *gin.Context {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	c.Set("token_quota", tokenQuota)
+	return c
+}
+
+func TestNewBillingSessionSubscriptionFirstPersistsMixedAllocations(t *testing.T) {
+	truncate(t)
+
+	const userID, tokenID, subID, planID = 310, 310, 310, 310
+	const preConsumed = 100
+	seedUser(t, userID, 1_000)
+	seedToken(t, tokenID, userID, "sk-mixed-allocation", 1_000)
+	seedSubscriptionPlan(t, planID, true)
+	seedSubscriptionWithPlan(t, subID, userID, planID, 1_000, 950, true)
+
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        "sk-mixed-allocation",
+		RequestId:       "req-mixed-allocation",
+		OriginModelName: "test-model",
+		UsingGroup:      "default",
+		UserSetting:     dto.UserSetting{BillingPreference: "subscription_first"},
+	}
+
+	session, apiErr := NewBillingSession(newBillingTestContext(1_000), info, preConsumed)
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceMixed, info.BillingSource)
+	require.Len(t, info.BillingAllocations, 2)
+	assert.Equal(t, BillingSourceSubscription, info.BillingAllocations[0].Source)
+	assert.Equal(t, 50, info.BillingAllocations[0].Quota)
+	assert.Equal(t, BillingSourceWallet, info.BillingAllocations[1].Source)
+	assert.Equal(t, 50, info.BillingAllocations[1].Quota)
+	assert.EqualValues(t, 1_000, getSubscriptionUsed(t, subID))
+	assert.EqualValues(t, 950, getUserQuota(t, userID))
+
+	require.NoError(t, session.Settle(70))
+	require.Len(t, info.BillingAllocations, 2)
+	assert.Equal(t, 50, info.BillingAllocations[0].Quota)
+	assert.Equal(t, 20, info.BillingAllocations[1].Quota)
+	assert.EqualValues(t, 980, getUserQuota(t, userID))
+	assert.EqualValues(t, 930, getTokenRemainQuota(t, tokenID))
+}
+
+func TestMixedTaskBillingPersistsAllocationsAcrossRecalculateAndRefund(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	const userID, channelID, subID, planID = 312, 312, 312, 312
+	const preConsumed, actualQuota = 100, 70
+
+	// This is the state immediately after subscription_first consumed the last
+	// 50 subscription units and charged the remaining 50 to the wallet.
+	seedUser(t, userID, 950)
+	seedChannel(t, channelID)
+	seedSubscriptionPlan(t, planID, true)
+	seedSubscriptionWithPlan(t, subID, userID, planID, 1_000, 1_000, true)
+	seedChargedAccounting(t, userID, channelID, 0, preConsumed, 1)
+
+	task := makeTask(userID, channelID, preConsumed, 0, BillingSourceMixed, 0)
+	task.PrivateData.BillingAllocations = []model.BillingAllocation{
+		{
+			Source:                             BillingSourceSubscription,
+			Quota:                              50,
+			SubscriptionId:                     subID,
+			SubscriptionPlanId:                 planID,
+			SubscriptionPlanTitle:              "test subscription",
+			SubscriptionAmountTotal:            1_000,
+			SubscriptionAmountUsedAfterConsume: 1_000,
+		},
+		{Source: BillingSourceWallet, Quota: 50},
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+
+	// The lower actual charge must refund the wallet portion first, and persist
+	// that revised allocation atomically with the task quota.
+	RecalculateTaskQuota(ctx, task, actualQuota, "mixed task actual usage")
+	assert.EqualValues(t, 980, getUserQuota(t, userID))
+	assert.EqualValues(t, 1_000, getSubscriptionUsed(t, subID))
+	assert.Equal(t, actualQuota, getTaskQuota(t, task.ID))
+
+	var settled model.Task
+	require.NoError(t, model.DB.First(&settled, task.ID).Error)
+	require.Len(t, settled.PrivateData.BillingAllocations, 2)
+	assert.Equal(t, BillingSourceSubscription, settled.PrivateData.BillingAllocations[0].Source)
+	assert.Equal(t, 50, settled.PrivateData.BillingAllocations[0].Quota)
+	assert.Equal(t, BillingSourceWallet, settled.PrivateData.BillingAllocations[1].Source)
+	assert.Equal(t, 20, settled.PrivateData.BillingAllocations[1].Quota)
+
+	// A later failure refunds exactly the persisted split: 20 wallet units and
+	// 50 subscription units, never the entire task from the wallet.
+	assert.True(t, RefundTaskQuota(ctx, &settled, "mixed task failed"))
+	assert.EqualValues(t, 1_000, getUserQuota(t, userID))
+	assert.EqualValues(t, 950, getSubscriptionUsed(t, subID))
+	assert.Zero(t, getTaskQuota(t, task.ID))
+
+	var refunded model.Task
+	require.NoError(t, model.DB.First(&refunded, task.ID).Error)
+	assert.Empty(t, refunded.PrivateData.BillingAllocations)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeRefund, log.Type)
+	var other map[string]any
+	require.NoError(t, json.Unmarshal([]byte(log.Other), &other))
+	assert.Contains(t, other, "billing_refund_allocations")
+}
+
+func TestNewBillingSessionStrictSubscriptionDoesNotFallbackToWallet(t *testing.T) {
+	truncate(t)
+
+	const userID, tokenID, subID, planID = 311, 311, 311, 311
+	seedUser(t, userID, 1_000)
+	seedToken(t, tokenID, userID, "sk-strict-subscription", 1_000)
+	seedSubscriptionPlan(t, planID, false)
+	seedSubscriptionWithPlan(t, subID, userID, planID, 1_000, 950, false)
+
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		TokenId:         tokenID,
+		TokenKey:        "sk-strict-subscription",
+		RequestId:       "req-strict-subscription",
+		OriginModelName: "test-model",
+		UsingGroup:      "default",
+		UserSetting:     dto.UserSetting{BillingPreference: "subscription_first"},
+	}
+
+	session, apiErr := NewBillingSession(newBillingTestContext(1_000), info, 100)
+	require.Nil(t, session)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, relaytypes.ErrorCodeInsufficientUserQuota, apiErr.GetErrorCode())
+	assert.EqualValues(t, 1_000, getUserQuota(t, userID))
+	assert.EqualValues(t, 950, getSubscriptionUsed(t, subID))
+	assert.EqualValues(t, 1_000, getTokenRemainQuota(t, tokenID))
 }
 
 func TestPriceDataOtherRatiosFilterAndSnapshot(t *testing.T) {
@@ -512,14 +687,14 @@ func getUserQuota(t *testing.T, id int) int {
 	t.Helper()
 	var user model.User
 	require.NoError(t, model.DB.Select("quota").Where("id = ?", id).First(&user).Error)
-	return user.Quota
+	return int(user.Quota)
 }
 
 func getUserUsageAccounting(t *testing.T, id int) (int, int) {
 	t.Helper()
 	var user model.User
 	require.NoError(t, model.DB.Select("used_quota", "request_count").Where("id = ?", id).First(&user).Error)
-	return user.UsedQuota, user.RequestCount
+	return int(user.UsedQuota), user.RequestCount
 }
 
 func getChannelUsedQuota(t *testing.T, id int) int64 {
@@ -533,14 +708,14 @@ func getTokenRemainQuota(t *testing.T, id int) int {
 	t.Helper()
 	var token model.Token
 	require.NoError(t, model.DB.Select("remain_quota").Where("id = ?", id).First(&token).Error)
-	return token.RemainQuota
+	return int(token.RemainQuota)
 }
 
 func getTokenUsedQuota(t *testing.T, id int) int {
 	t.Helper()
 	var token model.Token
 	require.NoError(t, model.DB.Select("used_quota").Where("id = ?", id).First(&token).Error)
-	return token.UsedQuota
+	return int(token.UsedQuota)
 }
 
 func getSubscriptionUsed(t *testing.T, id int) int64 {

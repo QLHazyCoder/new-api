@@ -908,13 +908,12 @@ func UpdateChannelUsedQuota(id int, quota int) {
 		addNewRecord(BatchUpdateTypeChannelUsedQuota, id, int64(quota))
 		return
 	}
-	updateChannelUsedQuota(id, quota)
+	updateChannelUsedQuota(id, int64(quota))
 }
 
-func updateChannelUsedQuota(id int, quota int) {
-	delta := int64(quota)
+func updateChannelUsedQuota(id int, delta int64) {
 	if delta == common.MinWalletQuota {
-		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, quota, common.ErrWalletQuotaOverflow))
+		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, delta, common.ErrWalletQuotaOverflow))
 		return
 	}
 	query := DB.Model(&Channel{}).Where("id = ?", id)
@@ -936,7 +935,7 @@ func updateChannelUsedQuota(id int, quota int) {
 		}
 	}
 	if err != nil {
-		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, quota, err))
+		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, delta, err))
 	}
 }
 

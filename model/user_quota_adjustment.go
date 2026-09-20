@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -19,21 +18,17 @@ var (
 type UserQuotaAdjustment struct {
 	UserID   int
 	Username string
-	Before   int
-	After    int
+	Before   int64
+	After    int64
 }
 
-func AdjustUserQuota(userID, operatorRole int, mode string, value int) (*UserQuotaAdjustment, error) {
+func AdjustUserQuota(userID, operatorRole int, mode string, value int64) (*UserQuotaAdjustment, error) {
 	if userID <= 0 || (mode != "add" && mode != "subtract" && mode != "override") {
 		return nil, ErrInvalidUserQuotaAdjustment
 	}
 	if mode != "override" && value <= 0 {
 		return nil, ErrInvalidUserQuotaAdjustment
 	}
-	if value > common.MaxWalletQuota || value < -common.MaxWalletQuota {
-		return nil, ErrWalletQuotaLimitExceeded
-	}
-
 	var adjustment UserQuotaAdjustment
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var user User
@@ -43,19 +38,20 @@ func AdjustUserQuota(userID, operatorRole int, mode string, value int) (*UserQuo
 		if operatorRole != common.RoleRootUser && operatorRole <= user.Role {
 			return ErrUserQuotaPermission
 		}
-		if user.Quota > common.MaxWalletQuota || user.Quota < -common.MaxWalletQuota {
-			return ErrWalletQuotaLimitExceeded
-		}
-		quota := decimal.NewFromInt(int64(value))
+		after := value
 		switch mode {
 		case "add":
-			quota = decimal.NewFromInt(int64(user.Quota)).Add(quota)
+			var err error
+			after, err = common.AddWalletQuota(user.Quota, value)
+			if err != nil {
+				return ErrWalletQuotaLimitExceeded
+			}
 		case "subtract":
-			quota = decimal.NewFromInt(int64(user.Quota)).Sub(quota)
-		}
-		after, err := common.WalletQuotaFromDecimalStrict(quota)
-		if err != nil {
-			return ErrWalletQuotaLimitExceeded
+			var err error
+			after, err = common.SubWalletQuota(user.Quota, value)
+			if err != nil {
+				return ErrWalletQuotaLimitExceeded
+			}
 		}
 		// An unchanged override is a successful operation, including on MySQL
 		// configurations that count only changed rows in RowsAffected.
@@ -77,8 +73,12 @@ func AdjustUserQuota(userID, operatorRole int, mode string, value int) (*UserQuo
 
 	// Apply only the committed difference, preserving outstanding reservations.
 	// Both balances are bounded above, so their difference fits in int64.
-	delta := int64(adjustment.After) - int64(adjustment.Before)
-	if delta != 0 {
+	delta, deltaErr := common.SubWalletQuota(adjustment.After, adjustment.Before)
+	if deltaErr != nil {
+		if err := invalidateUserCache(userID); err != nil {
+			common.SysError(fmt.Sprintf("failed to invalidate user cache after manual quota adjustment for user %d: %s", userID, err))
+		}
+	} else if delta != 0 {
 		if err := cacheIncrUserQuota(userID, delta); err != nil {
 			common.SysError(fmt.Sprintf("failed to sync manual quota adjustment for user %d: %s", userID, err))
 		}

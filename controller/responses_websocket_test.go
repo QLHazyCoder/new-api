@@ -823,7 +823,7 @@ func TestResponsesWebSocketInitialUpstreamRejectionRefundsReservation(t *testing
 				if !assert.NoError(t, model.DB.First(&token, <-tokenID).Error) {
 					return
 				}
-				preConsumed <- token.RemainQuota
+				preConsumed <- int(token.RemainQuota)
 				if !assert.NoError(t, ws.WriteMessage(websocket.TextMessage, []byte(tc.upstream))) {
 					return
 				}

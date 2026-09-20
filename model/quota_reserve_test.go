@@ -172,25 +172,25 @@ func TestBatchUpdateAccumulatesTwoMaximumRequestCharges(t *testing.T) {
 	require.NoError(t, DecreaseUserQuota(user.Id, common.MaxQuota, false))
 
 	batchUpdate()
-	assert.Equal(t, 100, getUserQuotaFromDB(t, user.Id))
+	assert.EqualValues(t, 100, getUserQuotaFromDB(t, user.Id))
 }
 
 func TestBatchUpdateAccumulatorSaturatesOverflow(t *testing.T) {
 	resetBatchUpdateTestState(t)
 
-	addNewRecord(BatchUpdateTypeUserQuota, 1, math.MaxInt)
+	addNewRecord(BatchUpdateTypeUserQuota, 1, int64(math.MaxInt))
 	addNewRecord(BatchUpdateTypeUserQuota, 1, 1)
 	batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
-	assert.Equal(t, math.MaxInt, batchUpdateStores[BatchUpdateTypeUserQuota][1])
+	assert.Equal(t, int64(math.MaxInt), batchUpdateStores[BatchUpdateTypeUserQuota][1])
 	batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
 
 	batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
-	batchUpdateStores[BatchUpdateTypeUserQuota] = make(map[int]int)
+	batchUpdateStores[BatchUpdateTypeUserQuota] = make(map[int]int64)
 	batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
-	addNewRecord(BatchUpdateTypeUserQuota, 1, math.MinInt)
+	addNewRecord(BatchUpdateTypeUserQuota, 1, int64(math.MinInt))
 	addNewRecord(BatchUpdateTypeUserQuota, 1, -1)
 	batchUpdateLocks[BatchUpdateTypeUserQuota].Lock()
-	assert.Equal(t, math.MinInt, batchUpdateStores[BatchUpdateTypeUserQuota][1])
+	assert.Equal(t, int64(math.MinInt), batchUpdateStores[BatchUpdateTypeUserQuota][1])
 	batchUpdateLocks[BatchUpdateTypeUserQuota].Unlock()
 }
 

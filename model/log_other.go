@@ -21,6 +21,9 @@ var legacySensitiveLogOtherKeys = []string{
 	"channel_name",
 	"channel_type",
 	"reject_reason",
+	// Sensitive-word evidence belongs to the dedicated audit table and must
+	// not leak through a user's generic log history.
+	"audit_id",
 }
 
 type logOtherVisibility int
@@ -237,6 +240,20 @@ func formatLogOtherJSON(value string, visibility logOtherVisibility) string {
 			if _, exists := values[key]; exists {
 				delete(values, key)
 				changed = true
+			}
+		}
+		if rawFilter, exists := values["keyword_filter"]; exists {
+			var filter map[string]json.RawMessage
+			if err := common.Unmarshal(rawFilter, &filter); err == nil {
+				for _, key := range []string{"matched_words", "rule_names", "prompt_hash", "rule_ids"} {
+					if _, present := filter[key]; present {
+						delete(filter, key)
+						changed = true
+					}
+				}
+				if encoded, err := common.Marshal(filter); err == nil {
+					values["keyword_filter"] = encoded
+				}
 			}
 		}
 	} else {

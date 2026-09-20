@@ -92,6 +92,9 @@ var DebugEnabled bool
 var MemoryCacheEnabled bool
 
 var LogConsumeEnabled = true
+var LogRetentionDays = 30
+
+const MaxLogRetentionDays = 3650
 
 var TLSInsecureSkipVerify bool
 var InsecureTLSConfig = &tls.Config{InsecureSkipVerify: true}
@@ -122,13 +125,18 @@ var TurnstileSecretKey = ""
 var TelegramBotToken = ""
 var TelegramBotName = ""
 
-var QuotaForNewUser = 0
-var QuotaForInviter = 0
-var QuotaForInvitee = 0
+var QuotaForNewUser int64
+var QuotaForInviter int64
+var QuotaForInvitee int64
+
+// TopUpInviteRewardPercent remains an explicit opt-in percentage.  The
+// settlement path also requires payment-compliance confirmation before it can
+// grant a reward.
+var TopUpInviteRewardPercent = 0.0
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
-var QuotaRemindThreshold = 1000
+var QuotaRemindThreshold int64 = 1000
 
 // PreConsumedQuota is retained for old option clients; token reservations now
 // use quota_setting.pre_consume_multiplier and the estimated input cost.

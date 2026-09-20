@@ -42,12 +42,12 @@ type tokenResponse struct {
 	AutoGroups []string `json:"auto_groups"`
 }
 
-func maxTokenQuota() int {
+func maxTokenQuota() int64 {
 	quota, err := common.WalletQuotaFromDecimalStrict(
 		decimal.NewFromInt(1_000_000_000).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 	)
 	if err != nil {
-		return common.MaxWalletQuota
+		return int64(common.MaxWalletQuota)
 	}
 	return quota
 }

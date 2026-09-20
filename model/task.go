@@ -116,11 +116,12 @@ type TaskPrivateData struct {
 	// other private task state so public task DTOs cannot expose it by accident.
 	Execution *TaskExecutionSnapshot `json:"execution,omitempty"`
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
-	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
-	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
-	TokenId        int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
-	NodeName       string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
-	BillingContext *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
+	BillingSource      string              `json:"billing_source,omitempty"`      // "wallet"、"subscription" 或 "mixed"
+	BillingAllocations []BillingAllocation `json:"billing_allocations,omitempty"` // mixed 计费分段
+	SubscriptionId     int                 `json:"subscription_id,omitempty"`     // 订阅 ID，用于订阅退款
+	TokenId            int                 `json:"token_id,omitempty"`            // 令牌 ID，用于令牌额度退款
+	NodeName           string              `json:"node_name,omitempty"`           // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
+	BillingContext     *TaskBillingContext `json:"billing_context,omitempty"`     // 计费参数快照（用于轮询阶段重新计算）
 	// ResponsesBackground records that the openai_responses create request
 	// asked for background:true. Every task is durable and survives client
 	// disconnect regardless; this only echoes the protocol-level request
@@ -136,6 +137,43 @@ type TaskPrivateData struct {
 	// and every retrieval surface treats the task as not found. The zero
 	// value keeps historical rows retained and retrievable.
 	ResultDiscarded bool `json:"result_discarded,omitempty"`
+}
+
+// BillingAllocation snapshots a single source used by mixed task billing.
+// Historical private_data rows already use this shape, so it must remain
+// decodable even when a newer upstream task implementation is in use.
+type BillingAllocation struct {
+	Source                             string `json:"source"`
+	Quota                              int    `json:"quota"`
+	SubscriptionId                     int    `json:"subscription_id,omitempty"`
+	SubscriptionPlanId                 int    `json:"subscription_plan_id,omitempty"`
+	SubscriptionPlanTitle              string `json:"subscription_plan_title,omitempty"`
+	SubscriptionAmountTotal            int64  `json:"subscription_amount_total,omitempty"`
+	SubscriptionAmountUsedAfterConsume int64  `json:"subscription_amount_used_after_consume,omitempty"`
+}
+
+// NewTaskBillingAllocationsFromRelay copies request-scoped allocations into a
+// task's durable private data without retaining zero-value fragments.
+func NewTaskBillingAllocationsFromRelay(allocations []commonRelay.BillingAllocation) []BillingAllocation {
+	if len(allocations) == 0 {
+		return nil
+	}
+	result := make([]BillingAllocation, 0, len(allocations))
+	for _, allocation := range allocations {
+		if allocation.Quota <= 0 {
+			continue
+		}
+		result = append(result, BillingAllocation{
+			Source:                             allocation.Source,
+			Quota:                              allocation.Quota,
+			SubscriptionId:                     allocation.SubscriptionId,
+			SubscriptionPlanId:                 allocation.SubscriptionPlanId,
+			SubscriptionPlanTitle:              allocation.SubscriptionPlanTitle,
+			SubscriptionAmountTotal:            allocation.SubscriptionAmountTotal,
+			SubscriptionAmountUsedAfterConsume: allocation.SubscriptionAmountUsedAfterConsume,
+		})
+	}
+	return result
 }
 
 type TaskExecutionSnapshot struct {
@@ -211,7 +249,7 @@ func (p *TaskPrivateData) Scan(val any) error {
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
 	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" &&
-		p.Execution == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
+		p.Execution == nil && p.BillingSource == "" && len(p.BillingAllocations) == 0 && p.SubscriptionId == 0 &&
 		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 &&
 		!p.ResultDiscarded {
@@ -543,6 +581,16 @@ func (Task *Task) Update() error {
 
 func (t *Task) UpdateQuota() error {
 	return DB.Model(t).Update("quota", t.Quota).Error
+}
+
+// UpdateQuotaAndPrivateData persists accounting allocation changes together
+// with the current task quota. Mixed-billing settlement must not update one
+// without the other, otherwise a retry could refund the wrong source.
+func (t *Task) UpdateQuotaAndPrivateData() error {
+	return DB.Model(t).Updates(map[string]any{
+		"quota":        t.Quota,
+		"private_data": t.PrivateData,
+	}).Error
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).

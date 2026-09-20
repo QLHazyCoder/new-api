@@ -1,6 +1,10 @@
 package common
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/QuantumNous/new-api/pkg/imagecapability"
+)
 
 var (
 	// OpenAIResponseOnlyModels is a list of models that are only available for OpenAI responses.
@@ -62,6 +66,24 @@ func IsImageGenerationModel(modelName string) bool {
 		}
 	}
 	return false
+}
+
+// IsChannelImageGenerationModel resolves a channel mapping before checking the
+// shared image-capability registry. This keeps image endpoint selection in
+// sync with the capability system rather than relying on model-name heuristics.
+func IsChannelImageGenerationModel(channelType int, modelName string, modelMappings ...string) bool {
+	if len(modelMappings) > 0 {
+		mappedModel, _, err := ResolveModelMapping(modelName, modelMappings[0])
+		if err != nil {
+			return false
+		}
+		modelName = mappedModel
+	}
+	_, ok := imagecapability.Resolve(channelType, modelName)
+	// The capability registry is authoritative when it has a channel-specific
+	// rule. Keep the upstream legacy catalogue as a fallback for compatible
+	// image models that do not yet need Playground capability metadata.
+	return ok || IsImageGenerationModel(modelName)
 }
 
 func IsOpenAITextModel(modelName string) bool {

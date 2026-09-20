@@ -204,10 +204,7 @@ export function CCSwitchDialog(props: Props) {
 
         {currentSource.modelFields.map((field) => (
           <div key={field.key} className='space-y-2'>
-            <Label
-              htmlFor={`cc-switch-${field.key}`}
-              required={field.required}
-            >
+            <Label htmlFor={`cc-switch-${field.key}`} required={field.required}>
               {t(field.labelKey)}
             </Label>
             <Combobox

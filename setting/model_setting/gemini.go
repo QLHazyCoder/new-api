@@ -2,7 +2,7 @@ package model_setting
 
 import (
 	"fmt"
-	"slices"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -109,5 +109,18 @@ func GetGeminiVersionSetting(key string) string {
 }
 
 func IsGeminiModelSupportImagine(model string) bool {
-	return slices.Contains(geminiSettings.SupportedImagineModels, model)
+	for _, supported := range geminiSettings.SupportedImagineModels {
+		if strings.EqualFold(supported, model) {
+			return true
+		}
+		// The capability registry treats these public suffixes as resolution
+		// aliases. Keep this compatibility predicate aligned with it while
+		// retaining the upstream settings list as the source of base models.
+		for _, suffix := range []string{"-1k", "-2k", "-4k"} {
+			if strings.EqualFold(supported+suffix, model) {
+				return true
+			}
+		}
+	}
+	return false
 }

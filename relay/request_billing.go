@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -22,7 +24,9 @@ import (
 // provide the current request body through BodyStorage or BillingRequestInput;
 // channel retries retain the resulting billing session and pricing snapshot.
 func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
-	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
+	advancedSensitiveEnabled := model.GetSensitiveWordConfig().Enabled
+	legacySensitiveEnabled := setting.ShouldCheckPromptSensitive() && !advancedSensitiveEnabled
+	needSensitiveCheck := advancedSensitiveEnabled || legacySensitiveEnabled
 	meta := &types.TokenCountMeta{TokenType: types.TokenTypeTokenizer}
 	if info.Request != nil && (needSensitiveCheck || constant.CountToken) {
 		meta = info.Request.GetTokenCountMeta()
@@ -41,7 +45,30 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 	}
 
 	if needSensitiveCheck && meta != nil {
-		if contains, words := service.CheckSensitiveText(meta.CombineText); contains {
+		if advancedSensitiveEnabled {
+			candidateGroups := []string{info.UsingGroup}
+			if info.TokenGroup == "auto" {
+				candidateGroups = service.GetRequestAutoGroups(c, info.UserGroup)
+			}
+			result, checkErr := model.CheckSensitiveRequestForGroups(model.SensitiveCheckInput{
+				RequestID: c.GetString(common.RequestIdKey), UserID: info.UserId, Username: c.GetString("username"),
+				TokenID: info.TokenId, TokenName: c.GetString("token_name"), GroupName: info.UsingGroup,
+				ModelName: info.OriginModelName, Endpoint: c.Request.URL.Path, Protocol: string(info.RelayFormat),
+				Prompt: meta.CombineText,
+			}, candidateGroups)
+			if checkErr != nil {
+				logger.LogWarn(c, "sensitive word audit failed: "+checkErr.Error())
+				if result == nil || !result.Matched || !result.ObserveOnly || !errors.Is(checkErr, model.ErrSensitiveWordAuditPersistence) {
+					return types.NewErrorWithStatusCode(errors.New("敏感词审计暂时不可用，请稍后重试"), types.ErrorCodeQueryDataError, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+				}
+				logger.LogWarn(c, "sensitive word audit unavailable in observe mode; continuing request")
+			}
+			if result != nil && result.Matched && result.Blocked {
+				service.RequestPolicy(c).AddEvent(service.PolicyEvent{ErrorCode: string(types.ErrorCodeSensitiveWordsDetected), ErrorSource: "local", Decision: service.PolicyDecision{Action: "stop", Reason: "local_rejection", Source: "global"}, Health: "unchanged"})
+				logger.LogWarn(c, "sensitive word policy matched")
+				return types.NewOpenAIError(errors.New(result.Message), types.ErrorCodeSensitiveWordsDetected, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+			}
+		} else if contains, words := service.CheckSensitiveText(meta.CombineText); contains {
 			service.RequestPolicy(c).AddEvent(service.PolicyEvent{ErrorCode: string(types.ErrorCodeSensitiveWordsDetected), ErrorSource: "local", Decision: service.PolicyDecision{Action: "stop", Reason: "local_rejection", Source: "global"}, Health: "unchanged"})
 			message := fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", "))
 			logger.LogWarn(c, message)

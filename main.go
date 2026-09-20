@@ -23,6 +23,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/pkg/imagecapability"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/pkg/wsmanager"
@@ -62,6 +63,9 @@ func main() {
 		common.FatalLog("failed to initialize resources: " + err.Error())
 		return
 	}
+	// Load the external image capability registry and enable its hot-reload
+	// watcher before any request can inspect image model capabilities.
+	imagecapability.EnsureRuntimeConfig()
 
 	common.SysLog("New API " + common.Version + " started")
 	if os.Getenv("GIN_MODE") != "debug" {
@@ -114,6 +118,11 @@ func main() {
 	// 热更新配置
 	go model.SyncOptions(common.SyncFrequency)
 	go controller.SyncTaskPlugins()
+	if common.IsMasterNode {
+		// Keep the denormalized invitation counter convergent while old and new
+		// instances overlap during rolling or blue-green deployments.
+		go model.SyncAffiliateCounts(5 * time.Minute)
+	}
 
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
 	go authz.StartPolicySync(common.SyncFrequency)
@@ -157,6 +166,11 @@ func main() {
 	// switch are enforced inside the runner and each handler's Enabled().
 	controller.RegisterScheduledSystemTasks()
 	service.StartSystemTaskRunner()
+
+	// Playground image jobs use the normal relay pipeline in the background,
+	// while the service package owns queue leases and result persistence.
+	service.ExecutePlaygroundImageTask = controller.ExecutePlaygroundImageRelay
+	service.StartPlaygroundImageTaskRunner()
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true

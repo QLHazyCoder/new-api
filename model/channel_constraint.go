@@ -3,12 +3,14 @@ package model
 import (
 	"slices"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 )
 
 var filterEvalOrder = []dto.ChannelFilterKind{
 	dto.FilterRequestPath,
+	dto.FilterEndpointType,
 	dto.FilterTaskPluginIdentity,
 	dto.FilterResponsesWebSocket,
 }
@@ -98,6 +100,15 @@ func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilte
 		}
 		config := ch.GetOtherSettings().AdvancedCustom
 		return config != nil && config.SupportsPathForModel(filter.RequestPath, modelName)
+	case dto.FilterEndpointType:
+		switch filter.EndpointType {
+		case "":
+			return true
+		case constant.EndpointTypeImageGeneration:
+			return common.IsChannelImageGenerationModel(ch.Type, modelName, ch.GetModelMapping())
+		default:
+			return true
+		}
 	case dto.FilterTaskPluginIdentity:
 		if filter.TaskPluginKey == "" {
 			return ch.Type != constant.ChannelTypeTaskPlugin

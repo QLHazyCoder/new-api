@@ -197,7 +197,7 @@ func TestOAuthRegistrationAppliesProviderOverride(t *testing.T) {
 
 	router := gin.New()
 	router.GET("/oauth-contract", func(c *gin.Context) {
-		user, err := findOrCreateOAuthUser(c, "github", provider, oauthUser, "")
+		user, _, err := findOrCreateOAuthUser(c, "github", provider, oauthUser, nil, "")
 		require.NoError(t, err)
 		require.Equal(t, "vip", user.Group)
 		c.Status(http.StatusNoContent)
@@ -231,7 +231,7 @@ func TestExistingOAuthLoginKeepsCurrentGroup(t *testing.T) {
 
 	router := gin.New()
 	router.GET("/oauth-existing-contract", func(c *gin.Context) {
-		user, err := findOrCreateOAuthUser(c, "github", provider, &oauth.OAuthUser{ProviderUserID: existing.GitHubId}, "")
+		user, _, err := findOrCreateOAuthUser(c, "github", provider, &oauth.OAuthUser{ProviderUserID: existing.GitHubId}, nil, "")
 		require.NoError(t, err)
 		require.Equal(t, "legacy-group", user.Group)
 		c.Status(http.StatusNoContent)

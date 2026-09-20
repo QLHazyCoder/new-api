@@ -22,9 +22,9 @@ func TestWalletQuotaSupportsLargeBalancesAndInt64Boundary(t *testing.T) {
 
 	require.NoError(t, OverrideUserQuota(user.Id, common.MaxWalletQuota-1))
 	require.NoError(t, IncreaseUserQuota(user.Id, 1, true))
-	require.Equal(t, common.MaxWalletQuota, getUserQuotaFromDB(t, user.Id))
+	require.EqualValues(t, common.MaxWalletQuota, getUserQuotaFromDB(t, user.Id))
 	require.ErrorIs(t, IncreaseUserQuota(user.Id, 1, true), common.ErrWalletQuotaOverflow)
-	require.Equal(t, common.MaxWalletQuota, getUserQuotaFromDB(t, user.Id))
+	require.EqualValues(t, common.MaxWalletQuota, getUserQuotaFromDB(t, user.Id))
 
 	token := createReserveTestToken(t, 50_000_000_000)
 	reserved, err := TryReserveTokenQuota(token.Id, token.Key, 2_000_000_000, false)

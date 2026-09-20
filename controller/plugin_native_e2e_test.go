@@ -41,7 +41,7 @@ func (b *nativeRouteBilling) Settle(int) error {
 func (b *nativeRouteBilling) Refund(*gin.Context) {
 	b.events = append(b.events, "refund")
 	if !b.settled && b.preConsumed > 0 {
-		_ = model.IncreaseUserQuota(b.userID, b.preConsumed, true)
+		_ = model.IncreaseUserQuota(b.userID, int64(b.preConsumed), true)
 		b.preConsumed = 0
 	}
 }
@@ -56,7 +56,7 @@ func (b *nativeRouteBilling) GetPreConsumedQuota() int {
 
 func (b *nativeRouteBilling) Reserve(quota int) error {
 	b.events = append(b.events, "reserve")
-	if err := model.DecreaseUserQuota(b.userID, quota, true); err != nil {
+	if err := model.DecreaseUserQuota(b.userID, int64(quota), true); err != nil {
 		return err
 	}
 	b.preConsumed = quota

@@ -251,9 +251,9 @@ func TestPreConsumePolicyDatabaseMatrix(t *testing.T) {
 			cases := []struct {
 				name                  string
 				threshold, multiplier float64
-				wallet, token         int
+				wallet, token         int64
 				force, unlimited      bool
-				wantHeld              int
+				wantHeld              int64
 			}{
 				{"above threshold", 10, 1, 5500000, 5500000, false, false, 0},
 				{"custom threshold", 20, 1, 5500000, 5500000, false, false, 1500},
@@ -282,22 +282,22 @@ func TestPreConsumePolicyDatabaseMatrix(t *testing.T) {
 					price, err := helper.ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{MaxTokens: 10000})
 					require.NoError(t, err)
 					require.Nil(t, service.PreConsumeBilling(ctx, price.QuotaToPreConsume, info))
-					assert.Equal(t, tc.wantHeld, info.FinalPreConsumedQuota)
+					assert.EqualValues(t, tc.wantHeld, info.FinalPreConsumedQuota)
 					require.NoError(t, db.First(&user, user.Id).Error)
-					assert.Equal(t, tc.wallet-tc.wantHeld, user.Quota)
+					assert.EqualValues(t, tc.wallet-tc.wantHeld, user.Quota)
 					if !tc.unlimited {
 						require.NoError(t, db.First(&token, token.Id).Error)
-						assert.Equal(t, tc.token-tc.wantHeld, token.RemainQuota)
+						assert.EqualValues(t, tc.token-tc.wantHeld, token.RemainQuota)
 					}
 					_, actual, _ := service.TryTieredSettle(info, billingexpr.TokenParams{P: 1000, C: 100, Len: 1000})
 					assert.Equal(t, 2250, actual)
 					require.NoError(t, info.Billing.Settle(actual))
 					require.NoError(t, info.Billing.Settle(actual))
 					require.NoError(t, db.First(&user, user.Id).Error)
-					assert.Equal(t, tc.wallet-actual, user.Quota)
+					assert.EqualValues(t, tc.wallet-int64(actual), user.Quota)
 					if !tc.unlimited {
 						require.NoError(t, db.First(&token, token.Id).Error)
-						assert.Equal(t, tc.token-actual, token.RemainQuota)
+						assert.EqualValues(t, tc.token-int64(actual), token.RemainQuota)
 					}
 				})
 			}

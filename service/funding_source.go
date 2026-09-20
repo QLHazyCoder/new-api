@@ -53,7 +53,7 @@ func (w *WalletFunding) PreConsume(amount int) error {
 	if !reserved {
 		return ErrInsufficientWalletQuota
 	}
-	w.consumed = amount
+	w.consumed += amount
 	return nil
 }
 
@@ -209,6 +209,34 @@ func (m *MixedFunding) Settle(delta int) error {
 		return m.settlePositive(delta)
 	}
 	return m.settleNegative(-delta)
+}
+
+// Reserve applies a later upward reservation. For image tasks rc.39 requires
+// an atomic wallet reservation rather than allowing debt; normal settlement
+// keeps the established mixed-funding behavior of charging the wallet delta.
+func (m *MixedFunding) Reserve(delta int, requireAvailableQuota bool) error {
+	if delta <= 0 {
+		return nil
+	}
+	if m.wallet == nil {
+		return fmt.Errorf("mixed funding wallet is missing")
+	}
+	if requireAvailableQuota {
+		if err := m.wallet.PreConsume(delta); err != nil {
+			return err
+		}
+		m.walletAmount += delta
+		return nil
+	}
+	return m.settlePositive(delta)
+}
+
+func (m *MixedFunding) needsRefund() bool {
+	if m == nil {
+		return false
+	}
+	return (m.subscription != nil && m.subscription.preConsumed > 0) ||
+		(m.wallet != nil && m.wallet.consumed > 0)
 }
 
 func (m *MixedFunding) settlePositive(delta int) error {

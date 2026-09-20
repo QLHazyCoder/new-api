@@ -65,6 +65,13 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 	return err
 }
 
+// Observation mode is explicitly non-blocking. If the policy matched but the
+// audit row could not be persisted, let the request continue while keeping the
+// storage failure visible in the logs. Blocking mode remains fail closed.
+func shouldAllowSensitiveAuditFailure(result *model.SensitiveCheckResult, err error) bool {
+	return result != nil && result.Matched && result.ObserveOnly && errors.Is(err, model.ErrSensitiveWordAuditPersistence)
+}
+
 func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	requestId := c.GetString(common.RequestIdKey)
@@ -618,6 +625,7 @@ func executeTaskSubmissionWith(
 	task.PrivateData.Execution = service.TaskExecutionSnapshotFromContext(c)
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 	task.PrivateData.BillingSource = relayInfo.BillingSource
+	task.PrivateData.BillingAllocations = model.NewTaskBillingAllocationsFromRelay(relayInfo.BillingAllocations)
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.NodeName = common.NodeName

@@ -205,7 +205,7 @@ func createQuotaTestOperator(t *testing.T, db *gorm.DB, role int) model.User {
 func TestManageUserQuotaRecordsTopupAndAudit(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode, action, content string
-		value, wantQuota            int
+		value, wantQuota            int64
 	}{
 		{"add", "add", "user.quota_add", "Increased user quota by 500", 500, 1500},
 		{"subtract", "subtract", "user.quota_subtract", "Decreased user quota by 500", 500, 500},
@@ -225,7 +225,7 @@ func TestManageUserQuotaRecordsTopupAndAudit(t *testing.T) {
 			assert.Equal(t, http.StatusOK, recorder.Code)
 			require.Contains(t, recorder.Body.String(), `"success":true`)
 			require.NoError(t, db.First(&user, user.Id).Error)
-			assert.Equal(t, tc.wantQuota, user.Quota)
+			assert.EqualValues(t, tc.wantQuota, user.Quota)
 
 			logs, total, err := model.GetAllLogs(model.LogTypeTopup, 0, 0, "", "", "", 0, 20, 0, "", "", "")
 			require.NoError(t, err)
@@ -282,7 +282,7 @@ func TestManageUserQuotaRecordsTopupAndAudit(t *testing.T) {
 func TestManageUserQuotaFailuresDoNotRecordTopup(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode string
-		value      int
+		value      int64
 		failUpdate bool
 	}{
 		{"zero_add", "add", 0, false},
@@ -307,7 +307,7 @@ func TestManageUserQuotaFailuresDoNotRecordTopup(t *testing.T) {
 			recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":%q,"value":%d}`, user.Id, tc.mode, tc.value))
 			assert.Contains(t, recorder.Body.String(), `"success":false`)
 			require.NoError(t, db.First(&user, user.Id).Error)
-			assert.Equal(t, 1000, user.Quota)
+			assert.EqualValues(t, 1000, user.Quota)
 			var logCount, auditCount int64
 			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Count(&logCount).Error)
 			require.NoError(t, model.LOG_DB.Model(&model.AuditLog{}).Count(&auditCount).Error)
@@ -347,7 +347,7 @@ func TestManageUserQuotaLogFailureKeepsSuccessfulAdjustment(t *testing.T) {
 			recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":"add","value":500}`, user.Id))
 			assert.Contains(t, recorder.Body.String(), `"success":true`)
 			require.NoError(t, db.First(&user, user.Id).Error)
-			assert.Equal(t, 1500, user.Quota)
+			assert.EqualValues(t, 1500, user.Quota)
 			var logCount, auditCount int64
 			require.NoError(t, model.LOG_DB.Model(&model.Log{}).Count(&logCount).Error)
 			require.NoError(t, model.LOG_DB.Model(&model.AuditLog{}).Count(&auditCount).Error)
@@ -364,9 +364,10 @@ func TestManageUserQuotaLogFailureKeepsSuccessfulAdjustment(t *testing.T) {
 
 func TestManageUserQuotaTargetsAndWalletBounds(t *testing.T) {
 	for _, tc := range []struct {
-		name, mode, reason                                string
-		before, value, targetID, targetRole, operatorRole int
-		deleted, failRead                                 bool
+		name, mode, reason                 string
+		before, value                      int64
+		targetID, targetRole, operatorRole int
+		deleted, failRead                  bool
 	}{
 		{name: "zero_id", mode: "add", value: 1, reason: "invalid_parameters"},
 		{name: "negative_id", mode: "subtract", value: 1, targetID: -1, reason: "invalid_parameters"},
@@ -376,10 +377,9 @@ func TestManageUserQuotaTargetsAndWalletBounds(t *testing.T) {
 		{name: "higher_role", mode: "override", value: 1, targetID: 1, targetRole: common.RoleRootUser, operatorRole: common.RoleAdminUser, reason: "permission_denied"},
 		{name: "read_error", mode: "add", value: 1, targetID: 1, failRead: true, reason: "database_error"},
 		{name: "add_overflow", mode: "add", before: common.MaxWalletQuota, value: 1, targetID: 1, reason: "quota_limit_exceeded"},
-		{name: "subtract_underflow", mode: "subtract", before: -common.MaxWalletQuota, value: 1, targetID: 1, reason: "quota_limit_exceeded"},
-		{name: "oversized_add", mode: "add", value: common.MaxWalletQuota + 1, targetID: 1, reason: "quota_limit_exceeded"},
-		{name: "oversized_subtract", mode: "subtract", value: common.MaxWalletQuota + 1, targetID: 1, reason: "quota_limit_exceeded"},
-		{name: "oversized_override", mode: "override", value: -common.MaxWalletQuota - 1, targetID: 1, reason: "quota_limit_exceeded"},
+		{name: "subtract_underflow", mode: "subtract", before: common.MinWalletQuota, value: 1, targetID: 1, reason: "quota_limit_exceeded"},
+		{name: "oversized_add", mode: "add", before: common.MaxWalletQuota - 1, value: 2, targetID: 1, reason: "quota_limit_exceeded"},
+		{name: "oversized_subtract", mode: "subtract", before: common.MinWalletQuota + 1, value: 2, targetID: 1, reason: "quota_limit_exceeded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupManageUserTestDB(t)
@@ -411,7 +411,7 @@ func TestManageUserQuotaTargetsAndWalletBounds(t *testing.T) {
 				require.NoError(t, db.Callback().Query().Remove("test:quota_read_error"))
 			}
 			require.NoError(t, db.Unscoped().First(&user, user.Id).Error)
-			assert.Equal(t, tc.before, user.Quota)
+			assert.EqualValues(t, tc.before, user.Quota)
 			var audits []model.AuditLog
 			require.NoError(t, model.LOG_DB.Find(&audits).Error)
 			require.Len(t, audits, 1)
@@ -482,7 +482,7 @@ func TestManageUserQuotaMiddlewareKeepsOneOperationPerRequest(t *testing.T) {
 		}
 	}
 	require.NoError(t, db.First(&operator, operator.Id).Error)
-	assert.Equal(t, 1100, operator.Quota)
+	assert.EqualValues(t, 1100, operator.Quota)
 }
 
 func TestManageUserQuotaConcurrentSnapshots(t *testing.T) {
@@ -501,11 +501,11 @@ func TestManageUserQuotaConcurrentSnapshots(t *testing.T) {
 	type result struct {
 		adjustment *model.UserQuotaAdjustment
 		err        error
-		value      int
+		value      int64
 	}
 	results := make(chan result, 2)
-	for _, value := range []int{10, 20} {
-		go func(value int) {
+	for _, value := range []int64{10, 20} {
+		go func(value int64) {
 			adjustment, err := model.AdjustUserQuota(user.Id, common.RoleRootUser, "add", value)
 			results <- result{adjustment, err, value}
 		}(value)
@@ -522,25 +522,25 @@ func TestManageUserQuotaConcurrentSnapshots(t *testing.T) {
 			continue
 		}
 		require.NotNil(t, result.adjustment)
-		assert.Equal(t, result.value, result.adjustment.After-result.adjustment.Before)
+		assert.EqualValues(t, result.value, result.adjustment.After-result.adjustment.Before)
 		committed = append(committed, *result.adjustment)
 	}
 	require.NoError(t, db.Callback().Query().Remove("test:concurrent_quota_start"))
 	require.NotEmpty(t, committed)
 	sort.Slice(committed, func(i, j int) bool { return committed[i].Before < committed[j].Before })
-	balance := 1000
+	balance := int64(1000)
 	for _, adjustment := range committed {
 		assert.Equal(t, balance, adjustment.Before)
 		balance = adjustment.After
 	}
 	require.NoError(t, db.First(&user, user.Id).Error)
-	assert.Equal(t, balance, user.Quota)
+	assert.EqualValues(t, balance, user.Quota)
 }
 
 func TestManageUserQuotaCacheUsesCommittedIntegerDifference(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode                               string
-		before, cached, value, after, wantCached int
+		before, cached, value, after, wantCached int64
 		failUpdate, failCache, missingCache      bool
 	}{
 		{name: "add_preserves_reservations", mode: "add", before: 1000, cached: 900, value: 500, after: 1500, wantCached: 1400},
@@ -563,7 +563,7 @@ func TestManageUserQuotaCacheUsesCommittedIntegerDifference(t *testing.T) {
 			require.NoError(t, db.Create(&user).Error)
 			cache, err := model.GetUserCache(user.Id)
 			require.NoError(t, err)
-			assert.Equal(t, tc.before, cache.Quota)
+			assert.EqualValues(t, tc.before, cache.Quota)
 			_, err = model.GetUserCache(operator.Id)
 			require.NoError(t, err)
 			keys := server.Keys()
@@ -575,7 +575,7 @@ func TestManageUserQuotaCacheUsesCommittedIntegerDifference(t *testing.T) {
 				}
 			}
 			require.NotEmpty(t, quotaKey)
-			server.HSet(quotaKey, "Quota", strconv.Itoa(tc.cached))
+			server.HSet(quotaKey, "Quota", strconv.FormatInt(tc.cached, 10))
 			if tc.missingCache {
 				server.Del(quotaKey)
 			}
@@ -592,16 +592,16 @@ func TestManageUserQuotaCacheUsesCommittedIntegerDifference(t *testing.T) {
 			recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"add_quota","mode":%q,"value":%d}`, user.Id, tc.mode, tc.value))
 			assert.Contains(t, recorder.Body.String(), fmt.Sprintf(`"success":%t`, !tc.failUpdate))
 			require.NoError(t, db.First(&user, user.Id).Error)
-			assert.Equal(t, tc.after, user.Quota)
+			assert.EqualValues(t, tc.after, user.Quota)
 			if tc.missingCache {
 				// Log username lookup may hydrate the whole user after commit.
 				if server.Exists(quotaKey) {
 					assert.Equal(t, strconv.Itoa(user.Id), server.HGet(quotaKey, "Id"))
 					assert.NotEmpty(t, server.HGet(quotaKey, "CacheSchema"))
-					assert.Equal(t, strconv.Itoa(tc.after), server.HGet(quotaKey, "Quota"))
+					assert.Equal(t, strconv.FormatInt(tc.after, 10), server.HGet(quotaKey, "Quota"))
 				}
 			} else if !tc.failCache {
-				assert.Equal(t, strconv.Itoa(tc.wantCached), server.HGet(quotaKey, "Quota"))
+				assert.Equal(t, strconv.FormatInt(tc.wantCached, 10), server.HGet(quotaKey, "Quota"))
 			}
 		})
 	}

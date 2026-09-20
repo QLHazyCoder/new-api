@@ -47,6 +47,15 @@ export interface Model {
   vendor_id?: number
   endpoints?: string
   supported_endpoints?: string[]
+  // Legacy catalog metadata fields remain optional for form compatibility;
+  // rc.39's square/catalog API does not require them.
+  context_length?: number
+  max_output_tokens?: number
+  knowledge_cutoff?: string
+  release_date?: string
+  parameter_count?: string
+  input_modalities?: string
+  output_modalities?: string
   status: number
   sync_official: number
   created_time: number

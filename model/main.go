@@ -63,6 +63,12 @@ func initCol() {
 	}
 }
 
+// InitColumnNamesForTest resets SQL quoting globals after tests temporarily
+// replace the database dialect. Production startup uses initCol directly.
+func InitColumnNamesForTest() {
+	initCol()
+}
+
 var DB *gorm.DB
 
 var LOG_DB *gorm.DB
@@ -318,6 +324,12 @@ func is64BitIntegerType(dbType common.DatabaseType, dataType string) bool {
 }
 
 func migrateDB() error {
+	// Read-only audit before AutoMigrate: historical wallet values outside the
+	// request-charge range are valid int64 balances and must never be scaled or
+	// rewritten during an expand migration.
+	if err := inspectWalletQuotaRangeBeforeMigration(); err != nil {
+		return err
+	}
 	if err := migrateTokenKeyUniqueness(DB); err != nil {
 		return err
 	}
@@ -345,6 +357,7 @@ func migrateDB() error {
 		&Option{},
 		&LoginEncryptionKey{},
 		&Redemption{},
+		&AffiliateRewardEvent{},
 		&Ability{},
 		&Log{},
 		&Midjourney{},
@@ -370,8 +383,27 @@ func migrateDB() error {
 		&SystemTaskLock{},
 		&CasbinRule{},
 		&AuthzRole{},
+		&SensitiveWordRule{},
+		&SensitiveWordRuleWord{},
+		&SensitiveWordRuleGroup{},
+		&SensitiveWordWhitelist{},
+		&SensitiveWordAuditEvent{},
+		&PlaygroundImageBatch{},
+		&PlaygroundImageTask{},
 	)
 	if err != nil {
+		return err
+	}
+	if err := validateWalletQuotaSchema(); err != nil {
+		return err
+	}
+	if err := seedRequiredOptions(DB); err != nil {
+		return err
+	}
+	if err := MigrateSensitiveWordData(); err != nil {
+		return err
+	}
+	if err := ReconcileAffiliateCounts(); err != nil {
 		return err
 	}
 	if err := InitializeUserAuthVersions(); err != nil {
@@ -390,6 +422,14 @@ func migrateDB() error {
 		}
 	}
 	return nil
+}
+
+// migrateDBFast is the deterministic test/standby migration entry point. The
+// current upstream migration is already ordered and idempotent; keeping this
+// named wrapper preserves the local contract used by isolated SQLite checks
+// without maintaining a second divergent model list.
+func migrateDBFast() error {
+	return migrateDB()
 }
 
 func migrateLOGDB() error {

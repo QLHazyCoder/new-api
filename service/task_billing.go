@@ -112,15 +112,145 @@ func taskIsSubscription(task *model.Task) bool {
 	return task.PrivateData.BillingSource == BillingSourceSubscription && task.PrivateData.SubscriptionId > 0
 }
 
+func taskIsMixed(task *model.Task) bool {
+	return task != nil && task.PrivateData.BillingSource == BillingSourceMixed && len(task.PrivateData.BillingAllocations) > 0
+}
+
 // taskAdjustFunding 调整任务的资金来源（钱包或订阅），delta > 0 表示扣费，delta < 0 表示退还。
 func taskAdjustFunding(task *model.Task, delta int) error {
+	if taskIsMixed(task) {
+		return taskAdjustMixedFunding(task, delta)
+	}
 	if taskIsSubscription(task) {
 		return model.PostConsumeUserSubscriptionDelta(task.PrivateData.SubscriptionId, int64(delta))
 	}
 	if delta > 0 {
-		return model.DecreaseUserQuota(task.UserId, delta, false)
+		return model.DecreaseUserQuota(task.UserId, int64(delta), false)
 	}
-	return model.IncreaseUserQuota(task.UserId, -delta, false)
+	return model.IncreaseUserQuota(task.UserId, int64(-delta), false)
+}
+
+// taskAdjustMixedFunding preserves the original source allocation while a
+// task settles or refunds. Positive deltas are paid by wallet; negative
+// deltas refund wallet first and then subscription quota, matching the order
+// in which the original pre-consume exhausted sources.
+func taskAdjustMixedFunding(task *model.Task, delta int) error {
+	if delta == 0 {
+		return nil
+	}
+	if delta > 0 {
+		if err := model.DecreaseUserQuota(task.UserId, int64(delta), false); err != nil {
+			return err
+		}
+		addWalletTaskAllocation(&task.PrivateData.BillingAllocations, delta)
+		return nil
+	}
+
+	refund := -delta
+	if err := validateMixedRefundAllocations(task.PrivateData.BillingAllocations, refund); err != nil {
+		return err
+	}
+
+	remaining := refund
+	for i := range task.PrivateData.BillingAllocations {
+		if remaining <= 0 {
+			break
+		}
+		allocation := &task.PrivateData.BillingAllocations[i]
+		if allocation.Source != BillingSourceWallet || allocation.Quota <= 0 {
+			continue
+		}
+		amount := min(remaining, allocation.Quota)
+		if err := model.IncreaseUserQuota(task.UserId, int64(amount), false); err != nil {
+			return err
+		}
+		allocation.Quota -= amount
+		remaining -= amount
+	}
+	for i := range task.PrivateData.BillingAllocations {
+		if remaining <= 0 {
+			break
+		}
+		allocation := &task.PrivateData.BillingAllocations[i]
+		if allocation.Source != BillingSourceSubscription || allocation.Quota <= 0 {
+			continue
+		}
+		if allocation.SubscriptionId <= 0 {
+			return fmt.Errorf("mixed billing subscription allocation missing subscription_id")
+		}
+		amount := min(remaining, allocation.Quota)
+		if err := model.PostConsumeUserSubscriptionDelta(allocation.SubscriptionId, -int64(amount)); err != nil {
+			return err
+		}
+		allocation.Quota -= amount
+		allocation.SubscriptionAmountUsedAfterConsume -= int64(amount)
+		if allocation.SubscriptionAmountUsedAfterConsume < 0 {
+			allocation.SubscriptionAmountUsedAfterConsume = 0
+		}
+		remaining -= amount
+	}
+	task.PrivateData.BillingAllocations = compactTaskBillingAllocations(task.PrivateData.BillingAllocations)
+	return nil
+}
+
+func validateMixedRefundAllocations(allocations []model.BillingAllocation, refund int) error {
+	if refund <= 0 {
+		return nil
+	}
+	remaining := refund
+	for _, allocation := range allocations {
+		if remaining <= 0 {
+			return nil
+		}
+		if allocation.Source == BillingSourceWallet && allocation.Quota > 0 {
+			remaining -= min(remaining, allocation.Quota)
+		}
+	}
+	for _, allocation := range allocations {
+		if remaining <= 0 {
+			return nil
+		}
+		if allocation.Source != BillingSourceSubscription || allocation.Quota <= 0 {
+			continue
+		}
+		if allocation.SubscriptionId <= 0 {
+			return fmt.Errorf("mixed billing subscription allocation missing subscription_id")
+		}
+		remaining -= min(remaining, allocation.Quota)
+	}
+	if remaining > 0 {
+		return fmt.Errorf("mixed billing allocations are insufficient, need refund %d more", remaining)
+	}
+	return nil
+}
+
+func addWalletTaskAllocation(allocations *[]model.BillingAllocation, quota int) {
+	if quota <= 0 {
+		return
+	}
+	for i := range *allocations {
+		if (*allocations)[i].Source == BillingSourceWallet {
+			(*allocations)[i].Quota += quota
+			return
+		}
+	}
+	*allocations = append(*allocations, model.BillingAllocation{Source: BillingSourceWallet, Quota: quota})
+}
+
+func compactTaskBillingAllocations(allocations []model.BillingAllocation) []model.BillingAllocation {
+	if len(allocations) == 0 {
+		return nil
+	}
+	compacted := allocations[:0]
+	for _, allocation := range allocations {
+		if allocation.Quota > 0 {
+			compacted = append(compacted, allocation)
+		}
+	}
+	if len(compacted) == 0 {
+		return nil
+	}
+	return compacted
 }
 
 // taskAdjustTokenQuota 调整任务的令牌额度，delta > 0 表示扣费，delta < 0 表示退还。
@@ -177,8 +307,67 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 		other.SetPublic("is_model_mapped", true)
 		other.SetPublic("upstream_model_name", props.UpstreamModelName)
 	}
+	appendTaskBillingInfo(task, other)
 	appendTaskLogInfo(task, other)
 	return other
+}
+
+func appendTaskBillingInfo(task *model.Task, other *model.LogOther) {
+	if task == nil || other == nil {
+		return
+	}
+	if task.PrivateData.BillingSource != "" {
+		other.SetPublic("billing_source", task.PrivateData.BillingSource)
+	}
+	if task.PrivateData.BillingSource == BillingSourceSubscription {
+		if task.PrivateData.SubscriptionId > 0 {
+			other.SetPublic("subscription_id", task.PrivateData.SubscriptionId)
+		}
+		other.SetPublic("wallet_quota_deducted", 0)
+		return
+	}
+	if task.PrivateData.BillingSource == BillingSourceMixed {
+		appendTaskBillingAllocationInfo(task.PrivateData.BillingAllocations, other)
+	}
+}
+
+func appendTaskBillingAllocationInfo(allocations []model.BillingAllocation, other *model.LogOther) {
+	if len(allocations) == 0 || other == nil {
+		return
+	}
+	other.SetPublic("billing_allocations", allocations)
+	var walletDeducted int
+	var subscriptionConsumed int64
+	for _, allocation := range allocations {
+		if allocation.Quota <= 0 {
+			continue
+		}
+		switch allocation.Source {
+		case BillingSourceWallet:
+			walletDeducted += allocation.Quota
+		case BillingSourceSubscription:
+			subscriptionConsumed += int64(allocation.Quota)
+			if allocation.SubscriptionId > 0 {
+				other.SetPublic("subscription_id", allocation.SubscriptionId)
+			}
+			if allocation.SubscriptionPlanId > 0 {
+				other.SetPublic("subscription_plan_id", allocation.SubscriptionPlanId)
+			}
+			if allocation.SubscriptionPlanTitle != "" {
+				other.SetPublic("subscription_plan_title", allocation.SubscriptionPlanTitle)
+			}
+			if allocation.SubscriptionAmountTotal > 0 {
+				used := max(allocation.SubscriptionAmountUsedAfterConsume, 0)
+				other.SetPublic("subscription_total", allocation.SubscriptionAmountTotal)
+				other.SetPublic("subscription_used", used)
+				other.SetPublic("subscription_remain", max(allocation.SubscriptionAmountTotal-used, 0))
+			}
+		}
+	}
+	other.SetPublic("wallet_quota_deducted", walletDeducted)
+	if subscriptionConsumed > 0 {
+		other.SetPublic("subscription_consumed", subscriptionConsumed)
+	}
 }
 
 // setTaskImageCount publishes the billed image quantity of an image task as
@@ -264,6 +453,9 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 		return true
 	}
 
+	mixedBilling := task.PrivateData.BillingSource == BillingSourceMixed
+	billingAllocationsBefore := cloneTaskBillingAllocations(task.PrivateData.BillingAllocations)
+
 	// 1. 退还资金来源（钱包或订阅）
 	if err := taskAdjustFunding(task, -quota); err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, err.Error()))
@@ -279,6 +471,10 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 
 	// 4. 记录日志
 	other := taskBillingOther(task)
+	if mixedBilling && len(billingAllocationsBefore) > 0 {
+		appendTaskBillingAllocationInfo(billingAllocationsBefore, other)
+		other.SetPublic("billing_refund_allocations", billingAllocationsBefore)
+	}
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("reason", reason)
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
@@ -296,10 +492,25 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	// 5. 资金退款完成后再清除持久化标记。
 	// 回写失败必须显式告警，避免漏掉潜在的重复退款风险。
 	task.Quota = 0
-	if err := task.UpdateQuota(); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("退款成功但清除 task quota 失败 task %s: %s", task.TaskID, err.Error()))
+	var updateErr error
+	if mixedBilling {
+		updateErr = task.UpdateQuotaAndPrivateData()
+	} else {
+		updateErr = task.UpdateQuota()
+	}
+	if updateErr != nil {
+		logger.LogError(ctx, fmt.Sprintf("退款成功但清除 task quota 失败 task %s: %s", task.TaskID, updateErr.Error()))
 	}
 	return true
+}
+
+func cloneTaskBillingAllocations(allocations []model.BillingAllocation) []model.BillingAllocation {
+	if len(allocations) == 0 {
+		return nil
+	}
+	cloned := make([]model.BillingAllocation, len(allocations))
+	copy(cloned, allocations)
+	return cloned
 }
 
 // RecalculateTaskQuota 通用的异步差额结算。
@@ -327,6 +538,8 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		reason,
 	))
 
+	mixedBilling := task.PrivateData.BillingSource == BillingSourceMixed
+
 	// 调整资金来源
 	if err := taskAdjustFunding(task, quotaDelta); err != nil {
 		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, err.Error()))
@@ -337,8 +550,14 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	taskAdjustTokenQuota(ctx, task, quotaDelta)
 
 	task.Quota = actualQuota
-	if err := task.UpdateQuota(); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, err.Error()))
+	var updateErr error
+	if mixedBilling {
+		updateErr = task.UpdateQuotaAndPrivateData()
+	} else {
+		updateErr = task.UpdateQuota()
+	}
+	if updateErr != nil {
+		logger.LogError(ctx, fmt.Sprintf("差额结算回写 quota 失败 task %s: %s", task.TaskID, updateErr.Error()))
 	}
 
 	// 提交阶段已经累计过一次请求；结算阶段只调整最终用量。

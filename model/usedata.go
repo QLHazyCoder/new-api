@@ -22,14 +22,14 @@ type QuotaData struct {
 	NodeName  string `json:"node_name" gorm:"index;size:64;default:''"`
 	TokenUsed int    `json:"token_used" gorm:"default:0"`
 	Count     int    `json:"count" gorm:"default:0"`
-	Quota     int    `json:"quota" gorm:"default:0"`
+	Quota     int64  `json:"quota" gorm:"type:bigint;default:0"`
 }
 
 type QuotaDataLogParams struct {
 	UserID    int
 	Username  string
 	ModelName string
-	Quota     int
+	Quota     int64
 	CreatedAt int64
 	TokenUsed int
 	UseGroup  string
@@ -125,14 +125,27 @@ func SaveQuotaDataCache() {
 }
 
 func increaseQuotaData(quotaData *QuotaData) {
-	err := DB.Table("quota_data").
+	query := DB.Table("quota_data").
 		Where("user_id = ? and username = ? and model_name = ? and created_at = ? and use_group = ? and token_id = ? and channel_id = ? and node_name = ?",
-			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt, quotaData.UseGroup, quotaData.TokenID, quotaData.ChannelID, quotaData.NodeName).
-		Updates(map[string]any{
-			"count":      gorm.Expr("count + ?", quotaData.Count),
-			"quota":      gorm.Expr("quota + ?", quotaData.Quota),
-			"token_used": gorm.Expr("token_used + ?", quotaData.TokenUsed),
-		}).Error
+			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt, quotaData.UseGroup, quotaData.TokenID, quotaData.ChannelID, quotaData.NodeName)
+	if quotaData.Quota > 0 {
+		query = query.Where("quota <= ?", common.MaxWalletQuota-quotaData.Quota)
+	} else if quotaData.Quota < 0 {
+		if quotaData.Quota == common.MinWalletQuota {
+			common.SysError("increaseQuotaData rejected int64 minimum quota delta")
+			return
+		}
+		query = query.Where("quota >= ?", common.MinWalletQuota-quotaData.Quota)
+	}
+	result := query.Updates(map[string]any{
+		"count":      gorm.Expr("count + ?", quotaData.Count),
+		"quota":      gorm.Expr("quota + ?", quotaData.Quota),
+		"token_used": gorm.Expr("token_used + ?", quotaData.TokenUsed),
+	})
+	err := result.Error
+	if err == nil && result.RowsAffected == 0 {
+		err = common.ErrWalletQuotaOverflow
+	}
 	if err != nil {
 		common.SysLog(fmt.Sprintf("increaseQuotaData error: %s", err))
 	}

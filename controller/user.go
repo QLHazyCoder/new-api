@@ -279,6 +279,7 @@ func Register(c *gin.Context) {
 		DisplayName: user.Username,
 		InviterId:   inviterId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
+		Group:       model.ResolveRegistrationGroup(model.RegistrationSourcePassword),
 	}
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
@@ -409,7 +410,7 @@ func GetUser(c *gin.Context) {
 }
 
 type TransferAffQuotaRequest struct {
-	Quota int `json:"quota" binding:"required"`
+	Quota int64 `json:"quota" binding:"required"`
 }
 
 func TransferAffQuota(c *gin.Context) {
@@ -623,6 +624,7 @@ func GetUserModels(c *gin.Context) {
 		return
 	}
 	groups := service.GetUserUsableGroups(user.Group)
+	withEndpointTypes := c.Query("with_endpoint_types") == "true"
 	group := c.Query("group")
 	var groupsToQuery []string
 	switch {
@@ -639,11 +641,39 @@ func GetUserModels(c *gin.Context) {
 			groupsToQuery = []string{group}
 		}
 	}
+	models := service.GetGroupsEnabledModels(groupsToQuery)
+	if withEndpointTypes {
+		model.GetPricing()
+		common.ApiSuccess(c, buildUserModelOptions(models))
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    service.GetGroupsEnabledModels(groupsToQuery),
+		"data":    models,
 	})
+}
+
+func buildUserModelOptions(models []string) []dto.UserModelOption {
+	options := make([]dto.UserModelOption, 0, len(models))
+	for _, modelName := range models {
+		endpointTypes := model.GetModelSupportEndpointTypes(modelName)
+		endpoints := make([]string, 0, len(endpointTypes))
+		for _, endpointType := range endpointTypes {
+			endpoint := string(endpointType)
+			if endpoint != "" && !common.StringsContains(endpoints, endpoint) {
+				endpoints = append(endpoints, endpoint)
+			}
+		}
+		if common.IsImageGenerationModel(modelName) && !common.StringsContains(endpoints, string(constant.EndpointTypeImageGeneration)) {
+			endpoints = append([]string{string(constant.EndpointTypeImageGeneration)}, endpoints...)
+		}
+		if len(endpoints) == 0 {
+			continue
+		}
+		options = append(options, dto.UserModelOption{Label: modelName, Value: modelName, SupportedEndpointTypes: endpoints})
+	}
+	return options
 }
 
 func UpdateUser(c *gin.Context) {
@@ -1045,7 +1075,7 @@ func updateAdminPermissionsForUserInTx(c *gin.Context, tx *gorm.DB, userID int, 
 type ManageRequest struct {
 	Id     int    `json:"id"`
 	Action string `json:"action"`
-	Value  int    `json:"value"`
+	Value  int64  `json:"value"`
 	Mode   string `json:"mode"`
 }
 
@@ -1378,10 +1408,10 @@ func UpdateUserSetting(c *gin.Context) {
 	// 构建设置
 	settings := dto.UserSetting{
 		NotifyType:                       req.QuotaWarningType,
-		QuotaWarningThreshold:            req.QuotaWarningThreshold,
+		QuotaWarningThreshold:            &req.QuotaWarningThreshold,
 		UpstreamModelUpdateNotifyEnabled: upstreamModelUpdateNotifyEnabled,
 		AcceptUnsetRatioModel:            req.AcceptUnsetModelRatioModel,
-		RecordIpLog:                      req.RecordIpLog,
+		RecordIpLog:                      &req.RecordIpLog,
 	}
 
 	// 如果是webhook类型,添加webhook相关设置

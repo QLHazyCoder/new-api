@@ -532,7 +532,7 @@ export function InferenceStatusDialog(props: InferenceStatusDialogProps) {
                         {value}
                       </dd>
                       {row.details && (
-                        <dd className='text-muted-foreground col-span-2 break-all text-xs'>
+                        <dd className='text-muted-foreground col-span-2 text-xs break-all'>
                           {row.details}
                         </dd>
                       )}

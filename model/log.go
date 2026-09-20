@@ -90,6 +90,9 @@ const (
 	LogTypeError   = 5
 	LogTypeRefund  = 6
 	LogTypeLogin   = 7
+	// Kept separate from ordinary error logs so advanced sensitive-word audit
+	// records remain queryable even when LOG_DB is external.
+	LogTypeSensitiveWordBlock = 8
 )
 
 func ensureLogRequestId(log *Log) {
@@ -285,7 +288,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
-		if settingMap.RecordIpLog {
+		if settingMap.RecordIpLog == nil || *settingMap.RecordIpLog {
 			needRecordIp = true
 		}
 	}
@@ -349,7 +352,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
-		if settingMap.RecordIpLog {
+		if settingMap.RecordIpLog == nil || *settingMap.RecordIpLog {
 			needRecordIp = true
 		}
 	}
@@ -388,7 +391,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			UserID:    userId,
 			Username:  username,
 			ModelName: params.ModelName,
-			Quota:     params.Quota,
+			Quota:     int64(params.Quota),
 			CreatedAt: createdAt,
 			TokenUsed: params.PromptTokens + params.CompletionTokens,
 			UseGroup:  params.Group,
@@ -451,7 +454,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 			UserID:    params.UserId,
 			Username:  username,
 			ModelName: params.ModelName,
-			Quota:     params.Quota,
+			Quota:     int64(params.Quota),
 			CreatedAt: createdAt,
 			UseGroup:  params.Group,
 			TokenID:   params.TokenId,

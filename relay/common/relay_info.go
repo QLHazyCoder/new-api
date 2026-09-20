@@ -123,9 +123,11 @@ type RelayInfo struct {
 	ReasoningConversion *dto.ReasoningConversionState
 	UserSetting         dto.UserSetting
 	UserEmail           string
-	UserQuota           int
-	RelayFormat         types.RelayFormat
-	SendResponseCount   int
+	// UserQuota is a wallet balance, not a single-request charge. Keep it in
+	// the signed 64-bit wallet domain; individual request charges remain int.
+	UserQuota         int64
+	RelayFormat       types.RelayFormat
+	SendResponseCount int
 	// ClaudeToChatStreamState / ChatToGeminiStreamState hold per-attempt
 	// stream converters. InitChannelMeta nils them so a retry cannot resume a
 	// dirty converter (advanced tool index / finalized).
@@ -143,6 +145,10 @@ type RelayInfo struct {
 	// BillingSource indicates whether this request is billed from wallet quota or subscription.
 	// "" or "wallet" => wallet; "subscription" => subscription
 	BillingSource string
+	// BillingAllocations records split funding details when subscription_first
+	// consumes subscription quota first and only then falls back to wallet.
+	// It is request-scoped and is copied into durable task private data.
+	BillingAllocations []BillingAllocation
 	// SubscriptionId is the user_subscriptions.id used when BillingSource == "subscription"
 	SubscriptionId int
 	// SubscriptionPreConsumed is the amount pre-consumed on subscription item (quota units or 1)
@@ -161,9 +167,13 @@ type RelayInfo struct {
 	IsChannelTest                         bool // channel test request
 	RetryIndex                            int
 	LastError                             *types.NewAPIError
-	RuntimeHeadersOverride                map[string]any
-	UseRuntimeHeadersOverride             bool
-	ParamOverrideAudit                    []string
+	// LastUpstreamHTTPStatusCode is captured before image-channel error mapping.
+	// The performance classifier needs that raw value to distinguish an upstream
+	// image validation rejection from a local or mapped HTTP 400.
+	LastUpstreamHTTPStatusCode int `json:"-"`
+	RuntimeHeadersOverride     map[string]any
+	UseRuntimeHeadersOverride  bool
+	ParamOverrideAudit         []string
 
 	PriceData hosttypes.PriceData
 
@@ -212,6 +222,19 @@ type RelayInfo struct {
 	*ResponsesUsageInfo
 	*ChannelMeta
 	*TaskRelayInfo
+}
+
+// BillingAllocation is the durable accounting shape for a single funding
+// source used by a request. It deliberately lives at the relay boundary so
+// service and model packages can exchange it without a dependency cycle.
+type BillingAllocation struct {
+	Source                             string `json:"source"`
+	Quota                              int    `json:"quota"`
+	SubscriptionId                     int    `json:"subscription_id,omitempty"`
+	SubscriptionPlanId                 int    `json:"subscription_plan_id,omitempty"`
+	SubscriptionPlanTitle              string `json:"subscription_plan_title,omitempty"`
+	SubscriptionAmountTotal            int64  `json:"subscription_amount_total,omitempty"`
+	SubscriptionAmountUsedAfterConsume int64  `json:"subscription_amount_used_after_consume,omitempty"`
 }
 
 // UpdateImageCount replaces the billable quantity without changing the frozen
@@ -599,7 +622,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
 		UsingGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
 		UserGroup:  common.GetContextKeyString(c, constant.ContextKeyUserGroup),
-		UserQuota:  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
+		UserQuota:  common.GetContextKeyInt64(c, constant.ContextKeyUserQuota),
 		UserEmail:  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 
 		OriginModelName: originModelName,

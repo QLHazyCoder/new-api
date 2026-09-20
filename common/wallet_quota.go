@@ -11,8 +11,11 @@ import (
 // limits, not product limits: wallet operations may use the complete signed
 // range as long as the resulting value remains representable.
 const (
-	MaxWalletQuota int64 = 1<<63 - 1
-	MinWalletQuota int64 = -1 << 63
+	// Keep these untyped so callers that still expose an int-based API on
+	// 64-bit builds do not silently narrow the wallet domain. Persistence and
+	// JSON boundaries use int64 explicitly.
+	MaxWalletQuota = 1<<63 - 1
+	MinWalletQuota = -1 << 63
 )
 
 var ErrWalletQuotaOverflow = errors.New("wallet quota exceeds int64 range")

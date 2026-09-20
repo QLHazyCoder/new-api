@@ -187,12 +187,16 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other *model.LogOther) 
 	if relayInfo == nil || other == nil {
 		return
 	}
-	// billing_source: "wallet" or "subscription"
+	// billing_source: "wallet", "subscription" or "mixed"
 	if relayInfo.BillingSource != "" {
 		other.SetPublic("billing_source", relayInfo.BillingSource)
 	}
 	if relayInfo.UserSetting.BillingPreference != "" {
 		other.SetPublic("billing_preference", relayInfo.UserSetting.BillingPreference)
+	}
+	if relayInfo.BillingSource == BillingSourceMixed {
+		appendRelayBillingAllocationInfo(relayInfo.BillingAllocations, other)
+		return
 	}
 	if relayInfo.BillingSource == "subscription" {
 		if relayInfo.SubscriptionId != 0 {
@@ -231,6 +235,45 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other *model.LogOther) 
 		}
 		// Wallet quota is not deducted when billed from subscription.
 		other.SetPublic("wallet_quota_deducted", 0)
+	}
+}
+
+func appendRelayBillingAllocationInfo(allocations []relaycommon.BillingAllocation, other *model.LogOther) {
+	if len(allocations) == 0 || other == nil {
+		return
+	}
+	other.SetPublic("billing_allocations", allocations)
+	var walletDeducted int
+	var subscriptionConsumed int64
+	for _, allocation := range allocations {
+		if allocation.Quota <= 0 {
+			continue
+		}
+		switch allocation.Source {
+		case BillingSourceWallet:
+			walletDeducted += allocation.Quota
+		case BillingSourceSubscription:
+			subscriptionConsumed += int64(allocation.Quota)
+			if allocation.SubscriptionId > 0 {
+				other.SetPublic("subscription_id", allocation.SubscriptionId)
+			}
+			if allocation.SubscriptionPlanId > 0 {
+				other.SetPublic("subscription_plan_id", allocation.SubscriptionPlanId)
+			}
+			if allocation.SubscriptionPlanTitle != "" {
+				other.SetPublic("subscription_plan_title", allocation.SubscriptionPlanTitle)
+			}
+			if allocation.SubscriptionAmountTotal > 0 {
+				used := max(allocation.SubscriptionAmountUsedAfterConsume, 0)
+				other.SetPublic("subscription_total", allocation.SubscriptionAmountTotal)
+				other.SetPublic("subscription_used", used)
+				other.SetPublic("subscription_remain", max(allocation.SubscriptionAmountTotal-used, 0))
+			}
+		}
+	}
+	other.SetPublic("wallet_quota_deducted", walletDeducted)
+	if subscriptionConsumed > 0 {
+		other.SetPublic("subscription_consumed", subscriptionConsumed)
 	}
 }
 

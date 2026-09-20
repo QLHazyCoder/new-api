@@ -51,8 +51,8 @@ export function getInitialTieredPricingEditorState(
       canUseVisualMode || (!hasExpression && !currentRequestRuleExpr.trim())
         ? 'visual'
         : 'raw',
-    visualConfig: parsedConfig ??
-      (hasExpression ? null : createDefaultVisualConfig()),
+    visualConfig:
+      parsedConfig ?? (hasExpression ? null : createDefaultVisualConfig()),
     visualConfigDirty: false,
     rawExpr: combineBillingExpr(currentExpr, currentRequestRuleExpr),
     requestRuleGroups: parsedRuleGroups || [],
