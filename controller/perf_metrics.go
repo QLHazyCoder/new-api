@@ -4,12 +4,48 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
-	"github.com/samber/lo"
 )
+
+func perfMetricsAllowedGroups(c *gin.Context) []string {
+	allGroups := ratio_setting.GetGroupRatioCopy()
+	allowed := make(map[string]struct{}, len(allGroups)+1)
+	visibleGroups := service.GetUserUsableGroups("")
+	if rawID, ok := c.Get("id"); ok {
+		if userID, ok := rawID.(int); ok && userID > 0 {
+			if user, err := model.GetUserCache(userID); err == nil {
+				if user.Role >= common.RoleAdminUser {
+					for group := range allGroups {
+						allowed[group] = struct{}{}
+					}
+				} else {
+					visibleGroups = service.GetUserUsableGroups(user.Group)
+				}
+			}
+		}
+	}
+	if len(allowed) == 0 {
+		for group := range visibleGroups {
+			allowed[group] = struct{}{}
+		}
+	}
+	groups := make([]string, 0, len(allowed))
+	for group := range allGroups {
+		if _, ok := allowed[group]; ok {
+			groups = append(groups, group)
+		}
+	}
+	if _, ok := allowed["auto"]; ok {
+		groups = append(groups, "auto")
+	}
+	return groups
+}
 
 func GetPerfMetricsSummary(c *gin.Context) {
 	hours := 24
@@ -19,7 +55,7 @@ func GetPerfMetricsSummary(c *gin.Context) {
 		}
 	}
 
-	activeGroups := append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto")
+	activeGroups := perfMetricsAllowedGroups(c)
 	result, err := perfmetrics.QuerySummaryAll(hours, activeGroups)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -56,7 +92,7 @@ func GetPerfMetrics(c *gin.Context) {
 		Model:         modelName,
 		Group:         c.Query("group"),
 		Hours:         hours,
-		AllowedGroups: append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto"),
+		AllowedGroups: perfMetricsAllowedGroups(c),
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

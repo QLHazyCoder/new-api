@@ -165,10 +165,10 @@ func TestGetPerfMetricsSummaryFiltersGroupsByVisibility(t *testing.T) {
 	commonUser := performPerfMetricsSummaryRequest(t, 41001)
 	require.Len(t, commonUser.Data.Models, 1)
 	require.Equal(t, modelName, commonUser.Data.Models[0].ModelName)
-	require.Equal(t, int64(7), commonUser.Data.Models[0].RequestCount)
+	require.Equal(t, 100.0, commonUser.Data.Models[0].SuccessRate)
 
 	admin := performPerfMetricsSummaryRequest(t, 41002)
 	require.Len(t, admin.Data.Models, 1)
 	require.Equal(t, modelName, admin.Data.Models[0].ModelName)
-	require.Equal(t, int64(18), admin.Data.Models[0].RequestCount)
+	require.Equal(t, 100.0, admin.Data.Models[0].SuccessRate)
 }

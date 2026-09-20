@@ -31,7 +31,7 @@ func TestTopUpQuotaValidation(t *testing.T) {
 		name        string
 		displayType string
 		amount      int64
-		wantQuota   int
+		wantQuota   int64
 		wantErr     bool
 	}{
 		{

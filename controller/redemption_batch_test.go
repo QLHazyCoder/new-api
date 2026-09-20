@@ -188,7 +188,9 @@ func TestDeleteRedemptionBatch(t *testing.T) {
 			var active []model.Redemption
 			require.NoError(t, model.DB.Find(&active).Error)
 			require.Len(t, active, 1)
-			assert.Equal(t, codes[15], active[0])
+			expectedActive := codes[15]
+			expectedActive.QuotaRaw = "100"
+			assert.Equal(t, expectedActive, active[0])
 			var all []model.Redemption
 			require.NoError(t, model.DB.Unscoped().Order("id").Find(&all).Error)
 			require.Len(t, all, 16)

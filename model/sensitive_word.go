@@ -321,7 +321,7 @@ func normalizeSensitiveWordConfig(cfg SensitiveWordConfig) SensitiveWordConfig {
 
 func loadSensitiveWordConfig() SensitiveWordConfig {
 	cfg := defaultSensitiveWordConfig()
-	if DB != nil {
+	if DB != nil && DB.Migrator().HasTable(&Option{}) {
 		var option Option
 		if DB.Where(&Option{Key: "SensitiveWordConfig"}).First(&option).Error == nil {
 			_ = json.Unmarshal([]byte(option.Value), &cfg)
@@ -337,6 +337,31 @@ func loadSensitiveWordConfig() SensitiveWordConfig {
 		cfg.RuleVersion = 1
 	}
 	return cfg
+}
+
+func loadLegacySensitiveWordsFromRuntime() []string {
+	legacySource := append([]string(nil), setting.SensitiveWords...)
+	if DB != nil && DB.Migrator().HasTable(&Option{}) {
+		var legacyOption Option
+		if DB.Where(&Option{Key: "SensitiveWords"}).First(&legacyOption).Error == nil {
+			legacySource = strings.Split(legacyOption.Value, "\n")
+		}
+	}
+	seen := make(map[string]struct{}, len(legacySource))
+	legacyWords := make([]string, 0, len(legacySource))
+	for _, word := range legacySource {
+		word = strings.TrimSpace(word)
+		if word == "" {
+			continue
+		}
+		key := strings.ToLower(word)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		legacyWords = append(legacyWords, word)
+	}
+	return legacyWords
 }
 
 func GetSensitiveWordConfig() SensitiveWordConfig {
@@ -758,6 +783,17 @@ func normalizeSensitivePrompt(value string) string {
 }
 
 func buildSensitiveRuntimeSnapshot() (*sensitiveRuntimeSnapshot, error) {
+	legacyWords := loadLegacySensitiveWordsFromRuntime()
+	if DB == nil || !DB.Migrator().HasTable(&SensitiveWordRule{}) {
+		// A non-master node or an older test/standby database can reach the
+		// relay before the expand migration has created the rule tables. Keep
+		// the legacy option path active until the table-backed engine exists;
+		// this preserves the old protection contract without inventing a second
+		// rule store.
+		return &sensitiveRuntimeSnapshot{
+			version: 1, migrationComplete: false, legacyWords: legacyWords,
+		}, nil
+	}
 	var rules []SensitiveWordRule
 	if err := DB.Preload("Groups").Preload("Words").Where("enabled = ?", true).Order("id asc").Find(&rules).Error; err != nil {
 		return nil, err
@@ -784,27 +820,12 @@ func buildSensitiveRuntimeSnapshot() (*sensitiveRuntimeSnapshot, error) {
 		}
 	}
 	var migrationOption Option
-	migrationComplete := DB.Where(&Option{Key: sensitiveWordMigrationKey, Value: sensitiveWordMigrationValue}).First(&migrationOption).Error == nil
-	legacyWords := make([]string, 0)
-	if !migrationComplete {
-		legacySource := append([]string(nil), setting.SensitiveWords...)
-		var legacyOption Option
-		if DB.Where(&Option{Key: "SensitiveWords"}).First(&legacyOption).Error == nil {
-			legacySource = strings.Split(legacyOption.Value, "\n")
-		}
-		seenLegacyWords := make(map[string]struct{}, len(legacySource))
-		for _, word := range legacySource {
-			word = strings.TrimSpace(word)
-			if word == "" {
-				continue
-			}
-			key := strings.ToLower(word)
-			if _, ok := seenLegacyWords[key]; ok {
-				continue
-			}
-			seenLegacyWords[key] = struct{}{}
-			legacyWords = append(legacyWords, word)
-		}
+	migrationComplete := false
+	if DB.Migrator().HasTable(&Option{}) {
+		migrationComplete = DB.Where(&Option{Key: sensitiveWordMigrationKey, Value: sensitiveWordMigrationValue}).First(&migrationOption).Error == nil
+	}
+	if migrationComplete {
+		legacyWords = nil
 	}
 	if len(words) == 0 {
 		return &sensitiveRuntimeSnapshot{version: version, words: metadata, migrationComplete: migrationComplete, legacyWords: legacyWords}, nil

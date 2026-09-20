@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -35,6 +36,36 @@ func (input *tokenAutoGroupsInput) UnmarshalJSON(data []byte) error {
 type tokenRequest struct {
 	model.Token
 	AutoGroups tokenAutoGroupsInput `json:"auto_groups"`
+}
+
+// UnmarshalJSON accepts both JSON numbers and decimal strings for quota
+// writes. The latter is required for browser clients that cannot represent
+// every signed int64 exactly as a JavaScript number.
+func (request *tokenRequest) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := common.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	quota, hasQuota := fields["remain_quota"]
+	delete(fields, "remain_quota")
+	cleanData, err := common.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	type tokenRequestAlias tokenRequest
+	var decoded tokenRequestAlias
+	if err := common.Unmarshal(cleanData, &decoded); err != nil {
+		return err
+	}
+	*request = tokenRequest(decoded)
+	if hasQuota {
+		var value common.Int64Value
+		if err := common.Unmarshal(quota, &value); err != nil {
+			return err
+		}
+		request.RemainQuota = value.Int64()
+	}
+	return nil
 }
 
 type tokenResponse struct {

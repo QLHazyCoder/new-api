@@ -29,13 +29,28 @@ func getUserVerificationState(tx *gorm.DB, userID int, forUpdate bool) (*UserVer
 		return nil, ErrUserSessionInvalid
 	}
 	var state UserVerificationState
-	query := tx.Model(&User{}).Select(
-		"id AS user_id, status, role, auth_version, CASE WHEN password <> '' THEN 1 ELSE 0 END AS has_password, "+
-			"EXISTS (?) AS has_two_fa, EXISTS (?) AS two_fa_locked, EXISTS (?) AS has_passkey",
-		tx.Model(&TwoFA{}).Select("1").Where("user_id = ? AND is_enabled = ?", userID, true),
-		tx.Model(&TwoFA{}).Select("1").Where("user_id = ? AND is_enabled = ? AND locked_until > ?", userID, true, time.Now()),
-		tx.Model(&PasskeyCredential{}).Select("1").Where("user_id = ?", userID),
-	).Where("id = ?", userID)
+	selectFields := "id AS user_id, status, role, auth_version, CASE WHEN password <> '' THEN 1 ELSE 0 END AS has_password"
+	selectArgs := make([]any, 0, 3)
+	// Authentication tables are introduced by an expand migration. During a
+	// blue/green rollout (and in deliberately minimal test databases) they may
+	// not exist yet; absence means that credential type is unavailable, not that
+	// the whole login flow should fail with a SQL error.
+	if tx.Migrator().HasTable(&TwoFA{}) {
+		selectFields += ", EXISTS (?) AS has_two_fa, EXISTS (?) AS two_fa_locked"
+		selectArgs = append(selectArgs,
+			tx.Model(&TwoFA{}).Select("1").Where("user_id = ? AND is_enabled = ?", userID, true),
+			tx.Model(&TwoFA{}).Select("1").Where("user_id = ? AND is_enabled = ? AND locked_until > ?", userID, true, time.Now()),
+		)
+	} else {
+		selectFields += ", 0 AS has_two_fa, 0 AS two_fa_locked"
+	}
+	if tx.Migrator().HasTable(&PasskeyCredential{}) {
+		selectFields += ", EXISTS (?) AS has_passkey"
+		selectArgs = append(selectArgs, tx.Model(&PasskeyCredential{}).Select("1").Where("user_id = ?", userID))
+	} else {
+		selectFields += ", 0 AS has_passkey"
+	}
+	query := tx.Model(&User{}).Select(selectFields, selectArgs...).Where("id = ?", userID)
 	if forUpdate {
 		query = lockForUpdate(query)
 	}

@@ -601,7 +601,7 @@ export function buildQueryRequest(){throw new Error("completed submissions must 
 			var updated model.User
 			require.NoError(t, db.First(&updated, user.Id).Error)
 			assert.Equal(t, initial-int64(want), updated.Quota)
-			assert.Equal(t, want, updated.UsedQuota)
+			assert.Equal(t, int64(want), updated.UsedQuota)
 			var logs []model.Log
 			require.NoError(t, db.Where("user_id = ?", user.Id).Find(&logs).Error)
 			require.Len(t, logs, 1)

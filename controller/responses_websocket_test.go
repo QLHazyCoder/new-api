@@ -142,7 +142,7 @@ func TestResponsesWSRequestRunnerRefreshesBillingContextAndCleansBody(t *testing
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"first"}`))
 	require.Nil(t, runner(request, "ws-first", func(c *gin.Context) *types.NewAPIError {
 		assert.Equal(t, user.Id, c.GetInt("id"))
-		assert.Equal(t, 100, c.GetInt("token_quota"))
+		assert.Equal(t, int64(100), common.GetContextKeyInt64(c, constant.ContextKey("token_quota")))
 		assert.Equal(t, "203.0.113.8", c.ClientIP())
 		assert.Equal(t, "ws-first", c.GetString(common.RequestIdKey))
 		assert.Equal(t, "ws-first", c.Request.Context().Value(common.RequestIdKey))
@@ -169,7 +169,7 @@ func TestResponsesWSRequestRunnerRefreshesBillingContextAndCleansBody(t *testing
 	}).Error)
 	request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"second"}`))
 	require.Nil(t, runner(request, "ws-second", func(c *gin.Context) *types.NewAPIError {
-		assert.Equal(t, 2, c.GetInt("token_quota"))
+		assert.Equal(t, int64(2), common.GetContextKeyInt64(c, constant.ContextKey("token_quota")))
 		assert.True(t, c.GetBool("token_model_limit_enabled"))
 		modelLimits, _ := c.Get("token_model_limit")
 		assert.Equal(t, map[string]bool{"gpt-5.1": true}, modelLimits)
@@ -519,10 +519,10 @@ func assertResponsesWSAccounting(t *testing.T, fixture *responsesWSBillingTest, 
 	}
 	require.NoError(t, model.DB.First(fixture.token, fixture.token.Id).Error)
 	require.NoError(t, model.DB.First(fixture.user, fixture.user.Id).Error)
-	assert.Equal(t, 3000-charged, fixture.token.RemainQuota)
-	assert.Equal(t, charged, fixture.token.UsedQuota)
-	assert.Equal(t, 100000-charged, fixture.user.Quota)
-	assert.Equal(t, charged, fixture.user.UsedQuota)
+	assert.Equal(t, int64(3000-charged), fixture.token.RemainQuota)
+	assert.Equal(t, int64(charged), fixture.token.UsedQuota)
+	assert.Equal(t, int64(100000-charged), fixture.user.Quota)
+	assert.Equal(t, int64(charged), fixture.user.UsedQuota)
 }
 
 func TestResponsesWebSocketReusesConnectionAndSettlesEachRequest(t *testing.T) {
@@ -637,9 +637,9 @@ func TestResponsesWebSocketReusesConnectionAndSettlesEachRequest(t *testing.T) {
 	require.NoError(t, model.DB.First(token, token.Id).Error)
 	require.NoError(t, model.DB.First(user, user.Id).Error)
 	assert.Zero(t, token.RemainQuota)
-	assert.Equal(t, 3000, token.UsedQuota)
-	assert.Equal(t, 97000, user.Quota)
-	assert.Equal(t, 3000, user.UsedQuota)
+	assert.Equal(t, int64(3000), token.UsedQuota)
+	assert.Equal(t, int64(97000), user.Quota)
+	assert.Equal(t, int64(3000), user.UsedQuota)
 }
 
 // Both transports must reach the same upstream target with the same
@@ -848,7 +848,7 @@ func TestResponsesWebSocketInitialUpstreamRejectionRefundsReservation(t *testing
 			rejectionError, _ := rejection["error"].(map[string]any)
 			assert.Equal(t, tc.wantType, rejectionError["type"])
 			assert.Equal(t, tc.wantMessage, rejectionError["message"])
-			assert.Equal(t, 2990, <-preConsumed, "the rejected request reserved quota before contacting upstream")
+			assert.Equal(t, 3000, <-preConsumed, "output-only tiered pricing does not reserve unknown completion usage")
 			deadline := time.NewTimer(3 * time.Second)
 			defer deadline.Stop()
 			for {

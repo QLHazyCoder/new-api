@@ -698,7 +698,7 @@ func TestAuditDatabaseMatrix(t *testing.T) {
 						require.NotNil(t, legacyUser)
 						var user model.User
 						require.NoError(t, db.First(&user, 1).Error)
-						assert.Equal(t, 1234, user.Quota)
+						assert.Equal(t, int64(1234), user.Quota)
 						var old model.Log
 						require.NoError(t, db.First(&old).Error)
 						assert.Equal(t, "historical login", old.Content)

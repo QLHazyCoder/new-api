@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -350,7 +351,7 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 	// 检查令牌是否充足
 	tokenTrusted := s.relayInfo.TokenUnlimited
 	if !tokenTrusted {
-		tokenQuota := c.GetInt("token_quota")
+		tokenQuota := common.GetContextKeyInt64(c, constant.ContextKey("token_quota"))
 		tokenTrusted = float64(tokenQuota) > trustQuota
 	}
 	if !tokenTrusted {
