@@ -65,6 +65,16 @@
 `trust_quota_usd=0`、`pre_consume_multiplier=1`。已有 task/video 模型先做价格等价
 映射，不自动重写生产价格。
 
+首次候选实例的兼容配置（只记录，不在本轮写入生产）为：
+
+| 配置 | 值 | 目的 |
+| --- | --- | --- |
+| `TASK_PLUGIN_ENABLED` | `true` | 启用 rc.39 插件链路 |
+| `TASK_POLL_MAX_FAILURES` | `20` | 保持上游轮询失败/退款边界 |
+| `trust_quota_usd` | `0` | 首次发布禁用免预扣旁路 |
+| `pre_consume_multiplier` | `1` | 保持原始预扣估算 |
+| 现有模型价格 | 不自动修改 | 从生产有效配置生成插件映射；缺映射即阻断发布 |
+
 ### 敏感词与安全中心
 
 采用上游安全中心、Passkey、2FA、访问令牌审计和 Telegram OAuth；本地高级敏感词规则、
