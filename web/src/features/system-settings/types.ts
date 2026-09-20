@@ -39,23 +39,30 @@ export type UpdateOptionResponse = {
   message: string
 }
 
-export type AmountDiscountGroupsResponse = {
-  success: boolean
-  message: string
-  data?: {
-    groups: string[]
-  }
+export interface PasskeyDomainChange {
+  rp_id: string
+  legacy_rp_ids: string
+  origins: string
+  previous_rp_id: string
+  effective_rp_id: string
+  removed_rp_ids: string[]
+  affected_credentials: number
+  unknown_credentials: number
+  confirmation_required: boolean
+  removal_confirmation: string
 }
 
-export type UpdateAmountDiscountPolicyRequest = {
-  amount_discount: Record<string, number>
-  eligible_groups: string[]
+export interface UpdatePasskeyDomainsRequest {
+  rp_id: string
+  legacy_rp_ids: string
+  origins: string
+  preview: boolean
+  removal_confirmation?: string
 }
 
-export type UpdateAmountDiscountPolicyResponse = {
-  success: boolean
-  message: string
-  data?: UpdateAmountDiscountPolicyRequest
+export interface UpdatePasskeyDomainsResponse extends UpdateOptionResponse {
+  code?: string
+  data: PasskeyDomainChange
 }
 
 export type ConfirmPaymentComplianceResponse = {
@@ -123,6 +130,14 @@ export type SystemTaskListResponse = {
   success: boolean
   message: string
   data?: SystemTask[]
+  total: number
+}
+
+export type SystemTaskFilters = {
+  type?: string
+  status?: SystemTaskStatus | ''
+  scope?: 'active' | 'history'
+  offset?: number
 }
 
 export type SiteSettings = {
@@ -133,6 +148,8 @@ export type SiteSettings = {
   About: string
   HomePageContent: string
   ServerAddress: string
+  TaskPublicAddress: string
+  'general_setting.docs_link': string
   'legal.user_agreement': string
   'legal.privacy_policy': string
   HeaderNavModules: string
@@ -163,6 +180,8 @@ export type AuthSettings = {
   'oidc.token_endpoint': string
   'oidc.user_info_endpoint': string
   TelegramOAuthEnabled: boolean
+  'telegram.client_id': string
+  'telegram.client_secret': string
   TelegramBotToken: string
   TelegramBotName: string
   LinuxDOOAuthEnabled: boolean
@@ -179,6 +198,7 @@ export type AuthSettings = {
   'passkey.enabled': boolean
   'passkey.rp_display_name': string
   'passkey.rp_id': string
+  'passkey.legacy_rp_ids': string
   'passkey.origins': string
   'passkey.allow_insecure_origin': boolean
   'passkey.user_verification': 'required' | 'preferred' | 'discouraged'
@@ -204,7 +224,6 @@ export type ContentSettings = {
   MjForwardUrlEnabled: boolean
   MjModeClearEnabled: boolean
   MjActionCheckSuccessEnabled: boolean
-  PlaygroundImageMaxConcurrency: number
 }
 
 export type ModelSettings = {
@@ -237,49 +256,28 @@ export type ModelSettings = {
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.plugin_billing_expr': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
   UserUsableGroups: string
-  'group_ratio_setting.group_descriptions': string
   GroupGroupRatio: string
   AutoGroups: string
   MaxTokenAutoGroups: number
   DefaultUseAutoGroup: boolean
   'group_ratio_setting.group_special_usable_group': string
-  RetryTimes: number
-  ChannelDisableThreshold: string
-  AutomaticDisableChannelEnabled: boolean
-  AutomaticEnableChannelEnabled: boolean
-  AutomaticDisableKeywords: string
-  AutomaticDisableStatusCodes: string
-  AutomaticRetryStatusCodes: string
-  'monitor_setting.auto_test_channel_enabled': boolean
-  'monitor_setting.auto_test_channel_minutes': number
-  'monitor_setting.channel_test_concurrency': number
-  'monitor_setting.channel_test_mode':
-    | 'scheduled_all'
-    | 'auto_ban_only'
-    | 'passive_recovery'
-  'channel_affinity_setting.enabled': boolean
-  'channel_affinity_setting.switch_on_success': boolean
-  'channel_affinity_setting.keep_on_channel_disabled': boolean
-  'channel_affinity_setting.max_entries': number
-  'channel_affinity_setting.default_ttl_seconds': number
-  'channel_affinity_setting.rules': string
   'model_deployment.ionet.api_key': string
   'model_deployment.ionet.enabled': boolean
 }
 
 export type BillingSettings = {
   QuotaForNewUser: number
-  PreConsumedQuota: number
   QuotaForInviter: number
   QuotaForInvitee: number
-  TopUpInviteRewardPercent: number
   TopUpLink: string
-  'general_setting.docs_link': string
   'quota_setting.enable_free_model_pre_consume': boolean
+  'quota_setting.trust_quota_usd': number
+  'quota_setting.pre_consume_multiplier': number
   QuotaPerUnit: number
   USDExchangeRate: number
   'general_setting.quota_display_type': string
@@ -298,11 +296,11 @@ export type BillingSettings = {
   ExposeRatioEnabled: boolean
   'billing_setting.billing_mode': string
   'billing_setting.billing_expr': string
+  'billing_setting.plugin_billing_expr': string
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
   UserUsableGroups: string
-  'group_ratio_setting.group_descriptions': string
   GroupGroupRatio: string
   AutoGroups: string
   MaxTokenAutoGroups: number
@@ -317,8 +315,6 @@ export type BillingSettings = {
   PayMethods: string
   'payment_setting.amount_options': string
   'payment_setting.amount_discount': string
-  'payment_setting.amount_discount_eligible_groups': string
-  'payment_setting.default_topup_amount': number
   'payment_setting.compliance_confirmed': boolean
   'payment_setting.compliance_terms_version': string
   'payment_setting.compliance_confirmed_at': number
@@ -379,7 +375,6 @@ export type OperationsSettings = {
   WorkerValidKey: string
   WorkerAllowHttpImageRequestEnabled: boolean
   LogConsumeEnabled: boolean
-  LogRetentionDays: number
   'performance_setting.disk_cache_enabled': boolean
   'performance_setting.disk_cache_threshold_mb': number
   'performance_setting.disk_cache_max_size_mb': number
@@ -445,6 +440,12 @@ export type DifferencesMap = Record<
   Partial<Record<RatioType, RatioDifference>>
 >
 
+export type PricingSyncValues = Partial<Record<RatioType, number | string>>
+export type PricingSyncModels = Record<
+  string,
+  { current: PricingSyncValues; upstreams: Record<string, PricingSyncValues> }
+>
+
 export type UpstreamChannelsResponse = {
   success: boolean
   message: string
@@ -474,6 +475,7 @@ export type UpstreamRatiosResponse = {
   message: string
   data: {
     differences: DifferencesMap
+    prices: PricingSyncModels
     test_results: TestResult[]
   }
 }

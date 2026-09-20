@@ -30,6 +30,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
   getTagModels,
@@ -66,7 +68,7 @@ export function TagBatchEditDialog({
   // Fetch available groups
   const { data: groupsData, isLoading: isLoadingGroups } = useQuery({
     queryKey: ['groups'],
-    queryFn: getGroups,
+    queryFn: async () => requireServerSuccess(await getGroups()),
   })
 
   // Transform groups to multi-select options
@@ -93,12 +95,13 @@ export function TagBatchEditDialog({
     try {
       // Fetch current tag models
       const tagModelsResponse = await getTagModels(currentTag)
+      requireServerSuccess(tagModelsResponse)
       if (tagModelsResponse.success && tagModelsResponse.data) {
         setModels(tagModelsResponse.data)
       }
 
       // Fetch all available models (for future use if needed)
-      const allModelsResponse = await getAllModels()
+      const allModelsResponse = requireServerSuccess(await getAllModels())
       if (allModelsResponse.success && allModelsResponse.data) {
         // Available models could be used for autocomplete in the future
       }
@@ -106,9 +109,7 @@ export function TagBatchEditDialog({
       // Initialize new tag with current tag name
       setNewTag(currentTag)
     } catch (_error: unknown) {
-      toast.error(
-        _error instanceof Error ? _error.message : t('Failed to load tag data')
-      )
+      handleServerError(_error, t('Failed to load tag data'))
     } finally {
       setIsLoading(false)
     }
@@ -163,12 +164,10 @@ export function TagBatchEditDialog({
         queryClient.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
         handleClose()
       } else {
-        toast.error(response.message || t('Failed to update tag'))
+        handleServerError(response, t('Failed to update tag'))
       }
     } catch (error: unknown) {
-      toast.error(
-        error instanceof Error ? error.message : t('Failed to update tag')
-      )
+      handleServerError(error, t('Failed to update tag'))
     } finally {
       setIsSaving(false)
     }

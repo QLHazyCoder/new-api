@@ -21,41 +21,25 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { ConfirmDialog } from '@/components/confirm-dialog'
 import { PasswordInput } from '@/components/password-input'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
-import { useStatus } from '@/hooks/use-status'
-import { displayAmountToQuota, quotaToDisplayAmount } from '@/lib/currency'
+import { handleServerError } from '@/lib/handle-server-error'
 import { ROLE } from '@/lib/roles'
 
 import { updateUserSettings } from '../../api'
-import {
-  DEFAULT_QUOTA_WARNING_THRESHOLD,
-  NOTIFICATION_METHODS,
-} from '../../constants'
-import { parseUserSettings } from '../../lib'
-import type { UserProfile, UserSettings, NotifyType } from '../../types'
+import { NOTIFICATION_METHODS } from '../../constants'
+import { normalizeUserSettings } from '../../lib/user-settings'
+import type { UserProfile, NotifyType } from '../../types'
 
 const NOTIFICATION_ICONS: Record<NotifyType, typeof Mail> = {
   email: Mail,
   webhook: Webhook,
   bark: Bell,
   gotify: Server,
-}
-
-const NOTIFICATION_VALUES = new Set<NotifyType>(
-  NOTIFICATION_METHODS.map((method) => method.value)
-)
-
-function normalizeNotifyType(value: unknown): NotifyType {
-  return typeof value === 'string' &&
-    NOTIFICATION_VALUES.has(value as NotifyType)
-    ? (value as NotifyType)
-    : 'email'
 }
 
 // ============================================================================
@@ -69,97 +53,47 @@ interface NotificationTabProps {
 
 export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
   const { t } = useTranslation()
-  const { status } = useStatus()
   const isAdmin = (profile?.role ?? 0) >= ROLE.ADMIN
   const [loading, setLoading] = useState(false)
-  const [disableIpLogConfirmOpen, setDisableIpLogConfirmOpen] = useState(false)
-  const [settings, setSettings] = useState<UserSettings>({
-    notify_type: 'email',
-    quota_warning_threshold: 0,
-    notification_email: '',
-    webhook_url: '',
-    webhook_secret: '',
-    bark_url: '',
-    gotify_url: '',
-    gotify_token: '',
-    gotify_priority: 5,
-    accept_unset_model_ratio_model: false,
-    record_ip_log: false,
-    upstream_model_update_notify_enabled: false,
-  })
+  const [settings, setSettings] = useState(() => normalizeUserSettings())
 
   // Update form field helper
   const updateField = useCallback(
-    <K extends keyof UserSettings>(field: K, value: UserSettings[K]) => {
+    <K extends keyof typeof settings>(
+      field: K,
+      value: (typeof settings)[K]
+    ) => {
       setSettings((prev) => ({ ...prev, [field]: value }))
     },
     []
   )
 
   useEffect(() => {
-    const defaultThreshold = Number(
-      status?.quota_remind_threshold ??
-        status?.data?.quota_remind_threshold ??
-        DEFAULT_QUOTA_WARNING_THRESHOLD
-    )
     if (profile?.setting) {
-      const parsed = parseUserSettings(profile.setting)
-      const threshold = parsed.quota_warning_threshold ?? defaultThreshold
-      setSettings({
-        notify_type: normalizeNotifyType(parsed.notify_type),
-        quota_warning_threshold: quotaToDisplayAmount(threshold),
-        notification_email: parsed.notification_email ?? '',
-        webhook_url: parsed.webhook_url ?? '',
-        webhook_secret: parsed.webhook_secret ?? '',
-        bark_url: parsed.bark_url ?? '',
-        gotify_url: parsed.gotify_url ?? '',
-        gotify_token: parsed.gotify_token ?? '',
-        gotify_priority: parsed.gotify_priority ?? 5,
-        accept_unset_model_ratio_model:
-          parsed.accept_unset_model_ratio_model || false,
-        record_ip_log: parsed.record_ip_log ?? true,
-        upstream_model_update_notify_enabled:
-          parsed.upstream_model_update_notify_enabled || false,
-      })
-    } else {
-      setSettings((prev) => ({
-        ...prev,
-        quota_warning_threshold: quotaToDisplayAmount(defaultThreshold),
-      }))
+      setSettings(normalizeUserSettings(profile.setting))
     }
-  }, [profile, status])
+  }, [profile])
 
   const handleSave = async () => {
     try {
       setLoading(true)
-      const threshold = Number(settings.quota_warning_threshold ?? 0)
-      const response = await updateUserSettings({
-        ...settings,
-        quota_warning_threshold: displayAmountToQuota(threshold),
-      })
+      const { record_ip_log: _recordIpLog, ...notificationSettings } = settings
+      const response = await updateUserSettings(notificationSettings)
 
       if (response.success) {
         toast.success(t('Settings updated successfully'))
         onUpdate()
       } else {
-        toast.error(response.message || t('Failed to update settings'))
+        handleServerError(response, t('Failed to update settings'))
       }
-    } catch {
-      toast.error(t('Failed to update settings'))
+    } catch (error) {
+      handleServerError(error, t('Failed to update settings'))
     } finally {
       setLoading(false)
     }
   }
 
-  const handleRecordIpLogChange = (checked: boolean) => {
-    if (!checked) {
-      setDisableIpLogConfirmOpen(true)
-      return
-    }
-    updateField('record_ip_log', true)
-  }
-
-  const notifyType = normalizeNotifyType(settings.notify_type)
+  const notifyType = settings.notify_type
 
   return (
     <div className='space-y-4 sm:space-y-6'>
@@ -170,9 +104,7 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
           value={[notifyType]}
           onValueChange={(value) => {
             const nextValue = value.find((item) => item !== notifyType)
-            if (nextValue) {
-              updateField('notify_type', normalizeNotifyType(nextValue))
-            }
+            if (nextValue) updateField('notify_type', nextValue as NotifyType)
           }}
           aria-label={t('Notification Method')}
           variant='outline'
@@ -210,13 +142,9 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
             updateField('quota_warning_threshold', Number(e.target.value))
           }
           placeholder={t('Enter threshold')}
-          min={0}
-          step='any'
         />
         <p className='text-muted-foreground text-xs'>
-          {t(
-            'Get notified when balance falls below this value. Set 0 to disable.'
-          )}
+          {t('Get notified when balance falls below this value')}
         </p>
       </div>
 
@@ -407,22 +335,6 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
             }
           />
         </div>
-
-        {/* Record IP Log */}
-        <div className='flex items-start justify-between gap-3 rounded-lg border p-3 sm:items-center sm:p-4'>
-          <div className='space-y-0.5'>
-            <Label htmlFor='recordIp'>{t('Record IP Address')}</Label>
-            <p className='text-muted-foreground text-xs sm:text-sm'>
-              {t('Log IP address for usage and error logs')}
-            </p>
-          </div>
-          <Switch
-            id='recordIp'
-            className='shrink-0'
-            checked={settings.record_ip_log ?? true}
-            onCheckedChange={handleRecordIpLogChange}
-          />
-        </div>
       </div>
 
       {/* Save Button */}
@@ -432,22 +344,6 @@ export function NotificationTab({ profile, onUpdate }: NotificationTabProps) {
           {loading ? t('Saving...') : t('Save Settings')}
         </Button>
       </div>
-
-      <ConfirmDialog
-        open={disableIpLogConfirmOpen}
-        onOpenChange={setDisableIpLogConfirmOpen}
-        title={t('Disable IP logging?')}
-        desc={t(
-          'After disabling IP logging, if an issue occurs, it may not be possible to investigate it using IP records. Please choose carefully.'
-        )}
-        cancelBtnText={t('Keep Enabled')}
-        confirmText={t('Disable')}
-        destructive
-        handleConfirm={() => {
-          updateField('record_ip_log', false)
-          setDisableIpLogConfirmOpen(false)
-        }}
-      />
     </div>
   )
 }

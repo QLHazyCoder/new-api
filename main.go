@@ -23,8 +23,9 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
-	"github.com/QuantumNous/new-api/pkg/imagecapability"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/pkg/wsmanager"
 	"github.com/QuantumNous/new-api/relay"
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 	"github.com/QuantumNous/new-api/router"
@@ -47,6 +48,9 @@ var buildFS embed.FS
 var indexPage []byte
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "plugin" {
+		os.Exit(jsplugin.RunCLI(os.Args[2:], os.Stdout, os.Stderr))
+	}
 	startTime := time.Now()
 	kitutil.SetLogging(common.SysLog, func(message string) {
 		logger.LogError(nil, message)
@@ -58,7 +62,6 @@ func main() {
 		common.FatalLog("failed to initialize resources: " + err.Error())
 		return
 	}
-	imagecapability.EnsureRuntimeConfig()
 
 	common.SysLog("New API " + common.Version + " started")
 	if os.Getenv("GIN_MODE") != "debug" {
@@ -102,6 +105,7 @@ func main() {
 
 		go model.SyncChannelCache(common.SyncFrequency)
 	}
+	wsmanager.StartSubscriber(context.Background())
 
 	// Warm pricing after channel cache initialization so Advanced Custom
 	// endpoint inference can read cached route settings on first request.
@@ -109,11 +113,7 @@ func main() {
 
 	// 热更新配置
 	go model.SyncOptions(common.SyncFrequency)
-	if common.IsMasterNode {
-		// Keep the denormalized invitation counter convergent while old and new
-		// instances overlap during rolling or blue-green deployments.
-		go model.SyncAffiliateCounts(5 * time.Minute)
-	}
+	go controller.SyncTaskPlugins()
 
 	// 周期性重载授权策略，保证多节点/多 master 部署下权限变更能传播到每个实例
 	go authz.StartPolicySync(common.SyncFrequency)
@@ -157,11 +157,6 @@ func main() {
 	// switch are enforced inside the runner and each handler's Enabled().
 	controller.RegisterScheduledSystemTasks()
 	service.StartSystemTaskRunner()
-
-	// Playground image jobs use the normal relay pipeline in the background,
-	// while the service package owns queue leases and result persistence.
-	service.ExecutePlaygroundImageTask = controller.ExecutePlaygroundImageRelay
-	service.StartPlaygroundImageTaskRunner()
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true
@@ -325,6 +320,12 @@ func InitResources() error {
 		common.FatalLog("failed to initialize authorization: " + err.Error())
 		return err
 	}
+	if common.PasswordLoginEncryptionEnabled {
+		if err = model.InitPasswordEncryption(); err != nil {
+			common.FatalLog("failed to initialize password encryption: " + err.Error())
+			return err
+		}
+	}
 
 	model.CheckSetup()
 
@@ -334,10 +335,7 @@ func InitResources() error {
 			common.SysError("failed to migrate retired frontend options: " + err.Error())
 		}
 	}
-	if err := model.InitOptionMap(); err != nil {
-		common.FatalLog("failed to initialize options: " + err.Error())
-		return err
-	}
+	model.InitOptionMap()
 
 	// 清理旧的磁盘缓存文件
 	common.CleanupOldCacheFiles()

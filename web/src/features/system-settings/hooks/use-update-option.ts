@@ -20,10 +20,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 
-import type { SystemStatus } from '@/features/auth/types'
+import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
-import { updateSystemOption } from '../api'
-import type { UpdateOptionRequest } from '../types'
+import { updatePasskeyDomains, updateSystemOption } from '../api'
+import type { UpdateOptionRequest, UpdatePasskeyDomainsRequest } from '../types'
 
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = new Set([
@@ -39,41 +40,19 @@ const STATUS_RELATED_KEYS = new Set([
   'general_setting.custom_currency_symbol',
   'general_setting.custom_currency_exchange_rate',
   'oidc.display_name',
+  'ServerAddress',
+  'passkey.enabled',
+  'passkey.rp_id',
+  'passkey.legacy_rp_ids',
+  'passkey.origins',
 ])
 
 export function useUpdateOption() {
   const queryClient = useQueryClient()
 
-  const patchStatusCache = (enabled: boolean) => {
-    queryClient.setQueryData<SystemStatus | undefined>(['status'], (old) => {
-      if (!old) return old
-      return {
-        ...old,
-        perf_metrics_enabled: enabled,
-      }
-    })
-
-    try {
-      if (typeof window !== 'undefined') {
-        const saved = window.localStorage.getItem('status')
-        if (saved) {
-          const parsed = JSON.parse(saved) as SystemStatus
-          window.localStorage.setItem(
-            'status',
-            JSON.stringify({
-              ...parsed,
-              perf_metrics_enabled: enabled,
-            })
-          )
-        }
-      }
-    } catch {
-      /* empty */
-    }
-  }
-
   return useMutation({
-    mutationFn: (request: UpdateOptionRequest) => updateSystemOption(request),
+    mutationFn: async (request: UpdateOptionRequest) =>
+      requireServerSuccess(await updateSystemOption(request)),
     onSuccess: (data, variables) => {
       if (data.success) {
         // Always refresh system-options
@@ -81,26 +60,50 @@ export function useUpdateOption() {
 
         // If updating frontend-display-related config, also refresh status
         if (STATUS_RELATED_KEYS.has(variables.key)) {
-          if (variables.key === 'perf_metrics_setting.enabled') {
-            patchStatusCache(Boolean(variables.value))
-          }
           queryClient.invalidateQueries({ queryKey: ['status'] })
-          if (variables.key !== 'perf_metrics_setting.enabled') {
-            try {
-              window.localStorage.removeItem('status')
-            } catch {
-              /* empty */
-            }
+          try {
+            window.localStorage.removeItem('status')
+          } catch {
+            /* empty */
           }
         }
 
         toast.success(i18next.t('Setting updated successfully'))
       } else {
-        toast.error(data.message || i18next.t('Failed to update setting'))
+        handleServerError(data, i18next.t('Failed to update setting'))
       }
     },
     onError: (error: Error) => {
-      toast.error(error.message || i18next.t('Failed to update setting'))
+      handleServerError(error, i18next.t('Failed to update setting'))
     },
+  })
+}
+
+export function useUpdatePasskeyDomains() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (request: UpdatePasskeyDomainsRequest) => {
+      const result = await updatePasskeyDomains(request)
+      if (
+        result.code === 'PASSKEY_RP_ID_REMOVAL_CONFIRMATION_REQUIRED' &&
+        result.data
+      ) {
+        return result
+      }
+      return requireServerSuccess(result)
+    },
+    onSuccess: (result, request) => {
+      if (request.preview || !result.success) return
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      queryClient.invalidateQueries({ queryKey: ['status'] })
+      try {
+        window.localStorage.removeItem('status')
+      } catch {
+        /* Storage may be disabled. */
+      }
+      toast.success(i18next.t('Setting updated successfully'))
+    },
+    onError: (error: Error) =>
+      handleServerError(error, i18next.t('Failed to update setting')),
   })
 }

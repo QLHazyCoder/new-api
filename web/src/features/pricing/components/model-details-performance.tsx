@@ -27,26 +27,23 @@ import {
 } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { getPerfMetrics } from '@/features/performance-metrics/api'
-import { usePerformanceMetricsVisibility } from '@/features/performance-metrics/hooks/use-performance-metrics-visibility'
-import {
-  sumPerformanceCounters,
-  weightedSuccessRate,
-} from '@/features/performance-metrics/lib/aggregate'
 import {
   formatLatency,
   formatThroughput,
   formatUptimePct,
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
-import type { PerformanceGroup } from '@/features/performance-metrics/types'
+import type {
+  PerformanceGroup,
+  PerformanceSeriesPoint,
+} from '@/features/performance-metrics/types'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import type { UptimeDayPoint } from '../lib/mock-stats'
 import type { PricingModel } from '../types'
 import { LatencyTrendChart, UptimeTrendChart } from './model-details-charts'
 import { UptimeSparkline } from './model-details-uptime-sparkline'
-
-const DETAILS_PERFORMANCE_WINDOW_HOURS = 1
 
 function StatCard(props: {
   icon: React.ComponentType<{ className?: string }>
@@ -85,8 +82,6 @@ type PerformanceRow = {
   avg_latency_ms: number
   success_rate: number
   avg_tps: number
-  request_count?: number
-  success_count?: number
 }
 
 function toUptimePct(value: number): number {
@@ -95,81 +90,23 @@ function toUptimePct(value: number): number {
   return Math.round(clamped * 100) / 100
 }
 
-function toLatencySeries(groups: PerformanceGroup[]) {
-  const byTs = new Map<number, number[]>()
-  for (const group of groups) {
-    for (const point of group.series) {
-      if (point.avg_ttft_ms <= 0) continue
-      const current = byTs.get(point.ts) ?? []
-      current.push(point.avg_ttft_ms)
-      byTs.set(point.ts, current)
-    }
-  }
-
-  return [...byTs.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([ts, values]) => ({
-      timestamp: new Date(ts * 1000).toISOString(),
+function toLatencySeries(series: PerformanceSeriesPoint[]) {
+  return series
+    .filter((point) => point.avg_ttft_ms > 0)
+    .map((point) => ({
+      timestamp: new Date(point.ts * 1000).toISOString(),
       group: 'latency',
-      ttft_ms: Math.round(
-        values.reduce((sum, value) => sum + value, 0) / values.length
-      ),
+      ttft_ms: point.avg_ttft_ms,
     }))
 }
 
-function toUptimeSeries(groups: PerformanceGroup[]): UptimeDayPoint[] {
-  const byTs = new Map<
-    number,
-    {
-      rates: number[]
-      incidents: number
-      requestCount: number
-      successCount: number
-    }
-  >()
-  for (const group of groups) {
-    for (const point of group.series) {
-      const current = byTs.get(point.ts) ?? {
-        rates: [],
-        incidents: 0,
-        requestCount: 0,
-        successCount: 0,
-      }
-      if (Number.isFinite(point.success_rate)) {
-        const successRate = toUptimePct(point.success_rate)
-        current.rates.push(successRate)
-        if (successRate < 100) current.incidents += 1
-      }
-      const requestCount = Number(point.request_count)
-      const successCount = Number(point.success_count)
-      if (
-        Number.isFinite(requestCount) &&
-        requestCount > 0 &&
-        Number.isFinite(successCount)
-      ) {
-        current.requestCount += requestCount
-        current.successCount += Math.min(successCount, requestCount)
-      }
-      byTs.set(point.ts, current)
-    }
-  }
-  return [...byTs.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([ts, value]) => {
-      let uptime = 0
-      if (value.requestCount > 0) {
-        uptime = (value.successCount / value.requestCount) * 100
-      } else if (value.rates.length > 0) {
-        uptime =
-          value.rates.reduce((sum, rate) => sum + rate, 0) / value.rates.length
-      }
-      return {
-        date: new Date(ts * 1000).toISOString(),
-        uptime_pct: toUptimePct(uptime),
-        incidents: value.incidents,
-        outage_minutes: 0,
-      }
-    })
+function toUptimeSeries(series: PerformanceSeriesPoint[]): UptimeDayPoint[] {
+  return series.map((point) => ({
+    date: new Date(point.ts * 1000).toISOString(),
+    uptime_pct: toUptimePct(point.success_rate),
+    incidents: point.success_rate < 100 ? 1 : 0,
+    outage_minutes: 0,
+  }))
 }
 
 function toGroupUptimeSeries(group: PerformanceGroup): UptimeDayPoint[] {
@@ -184,34 +121,21 @@ function toGroupUptimeSeries(group: PerformanceGroup): UptimeDayPoint[] {
   })
 }
 
-function average(
-  rows: PerformanceRow[],
-  field: 'avg_ttft_ms' | 'avg_latency_ms'
-) {
-  const values = rows.map((row) => row[field]).filter((value) => value > 0)
-  if (values.length === 0) return 0
-  return Math.round(
-    values.reduce((sum, value) => sum + value, 0) / values.length
-  )
-}
-
 export function ModelDetailsPerformance(props: { model: PricingModel }) {
   const { t } = useTranslation()
-  const perfMetricsVisible = usePerformanceMetricsVisibility()
   const metricsQuery = useQuery({
-    queryKey: [
-      'perf-metrics',
-      props.model.model_name,
-      DETAILS_PERFORMANCE_WINDOW_HOURS,
-      perfMetricsVisible,
-    ],
-    queryFn: () =>
-      getPerfMetrics(props.model.model_name, DETAILS_PERFORMANCE_WINDOW_HOURS),
-    enabled: perfMetricsVisible,
+    queryKey: ['perf-metrics', props.model.model_name],
+    queryFn: async () =>
+      requireServerSuccess(await getPerfMetrics(props.model.model_name, 24)),
     staleTime: 60 * 1000,
   })
   const groups = useMemo(
     () => metricsQuery.data?.data.groups ?? [],
+    [metricsQuery.data]
+  )
+  const summary = metricsQuery.data?.data.summary
+  const series = useMemo(
+    () => metricsQuery.data?.data.series ?? [],
     [metricsQuery.data]
   )
   const performances = useMemo<PerformanceRow[]>(
@@ -222,13 +146,11 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
         avg_latency_ms: group.avg_latency_ms,
         success_rate: group.success_rate,
         avg_tps: group.avg_tps,
-        request_count: group.request_count,
-        success_count: group.success_count,
       })),
     [groups]
   )
-  const latencySeries = useMemo(() => toLatencySeries(groups), [groups])
-  const uptimeSeries = useMemo(() => toUptimeSeries(groups), [groups])
+  const latencySeries = useMemo(() => toLatencySeries(series), [series])
+  const uptimeSeries = useMemo(() => toUptimeSeries(series), [series])
   const uptimeByGroup = useMemo<Record<string, UptimeDayPoint[]>>(() => {
     const map: Record<string, UptimeDayPoint[]> = {}
     for (const group of groups) {
@@ -236,10 +158,6 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
     }
     return map
   }, [groups])
-
-  if (!perfMetricsVisible) {
-    return null
-  }
 
   if (metricsQuery.isLoading || performances.length === 0) {
     return (
@@ -249,16 +167,9 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
     )
   }
 
-  const tpsValues = performances
-    .map((p) => p.avg_tps)
-    .filter((value) => value > 0)
-  const avgTps =
-    tpsValues.length > 0
-      ? tpsValues.reduce((sum, value) => sum + value, 0) / tpsValues.length
-      : 0
-  const avgLatency = average(performances, 'avg_latency_ms')
-  const successRate = weightedSuccessRate(performances)
-  const totals = sumPerformanceCounters(performances)
+  const avgTps = summary?.avg_tps ?? 0
+  const avgLatency = summary?.avg_latency_ms ?? 0
+  const successRate = summary?.success_rate ?? Number.NaN
   const incidentCount = uptimeSeries.reduce((s, p) => s + p.incidents, 0)
 
   return (
@@ -280,12 +191,11 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
           label={t('Success rate')}
           value={formatUptimePct(successRate)}
           hint={
-            totals.requestCount > 0
-              ? t('{{failed}} failed of {{total}} requests in the last hour', {
-                  failed: totals.failedCount,
-                  total: totals.requestCount,
+            incidentCount > 0
+              ? t('{{count}} incidents in the last 24 hours', {
+                  count: incidentCount,
                 })
-              : t('No requests in the last hour')
+              : t('No incidents in the last 24 hours')
           }
           valueClassName={getSuccessRateTextClass(successRate)}
         />
@@ -341,6 +251,7 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
                 <UptimeSparkline
                   size='sm'
                   series={uptimeByGroup[perf.group] ?? []}
+                  overallSuccessRate={perf.success_rate}
                 />
               ),
             },
@@ -351,7 +262,7 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
       <section>
         <SectionHeader
           icon={Timer}
-          title={t('Latency trend (last hour)')}
+          title={t('Latency trend (last 24h)')}
           description={t('Average TTFT')}
         />
         <LatencyTrendChart series={latencySeries} />
@@ -360,17 +271,10 @@ export function ModelDetailsPerformance(props: { model: PricingModel }) {
       <section>
         <SectionHeader
           icon={HeartPulse}
-          title={t('Availability (last hour)')}
-          description={
-            incidentCount > 0
-              ? t(
-                  'Request success rate; {{incidents}} incident buckets in the last hour',
-                  {
-                    incidents: incidentCount,
-                  }
-                )
-              : t('Request success rate sampled over the last hour')
-          }
+          title={t('Availability (last 24h)')}
+          description={t(
+            'Success rate excludes business rejections and includes the current partial hour.'
+          )}
           accent={
             incidentCount > 0 ? (
               <span className='inline-flex items-center gap-1 text-amber-600 dark:text-amber-400'>

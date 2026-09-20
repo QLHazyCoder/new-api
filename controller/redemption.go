@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"unicode/utf8"
@@ -61,51 +62,52 @@ func GetRedemption(c *gin.Context) {
 	return
 }
 
-type redemptionCreateRequest struct {
-	Name        string            `json:"name"`
-	Count       int               `json:"count"`
-	Quota       common.Int64Value `json:"quota"`
-	ExpiredTime int64             `json:"expired_time"`
-}
-
 func AddRedemption(c *gin.Context) {
 	if !operation_setting.IsPaymentComplianceConfirmed() {
 		common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
 		return
 	}
 
-	var request redemptionCreateRequest
-	err := c.ShouldBindJSON(&request)
+	redemption := model.Redemption{}
+	err := c.ShouldBindJSON(&redemption)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if utf8.RuneCountInString(request.Name) == 0 || utf8.RuneCountInString(request.Name) > 20 {
+	if utf8.RuneCountInString(redemption.Name) == 0 || utf8.RuneCountInString(redemption.Name) > 20 {
 		common.ApiErrorI18n(c, i18n.MsgRedemptionNameLength)
 		return
 	}
-	if request.Count <= 0 {
+	if redemption.Count <= 0 {
 		common.ApiErrorI18n(c, i18n.MsgRedemptionCountPositive)
 		return
 	}
-	if request.Count > 100 {
+	if redemption.Count > 100 {
 		common.ApiErrorI18n(c, i18n.MsgRedemptionCountMax)
 		return
 	}
-	if valid, msg := validateExpiredTime(c, request.ExpiredTime); !valid {
+	if redemption.Quota <= 0 {
+		common.ApiError(c, errors.New("redemption quota must be positive"))
+		return
+	}
+	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if valid, msg := validateExpiredTime(c, redemption.ExpiredTime); !valid {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 		return
 	}
 	var keys []string
-	for i := 0; i < request.Count; i++ {
+	for i := 0; i < redemption.Count; i++ {
 		key := common.GetUUID()
 		cleanRedemption := model.Redemption{
 			UserId:      c.GetInt("id"),
-			Name:        request.Name,
+			Name:        redemption.Name,
 			Key:         key,
 			CreatedTime: common.GetTimestamp(),
-			Quota:       request.Quota.Int64(),
-			ExpiredTime: request.ExpiredTime,
+			Quota:       redemption.Quota,
+			ExpiredTime: redemption.ExpiredTime,
 		}
 		err = cleanRedemption.Insert()
 		if err != nil {
@@ -119,10 +121,10 @@ func AddRedemption(c *gin.Context) {
 		}
 		keys = append(keys, key)
 	}
-	recordManageAudit(c, "redemption.create", map[string]interface{}{
-		"name":  request.Name,
-		"count": request.Count,
-		"quota": logger.LogQuota64(request.Quota.Int64()),
+	recordManageAudit(c, "redemption.create", map[string]any{
+		"name":  redemption.Name,
+		"count": redemption.Count,
+		"quota": logger.LogQuota(redemption.Quota),
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -160,6 +162,14 @@ func UpdateRedemption(c *gin.Context) {
 		return
 	}
 	if statusOnly == "" {
+		if redemption.Quota <= 0 {
+			common.ApiError(c, errors.New("redemption quota must be positive"))
+			return
+		}
+		if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		if valid, msg := validateExpiredTime(c, redemption.ExpiredTime); !valid {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
 			return
@@ -204,4 +214,25 @@ func validateExpiredTime(c *gin.Context, expired int64) (bool, string) {
 		return false, i18n.T(c, i18n.MsgRedemptionExpireTimeInvalid)
 	}
 	return true, ""
+}
+
+func DeleteRedemptionBatch(c *gin.Context) {
+	var request struct {
+		Ids []int `json:"ids" binding:"required,min=1,max=1000,dive,gt=0"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	count, err := model.BatchDeleteRedemptions(request.Ids)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "redemption.delete_batch", map[string]any{
+		"count":                    count,
+		"total":                    len(request.Ids),
+		"requested_redemption_ids": request.Ids,
+	})
+	common.ApiSuccess(c, count)
 }

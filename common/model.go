@@ -1,10 +1,6 @@
 package common
 
-import (
-	"strings"
-
-	"github.com/QuantumNous/new-api/pkg/imagecapability"
-)
+import "strings"
 
 var (
 	// OpenAIResponseOnlyModels is a list of models that are only available for OpenAI responses.
@@ -12,6 +8,27 @@ var (
 		"o3-pro",
 		"o3-deep-research",
 		"o4-mini-deep-research",
+	}
+	ImageGenerationModels = []string{
+		"dall-e-3",
+		"dall-e-2",
+		"prefix:dall-e", // Deprecated upstream models; retained for compatible routes.
+		"gpt-image-",
+		"qwen-image",
+		"z-image",
+		"wan2.7-image-pro",
+		"wan2.7-image",
+		"wan2.6-image",
+		"wan2.6-t2i",
+		"wan2.5-t2i-preview",
+		"wan2.2-t2i-flash",
+		"wan2.2-t2i-plus",
+		"wanx2.1-t2i-turbo",
+		"wanx2.1-t2i-plus",
+		"wanx2.0-t2i-turbo",
+		"prefix:imagen-",
+		"flux-",
+		"flux.1-",
 	}
 	OpenAITextModels = []string{
 		"gpt-",
@@ -32,20 +49,19 @@ func IsOpenAIResponseOnlyModel(modelName string) bool {
 }
 
 func IsImageGenerationModel(modelName string) bool {
-	_, ok := imagecapability.Resolve(0, modelName)
-	return ok
-}
-
-func IsChannelImageGenerationModel(channelType int, modelName string, modelMappings ...string) bool {
-	if len(modelMappings) > 0 {
-		mappedModel, _, err := ResolveModelMapping(modelName, modelMappings[0])
-		if err != nil {
-			return false
+	modelName = strings.ToLower(modelName)
+	for _, m := range ImageGenerationModels {
+		if prefix, ok := strings.CutPrefix(m, "prefix:"); ok {
+			if strings.HasPrefix(modelName, prefix) {
+				return true
+			}
+			continue
 		}
-		modelName = mappedModel
+		if strings.Contains(modelName, m) {
+			return true
+		}
 	}
-	_, ok := imagecapability.Resolve(channelType, modelName)
-	return ok
+	return false
 }
 
 func IsOpenAITextModel(modelName string) bool {

@@ -2,7 +2,7 @@ package model_setting
 
 import (
 	"fmt"
-	"strings"
+	"slices"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -47,7 +47,6 @@ var defaultGeminiSettings = GeminiSettings{
 		"gemini-2.5-flash-image",
 		"gemini-3.1-flash-image",
 		"gemini-3.1-flash-image-preview",
-		"gemini-3.1-flash-lite-image",
 	},
 	ThinkingAdapterEnabled:                false,
 	ThinkingAdapterBudgetTokensPercentage: 0.6,
@@ -110,15 +109,5 @@ func GetGeminiVersionSetting(key string) string {
 }
 
 func IsGeminiModelSupportImagine(model string) bool {
-	for _, v := range geminiSettings.SupportedImagineModels {
-		if strings.EqualFold(v, model) {
-			return true
-		}
-		for _, suffix := range []string{"-1k", "-2k", "-4k"} {
-			if strings.EqualFold(v+suffix, model) {
-				return true
-			}
-		}
-	}
-	return false
+	return slices.Contains(geminiSettings.SupportedImagineModels, model)
 }

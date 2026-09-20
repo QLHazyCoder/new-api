@@ -3,7 +3,6 @@ package model
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -21,34 +20,16 @@ type Token struct {
 	CreatedTime        int64          `json:"created_time" gorm:"bigint"`
 	AccessedTime       int64          `json:"accessed_time" gorm:"bigint"`
 	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
-	RemainQuota        int64          `json:"remain_quota" gorm:"type:bigint;default:0"`
+	RemainQuota        int            `json:"remain_quota" gorm:"default:0"`
 	UnlimitedQuota     bool           `json:"unlimited_quota"`
 	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
 	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
-	UsedQuota          int64          `json:"used_quota" gorm:"type:bigint;default:0"` // used quota
+	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	AutoGroups         string         `json:"-" gorm:"type:text"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
-	RemainQuotaRaw     string         `json:"remain_quota_raw,omitempty" gorm:"-:all"`
-	UsedQuotaRaw       string         `json:"used_quota_raw,omitempty" gorm:"-:all"`
-}
-
-func (token *Token) syncQuotaRawFields() {
-	token.RemainQuotaRaw = strconv.FormatInt(token.RemainQuota, 10)
-	token.UsedQuotaRaw = strconv.FormatInt(token.UsedQuota, 10)
-}
-
-func (token *Token) SyncQuotaRawFields() {
-	if token != nil {
-		token.syncQuotaRawFields()
-	}
-}
-
-func (token *Token) AfterFind(_ *gorm.DB) error {
-	token.syncQuotaRawFields()
-	return nil
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {
@@ -111,8 +92,8 @@ func (token *Token) GetIpLimits() []string {
 	if cleanIps == "" {
 		return ipLimits
 	}
-	ips := strings.Split(cleanIps, "\n")
-	for _, ip := range ips {
+	ips := strings.SplitSeq(cleanIps, "\n")
+	for ip := range ips {
 		ip = strings.TrimSpace(ip)
 		ip = strings.ReplaceAll(ip, ",", "")
 		if ip != "" {
@@ -407,14 +388,21 @@ func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 		})
 	}
 	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeTokenQuota, tokenId, int64(quota))
+		addNewRecord(BatchUpdateTypeTokenQuota, tokenId, quota)
 		return nil
 	}
-	return increaseTokenQuota(tokenId, int64(quota))
+	return increaseTokenQuota(tokenId, quota)
 }
 
-func increaseTokenQuota(id int, quota int64) (err error) {
-	return updateTokenQuotaDeltaTx(DB, id, quota)
+func increaseTokenQuota(id int, quota int) (err error) {
+	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
+		map[string]any{
+			"remain_quota":  gorm.Expr("remain_quota + ?", quota),
+			"used_quota":    gorm.Expr("used_quota - ?", quota),
+			"accessed_time": common.GetTimestamp(),
+		},
+	).Error
+	return err
 }
 
 func DecreaseTokenQuota(id int, key string, quota int) (err error) {
@@ -429,14 +417,21 @@ func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 		})
 	}
 	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeTokenQuota, id, int64(-quota))
+		addNewRecord(BatchUpdateTypeTokenQuota, id, -quota)
 		return nil
 	}
-	return decreaseTokenQuota(id, int64(quota))
+	return decreaseTokenQuota(id, quota)
 }
 
-func decreaseTokenQuota(id int, quota int64) (err error) {
-	return updateTokenQuotaDeltaTx(DB, id, -quota)
+func decreaseTokenQuota(id int, quota int) (err error) {
+	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
+		map[string]any{
+			"remain_quota":  gorm.Expr("remain_quota - ?", quota),
+			"used_quota":    gorm.Expr("used_quota + ?", quota),
+			"accessed_time": common.GetTimestamp(),
+		},
+	).Error
+	return err
 }
 
 // CountUserTokens returns total number of tokens for the given user, used for pagination

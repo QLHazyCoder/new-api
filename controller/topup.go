@@ -24,11 +24,6 @@ import (
 
 func GetTopUpInfo(c *gin.Context) {
 	complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
-	group, err := model.GetUserGroup(c.GetInt("id"), true)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
 
 	// 获取支付方式
 	payMethods := operation_setting.PayMethods
@@ -110,7 +105,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,
-		"waffo_pay_methods": func() interface{} {
+		"waffo_pay_methods": func() any {
 			if enableWaffo {
 				return setting.GetWaffoPayMethods()
 			}
@@ -123,15 +118,8 @@ func GetTopUpInfo(c *gin.Context) {
 		"waffo_min_topup":         setting.WaffoMinTopUp,
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
-		"discount":                operation_setting.GetAmountDiscountsForGroup(group),
-		"default_topup_amount":    operation_setting.GetPaymentSetting().DefaultTopUpAmount,
+		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
 		"topup_link":              common.TopUpLink,
-		"topup_invite_reward_percent": func() float64 {
-			if complianceConfirmed {
-				return common.TopUpInviteRewardPercent
-			}
-			return 0
-		}(),
 	}
 	common.ApiSuccess(c, data)
 }
@@ -159,17 +147,51 @@ func GetEpayClient() *epay.Client {
 	return withUrl
 }
 
+func getPayMoney(amount int64, group string) float64 {
+	dAmount := decimal.NewFromInt(amount)
+	// 充值金额以“展示类型”为准：
+	// - USD/CNY: 前端传 amount 为金额单位；TOKENS: 前端传 tokens，需要换成 USD 金额
+	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
+		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+		dAmount = dAmount.Div(dQuotaPerUnit)
+	}
+
+	topupGroupRatio := common.GetTopupGroupRatio(group)
+	if topupGroupRatio == 0 {
+		topupGroupRatio = 1
+	}
+
+	dTopupGroupRatio := decimal.NewFromFloat(topupGroupRatio)
+	dPrice := decimal.NewFromFloat(operation_setting.Price)
+	// apply optional preset discount by the original request amount (if configured), default 1.0
+	discount := 1.0
+	if ds, ok := operation_setting.GetPaymentSetting().AmountDiscount[int(amount)]; ok {
+		if ds > 0 {
+			discount = ds
+		}
+	}
+	dDiscount := decimal.NewFromFloat(discount)
+
+	payMoney := dAmount.Mul(dPrice).Mul(dTopupGroupRatio).Mul(dDiscount)
+
+	return payMoney.InexactFloat64()
+}
+
 func getMinTopup() int64 {
 	minTopup := operation_setting.MinTopUp
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		dMinTopup := decimal.NewFromInt(int64(minTopup))
 		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-		minTopup = common.QuotaFromDecimal(dMinTopup.Mul(dQuotaPerUnit))
+		quota, err := common.WalletQuotaFromDecimalStrict(dMinTopup.Mul(dQuotaPerUnit))
+		if err != nil {
+			return common.MaxWalletQuota
+		}
+		minTopup = quota
 	}
 	return int64(minTopup)
 }
 
-func getTopUpQuota(amount int64) (int64, error) {
+func getTopUpQuota(amount int64) (int, error) {
 	quota := decimal.NewFromInt(amount)
 	if operation_setting.GetQuotaDisplayType() == operation_setting.QuotaDisplayTypeTokens {
 		quotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
@@ -177,7 +199,7 @@ func getTopUpQuota(amount int64) (int64, error) {
 	} else {
 		quota = quota.Mul(decimal.NewFromFloat(common.QuotaPerUnit))
 	}
-	return common.WalletQuotaFromDecimal(quota)
+	return common.WalletQuotaFromDecimalStrict(quota)
 }
 
 func getMaxTopUpAmount() int64 {
@@ -198,8 +220,8 @@ func getMaxTopUpAmount() int64 {
 	return maxStoredAmount.IntPart()
 }
 
-func validateCreditedQuota(quota decimal.Decimal) (int64, error) {
-	value, err := common.WalletQuotaFromDecimal(quota)
+func validateCreditedQuota(quota decimal.Decimal) (int, error) {
+	value, err := common.WalletQuotaFromDecimalStrict(quota)
 	if err != nil {
 		return 0, errors.New("充值额度超出系统可表示范围")
 	}
@@ -209,7 +231,7 @@ func validateCreditedQuota(quota decimal.Decimal) (int64, error) {
 	return value, nil
 }
 
-func validateTopUpQuota(amount int64) (int64, error) {
+func validateTopUpQuota(amount int64) (int, error) {
 	quota, err := getTopUpQuota(amount)
 	if err == nil && quota > 0 {
 		return quota, nil
@@ -266,8 +288,7 @@ func RequestEpay(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
-	pricing := getEpayTopUpPricing(req.Amount, group)
-	payMoney := pricing.PayMoney
+	payMoney := getPayMoney(req.Amount, group)
 	if payMoney < 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -308,13 +329,6 @@ func RequestEpay(c *gin.Context) {
 		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
 		amount = dAmount.Div(dQuotaPerUnit).IntPart()
 	}
-	pricing.Snapshot.StoredAmount = amount
-	snapshot, err := marshalTopUpPricingSnapshot(pricing)
-	if err != nil {
-		logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 创建充值订单快照失败 user_id=%d amount=%d error=%q", id, req.Amount, err.Error()))
-		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "创建订单失败"})
-		return
-	}
 	topUp := &model.TopUp{
 		UserId:          id,
 		Amount:          amount,
@@ -322,7 +336,6 @@ func RequestEpay(c *gin.Context) {
 		TradeNo:         tradeNo,
 		PaymentMethod:   req.PaymentMethod,
 		PaymentProvider: model.PaymentProviderEpay,
-		PricingSnapshot: snapshot,
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
@@ -440,12 +453,7 @@ func EpayNotify(c *gin.Context) {
 		// 数据库行锁 + 事务内状态校验保证（多实例部署下同样安全）。
 		LockOrder(verifyInfo.ServiceTradeNo)
 		defer UnlockOrder(verifyInfo.ServiceTradeNo)
-		result, err := model.CompleteTopUp(model.CompleteTopUpOptions{
-			TradeNo:                 verifyInfo.ServiceTradeNo,
-			ExpectedPaymentProvider: model.PaymentProviderEpay,
-			CallerIp:                c.ClientIP(),
-			CallbackPaymentMethod:   verifyInfo.Type,
-		})
+		alreadyDone, err := model.RechargeEpay(verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP())
 		if err != nil {
 			switch {
 			case errors.Is(err, model.ErrTopUpNotFound):
@@ -462,15 +470,11 @@ func EpayNotify(c *gin.Context) {
 			}
 			return
 		}
-		if !result.AlreadyCompleted {
-			logger.LogInfo(c.Request.Context(), fmt.Sprintf("Epay topup completed trade_no=%s user_id=%d client_ip=%s quota_to_add=%d money=%.2f", result.TradeNo, result.UserId, c.ClientIP(), result.QuotaToAdd, result.PayMoney))
-			model.RecordTopupLog(result.UserId, fmt.Sprintf("Epay topup succeeded, quota: %v, amount: %.2f", logger.LogQuota64(result.QuotaToAdd), result.PayMoney), c.ClientIP(), result.PaymentMethod, "epay")
+		if alreadyDone {
+			logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 重复回调幂等忽略 trade_no=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP()))
+		} else {
+			logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 充值成功 trade_no=%s callback_type=%s client_ip=%s", verifyInfo.ServiceTradeNo, verifyInfo.Type, c.ClientIP()))
 		}
-		if _, writeErr := c.Writer.Write([]byte("success")); writeErr != nil {
-			logger.LogError(c.Request.Context(), fmt.Sprintf("易支付 webhook 响应写入失败 trade_no=%s client_ip=%s error=%q", verifyInfo.ServiceTradeNo, c.ClientIP(), writeErr.Error()))
-		}
-		return
-
 	} else {
 		logger.LogInfo(c.Request.Context(), fmt.Sprintf("易支付 webhook 忽略事件 trade_no=%s callback_type=%s trade_status=%s client_ip=%s verify_info=%q", verifyInfo.ServiceTradeNo, verifyInfo.Type, verifyInfo.TradeStatus, c.ClientIP(), common.GetJsonString(verifyInfo)))
 	}
@@ -500,7 +504,7 @@ func RequestAmount(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "获取用户分组失败"})
 		return
 	}
-	payMoney := getEpayTopUpPricing(req.Amount, group).PayMoney
+	payMoney := getPayMoney(req.Amount, group)
 	if payMoney <= 0.01 {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": "充值金额过低"})
 		return
@@ -553,37 +557,9 @@ func GetAllTopUps(c *gin.Context) {
 		return
 	}
 
-	adminTopUps := make([]adminTopUpRecord, 0, len(topups))
-	for _, topUp := range topups {
-		record, err := newAdminTopUpRecord(topUp)
-		if err != nil {
-			logger.LogWarn(c.Request.Context(), fmt.Sprintf("充值订单计价快照解析失败 trade_no=%s error=%q", topUp.TradeNo, err.Error()))
-		}
-		adminTopUps = append(adminTopUps, record)
-	}
-
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(adminTopUps)
+	pageInfo.SetItems(topups)
 	common.ApiSuccess(c, pageInfo)
-}
-
-type adminTopUpRecord struct {
-	*model.TopUp
-	PricingSnapshot *model.TopUpPricingSnapshot `json:"pricing_snapshot,omitempty"`
-}
-
-func newAdminTopUpRecord(topUp *model.TopUp) (adminTopUpRecord, error) {
-	record := adminTopUpRecord{TopUp: topUp}
-	if topUp == nil {
-		return record, nil
-	}
-
-	snapshot, err := model.ParseTopUpPricingSnapshot(topUp.PricingSnapshot)
-	if err != nil {
-		return record, err
-	}
-	record.PricingSnapshot = snapshot
-	return record, nil
 }
 
 type AdminCompleteTopupRequest struct {

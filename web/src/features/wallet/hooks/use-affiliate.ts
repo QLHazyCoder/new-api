@@ -22,6 +22,8 @@ import { toast } from 'sonner'
 
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { getSelf } from '@/lib/api'
+import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { getAffiliateCode, transferAffiliateQuota } from '../api'
 import { generateAffiliateLink } from '../lib'
@@ -41,7 +43,7 @@ export function useAffiliate() {
   const fetchAffiliateCode = useCallback(async () => {
     try {
       setLoading(true)
-      const response = await getAffiliateCode()
+      const response = requireServerSuccess(await getAffiliateCode())
 
       if (response.success && response.data) {
         setAffiliateCode(response.data)
@@ -49,8 +51,7 @@ export function useAffiliate() {
         setAffiliateLink(link)
       }
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to fetch affiliate code:', error)
+      handleServerError(error)
     } finally {
       setLoading(false)
     }
@@ -62,29 +63,26 @@ export function useAffiliate() {
   }, [affiliateLink, copyToClipboard])
 
   // Transfer affiliate quota to balance
-  const transferQuota = useCallback(
-    async (quota: number | string): Promise<boolean> => {
-      try {
-        setTransferring(true)
-        const response = await transferAffiliateQuota({ quota })
+  const transferQuota = useCallback(async (quota: number): Promise<boolean> => {
+    try {
+      setTransferring(true)
+      const response = await transferAffiliateQuota({ quota })
 
-        if (response.success) {
-          toast.success(response.message || i18next.t('Transfer successful'))
-          await getSelf()
-          return true
-        }
-
-        toast.error(response.message || i18next.t('Transfer failed'))
-        return false
-      } catch {
-        toast.error(i18next.t('Transfer failed'))
-        return false
-      } finally {
-        setTransferring(false)
+      if (response.success) {
+        toast.success(response.message || i18next.t('Transfer successful'))
+        await getSelf()
+        return true
       }
-    },
-    []
-  )
+
+      handleServerError(response, i18next.t('Transfer failed'))
+      return false
+    } catch (_error) {
+      handleServerError(_error, i18next.t('Transfer failed'))
+      return false
+    } finally {
+      setTransferring(false)
+    }
+  }, [])
 
   useEffect(() => {
     fetchAffiliateCode()

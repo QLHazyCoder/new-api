@@ -20,8 +20,9 @@ import i18next from 'i18next'
 import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
 
+import { handleServerError } from '@/lib/handle-server-error'
+
 import { requestCreemPayment, isApiSuccess } from '../api'
-import { markPaymentFlowStart } from '../lib'
 
 /**
  * Hook for handling Creem payment processing
@@ -38,16 +39,15 @@ export function useCreemPayment() {
       })
 
       if (isApiSuccess(response) && response.data?.checkout_url) {
-        markPaymentFlowStart('topup', 'new_tab')
         window.open(response.data.checkout_url, '_blank')
         toast.success(i18next.t('Redirecting to Creem checkout...'))
         return true
       }
 
-      toast.error(response.message || i18next.t('Payment request failed'))
+      handleServerError(response, i18next.t('Payment request failed'))
       return false
-    } catch {
-      toast.error(i18next.t('Payment request failed'))
+    } catch (_error) {
+      handleServerError(_error, i18next.t('Payment request failed'))
       return false
     } finally {
       setProcessing(false)

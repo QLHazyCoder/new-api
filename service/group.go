@@ -13,33 +13,28 @@ import (
 
 func GetUserUsableGroups(userGroup string) map[string]string {
 	groupsCopy := setting.GetUserUsableGroupsCopy()
-	groupDescriptions := ratio_setting.GetGroupDescriptionsCopy()
-	for groupName := range groupsCopy {
-		if desc, ok := groupDescriptions[groupName]; ok && desc != "" {
-			groupsCopy[groupName] = desc
-		}
-	}
 	if userGroup != "" {
 		specialSettings, b := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
 		if b {
+			// 处理特殊可用分组
 			for specialGroup, desc := range specialSettings {
-				if strings.HasPrefix(specialGroup, "-:") {
-					groupToRemove := strings.TrimPrefix(specialGroup, "-:")
+				if after, ok := strings.CutPrefix(specialGroup, "-:"); ok {
+					// 移除分组
+					groupToRemove := after
 					delete(groupsCopy, groupToRemove)
-				} else if strings.HasPrefix(specialGroup, "+:") {
-					groupToAdd := strings.TrimPrefix(specialGroup, "+:")
+				} else if after, ok := strings.CutPrefix(specialGroup, "+:"); ok {
+					// 添加分组
+					groupToAdd := after
 					groupsCopy[groupToAdd] = desc
 				} else {
+					// 直接添加分组
 					groupsCopy[specialGroup] = desc
 				}
 			}
 		}
+		// 如果userGroup不在UserUsableGroups中，返回UserUsableGroups + userGroup
 		if _, ok := groupsCopy[userGroup]; !ok {
-			if desc, ok := groupDescriptions[userGroup]; ok && desc != "" {
-				groupsCopy[userGroup] = desc
-			} else {
-				groupsCopy[userGroup] = "\u7528\u6237\u5206\u7ec4"
-			}
+			groupsCopy[userGroup] = "用户分组"
 		}
 	}
 	return groupsCopy

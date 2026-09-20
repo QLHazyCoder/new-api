@@ -21,12 +21,11 @@ export function buildQueryParams(
 ): URLSearchParams {
   const queryParams = new URLSearchParams()
 
-  for (const [key, value] of Object.entries(params)) {
-    // Keep 0 as a valid value, only filter undefined, null, and empty strings.
+  Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== '') {
       queryParams.append(key, String(value))
     }
-  }
+  })
 
   return queryParams
 }

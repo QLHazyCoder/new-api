@@ -240,43 +240,19 @@ export function buildAssertionResult(
  * Check if current environment supports Passkey/WebAuthn.
  */
 export async function isPasskeySupported(): Promise<boolean> {
-  if (typeof window === 'undefined') return false
-  const { PublicKeyCredential } = window
-  if (!PublicKeyCredential) return false
-
-  if (
-    typeof PublicKeyCredential.isConditionalMediationAvailable === 'function'
-  ) {
-    try {
-      const available =
-        await PublicKeyCredential.isConditionalMediationAvailable()
-      if (available) return true
-    } catch {
-      // ignore
-    }
-  }
-
-  if (
-    typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable ===
-    'function'
-  ) {
-    try {
-      return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
-    } catch {
-      return false
-    }
-  }
-
-  return true
+  // A missing platform authenticator does not exclude USB/NFC security keys or
+  // cross-device Passkeys. Let the browser select an eligible authenticator.
+  return typeof window !== 'undefined' && Boolean(window.PublicKeyCredential)
 }
 
 /**
  * Execute an async Passkey credential creation flow.
  */
 export async function createCredential(
-  options: PublicKeyCredentialCreationOptions
+  options: PublicKeyCredentialCreationOptions,
+  signal?: AbortSignal
 ) {
-  return navigator.credentials.create({ publicKey: options })
+  return navigator.credentials.create({ publicKey: options, signal })
 }
 
 /**

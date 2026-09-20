@@ -61,6 +61,11 @@ import { Switch } from '@/components/ui/switch'
 import { api } from '@/lib/api'
 import dayjs from '@/lib/dayjs'
 import { formatTimestampToDate } from '@/lib/format'
+import { handleServerError } from '@/lib/handle-server-error'
+import {
+  requireServerSuccess,
+  createServerError,
+} from '@/lib/server-error-message'
 
 import {
   getCurrentLogCleanupTask,
@@ -182,9 +187,10 @@ export function LogSettingsSection({ defaultValues }: LogSettingsSectionProps) {
   const fetchServerLogInfo = useCallback(async () => {
     try {
       const res = await api.get('/api/performance/logs')
+      requireServerSuccess(res.data)
       if (res.data.success) setServerLogInfo(res.data.data)
-    } catch {
-      /* ignore */
+    } catch (error) {
+      handleServerError(error)
     }
   }, [])
 
@@ -295,7 +301,7 @@ export function LogSettingsSection({ defaultValues }: LogSettingsSectionProps) {
                 : t('No log entries matched the selected time.')
             )
           } else if (res.data.status === 'failed') {
-            toast.error(res.data.error || t('Failed to clean logs'))
+            handleServerError(res.data, t('Failed to clean logs'))
           }
         }
       } catch {
@@ -348,7 +354,7 @@ export function LogSettingsSection({ defaultValues }: LogSettingsSectionProps) {
     try {
       const res = await startLogCleanupTask(purgeTimestamp)
       if (!res.success) {
-        throw new Error(res.message || t('Failed to clean logs'))
+        throw createServerError(res, t('Failed to clean logs'))
       }
       if (!res.data) {
         throw new Error(t('Failed to clean logs'))
@@ -359,7 +365,7 @@ export function LogSettingsSection({ defaultValues }: LogSettingsSectionProps) {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : t('Failed to clean logs')
-      toast.error(message)
+      handleServerError(error, message)
     } finally {
       setIsStartingLogCleanup(false)
     }
@@ -389,11 +395,11 @@ export function LogSettingsSection({ defaultValues }: LogSettingsSectionProps) {
           })
         )
       } else {
-        toast.error(res.data.message || t('Cleanup failed'))
+        handleServerError(res.data, t('Cleanup failed'))
       }
       fetchServerLogInfo()
-    } catch {
-      toast.error(t('Cleanup failed'))
+    } catch (error) {
+      handleServerError(error, t('Cleanup failed'))
     } finally {
       setServerLogCleanupLoading(false)
     }

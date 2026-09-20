@@ -1,13 +1,16 @@
 package oairesponses
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/internal/convdiag"
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 )
 
 const (
@@ -24,7 +27,7 @@ const (
 	ResponsesInputTypeCustomToolOutput   = responsesInputTypeCustomToolOutput
 )
 
-func ResponsesRequestToChatCompletionsRequest(req *dto.OpenAIResponsesRequest) (*dto.GeneralOpenAIRequest, error) {
+func ResponsesRequestToChatCompletionsRequest(ctx context.Context, req *dto.OpenAIResponsesRequest) (*dto.GeneralOpenAIRequest, error) {
 	if req == nil {
 		return nil, errors.New("request is nil")
 	}
@@ -85,8 +88,13 @@ func ResponsesRequestToChatCompletionsRequest(req *dto.OpenAIResponsesRequest) (
 		return nil, fmt.Errorf("invalid presence_penalty: %w", err)
 	}
 
-	if req.Reasoning != nil {
-		out.ReasoningEffort = req.Reasoning.Effort
+	reasoningIntent, diagnostics, err := reasoning.FromOpenAIResponses(req)
+	if err != nil {
+		return nil, reasoning.AsClientError(err)
+	}
+	convdiag.Add(ctx, diagnostics...)
+	if err := reasoning.ApplyToOpenAIChat(out, reasoningIntent); err != nil {
+		return nil, reasoning.AsClientError(err)
 	}
 	if req.ServiceTier != "" {
 		out.ServiceTier, _ = kitutil.Marshal(req.ServiceTier)

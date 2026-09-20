@@ -31,7 +31,7 @@ func TestTopUpQuotaValidation(t *testing.T) {
 		name        string
 		displayType string
 		amount      int64
-		wantQuota   int64
+		wantQuota   int
 		wantErr     bool
 	}{
 		{
@@ -41,7 +41,7 @@ func TestTopUpQuotaValidation(t *testing.T) {
 			wantQuota:   2_147_000_000,
 		},
 		{
-			name:        "currency amount above the old int32 limit",
+			name:        "currency amount above limit",
 			displayType: operation_setting.QuotaDisplayTypeUSD,
 			amount:      4295,
 			wantQuota:   2_147_500_000,
@@ -49,14 +49,14 @@ func TestTopUpQuotaValidation(t *testing.T) {
 		{
 			name:        "token amount preserves settlement truncation",
 			displayType: operation_setting.QuotaDisplayTypeTokens,
-			amount:      common.MaxChargeQuota,
-			wantQuota:   2_147_000_000,
+			amount:      2_147_500_000,
+			wantQuota:   2_147_500_000,
 		},
 		{
-			name:        "large token amount remains representable",
+			name:        "token amount above legacy int32 range",
 			displayType: operation_setting.QuotaDisplayTypeTokens,
-			amount:      50_000_000_000,
-			wantQuota:   50_000_000_000,
+			amount:      4_294_500_000,
+			wantQuota:   4_294_500_000,
 		},
 	}
 
@@ -69,7 +69,7 @@ func TestTopUpQuotaValidation(t *testing.T) {
 				return
 			}
 			require.NoError(t, err)
-			assert.EqualValues(t, tc.wantQuota, quota)
+			assert.Equal(t, tc.wantQuota, quota)
 		})
 	}
 }
@@ -84,7 +84,7 @@ func TestValidateTopUpQuotaReturnsMaximumAmount(t *testing.T) {
 		operation_setting.GetGeneralSetting().QuotaDisplayType = oldDisplayType
 	})
 
-	maxAmount := decimal.NewFromInt(common.MaxWalletQuota - 1).
+	maxAmount := decimal.NewFromInt(common.MaxWalletQuota).
 		Div(decimal.NewFromFloat(common.QuotaPerUnit)).
 		Floor().IntPart()
 
@@ -94,45 +94,36 @@ func TestValidateTopUpQuotaReturnsMaximumAmount(t *testing.T) {
 	require.EqualError(t, err, fmt.Sprintf("单笔充值数量不能大于 %d", maxAmount))
 }
 
-func TestRequestAmountAcceptsAmountAboveTheOldInt32Limit(t *testing.T) {
+func TestRequestAmountRejectsTopUpThatCannotBeSettled(t *testing.T) {
 	oldQuotaPerUnit := common.QuotaPerUnit
 	oldDisplayType := operation_setting.GetGeneralSetting().QuotaDisplayType
-	oldDB := model.DB
 	common.QuotaPerUnit = 500000
 	operation_setting.GetGeneralSetting().QuotaDisplayType = operation_setting.QuotaDisplayTypeUSD
-	db, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}))
-	model.DB = db
 	t.Cleanup(func() {
 		common.QuotaPerUnit = oldQuotaPerUnit
 		operation_setting.GetGeneralSetting().QuotaDisplayType = oldDisplayType
-		model.DB = oldDB
-		sqlDB, dbErr := db.DB()
-		if dbErr == nil {
-			_ = sqlDB.Close()
-		}
 	})
-	require.NoError(t, db.Create(&model.User{Id: 42, Username: "request-amount-user", Group: "default", Status: common.UserStatusEnabled}).Error)
 
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
-	ctx.Set("id", 42)
+	maxAmount := decimal.NewFromInt(common.MaxWalletQuota).
+		Div(decimal.NewFromFloat(common.QuotaPerUnit)).
+		Floor().IntPart()
 	ctx.Request = httptest.NewRequest(
 		http.MethodPost,
 		"/api/user/amount",
-		strings.NewReader(`{"amount":4295}`),
+		strings.NewReader(fmt.Sprintf(`{"amount":%d}`, maxAmount+1)),
 	)
 	ctx.Request.Header.Set("Content-Type", "application/json")
 
 	RequestAmount(ctx)
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), `"message":"success"`)
+	assert.JSONEq(t, fmt.Sprintf(`{"message":"error","data":"单笔充值数量不能大于 %d"}`, maxAmount), recorder.Body.String())
 }
 
-func TestRequestAmountDoesNotApplyTheOldWalletLimit(t *testing.T) {
+func TestRequestAmountRejectsTopUpThatWouldOverflowWallet(t *testing.T) {
 	oldQuotaPerUnit := common.QuotaPerUnit
 	oldDisplayType := operation_setting.GetGeneralSetting().QuotaDisplayType
 	oldDB := model.DB
@@ -156,7 +147,7 @@ func TestRequestAmountDoesNotApplyTheOldWalletLimit(t *testing.T) {
 	require.NoError(t, model.DB.Create(&model.User{
 		Id:       42,
 		Username: "topup_capacity_user",
-		Quota:    1_000_000,
+		Quota:    common.MaxWalletQuota - 100_000,
 		Status:   common.UserStatusEnabled,
 	}).Error)
 
@@ -167,22 +158,22 @@ func TestRequestAmountDoesNotApplyTheOldWalletLimit(t *testing.T) {
 	ctx.Request = httptest.NewRequest(
 		http.MethodPost,
 		"/api/user/amount",
-		strings.NewReader(`{"amount":4294}`),
+		strings.NewReader(`{"amount":1}`),
 	)
 	ctx.Request.Header.Set("Content-Type", "application/json")
 
 	RequestAmount(ctx)
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.NotContains(t, recorder.Body.String(), "top-up quota limit exceeded")
+	assert.JSONEq(t, `{"message":"error","data":"top-up quota limit exceeded"}`, recorder.Body.String())
 }
 
 func TestValidateCreditedQuotaRejectsOverflow(t *testing.T) {
-	_, err := validateCreditedQuota(decimal.NewFromInt(common.MaxWalletQuota - 1))
+	_, err := validateCreditedQuota(decimal.NewFromInt(int64(common.MaxWalletQuota / 2)))
 	require.NoError(t, err)
 	_, err = validateCreditedQuota(decimal.Zero)
 	require.EqualError(t, err, "充值额度必须大于 0")
-	_, err = validateCreditedQuota(decimal.NewFromInt(common.MaxWalletQuota).Add(decimal.NewFromInt(1)))
+	_, err = validateCreditedQuota(decimal.NewFromInt(common.MaxWalletQuota + 1))
 	require.EqualError(
 		t,
 		err,
@@ -204,6 +195,8 @@ func TestStripeCreditedQuotaIncludesGroupRatio(t *testing.T) {
 	require.NoError(t, err)
 	_, err = validateCreditedQuota(getStripeCreditedQuota(2148, "vip"))
 	require.NoError(t, err)
+	_, err = validateCreditedQuota(getStripeCreditedQuota(int64(common.MaxWalletQuota), "vip"))
+	require.Error(t, err)
 
 	require.NoError(t, common.UpdateTopupGroupRatioByJSONString(`{"free":0}`))
 	assert.True(t, decimal.NewFromInt(500000).Equal(getStripeCreditedQuota(1, "free")))

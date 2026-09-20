@@ -22,6 +22,16 @@ type QueryParams struct {
 	Model string
 	Group string
 	Hours int
+	// AllowedGroups restricts both the per-group results and the model summary;
+	// nil allows every group.
+	AllowedGroups []string
+}
+
+// Summary is the request-weighted aggregate over every bucket in the window.
+type Summary struct {
+	AvgLatencyMs int64   `json:"avg_latency_ms"`
+	SuccessRate  float64 `json:"success_rate"`
+	AvgTps       float64 `json:"avg_tps"`
 }
 
 type BucketPoint struct {
@@ -30,8 +40,6 @@ type BucketPoint struct {
 	AvgLatencyMs int64   `json:"avg_latency_ms"`
 	SuccessRate  float64 `json:"success_rate"`
 	AvgTps       float64 `json:"avg_tps"`
-	RequestCount int64   `json:"request_count"`
-	SuccessCount int64   `json:"success_count"`
 }
 
 type GroupResult struct {
@@ -40,31 +48,38 @@ type GroupResult struct {
 	AvgLatencyMs int64         `json:"avg_latency_ms"`
 	SuccessRate  float64       `json:"success_rate"`
 	AvgTps       float64       `json:"avg_tps"`
-	RequestCount int64         `json:"request_count"`
-	SuccessCount int64         `json:"success_count"`
-	Availability string        `json:"availability"`
 	Series       []BucketPoint `json:"series"`
 }
 
 type QueryResult struct {
 	ModelName    string        `json:"model_name"`
 	SeriesSchema string        `json:"series_schema"`
+	Summary      *Summary      `json:"summary"`
+	Series       []BucketPoint `json:"series"`
+	WindowStart  int64         `json:"window_start"`
+	WindowEnd    int64         `json:"window_end"`
 	Groups       []GroupResult `json:"groups"`
 }
 
+type SuccessRatePoint struct {
+	Ts          int64   `json:"ts"`
+	SuccessRate float64 `json:"success_rate"`
+}
+
 type ModelSummary struct {
-	ModelName          string    `json:"model_name"`
-	AvgLatencyMs       int64     `json:"avg_latency_ms"`
-	SuccessRate        float64   `json:"success_rate"`
-	AvgTps             float64   `json:"avg_tps"`
-	Availability       string    `json:"availability"`
-	RecentSuccessRates []float64 `json:"recent_success_rates,omitempty"`
-	RequestCount       int64     `json:"request_count"`
-	SuccessCount       int64     `json:"success_count"`
+	ModelName           string             `json:"model_name"`
+	AvgLatencyMs        int64              `json:"avg_latency_ms"`
+	SuccessRate         float64            `json:"success_rate"`
+	AvgTps              float64            `json:"avg_tps"`
+	RecentSuccessSeries []SuccessRatePoint `json:"recent_success_series,omitempty"`
+	RequestCount        int64              `json:"-"`
 }
 
 type SummaryAllResult struct {
-	Models []ModelSummary `json:"models"`
+	Summary     *Summary       `json:"summary"`
+	WindowStart int64          `json:"window_start"`
+	WindowEnd   int64          `json:"window_end"`
+	Models      []ModelSummary `json:"models"`
 }
 
 type bucketKey struct {

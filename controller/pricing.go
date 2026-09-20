@@ -1,6 +1,9 @@
 package controller
 
 import (
+	"maps"
+
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -18,21 +21,16 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 
 	filtered := make([]model.Pricing, 0, len(pricing))
 	for _, item := range pricing {
-		visibleGroups := make([]string, 0, len(item.EnableGroup))
-		for _, group := range item.EnableGroup {
-			if group == "all" {
-				visibleGroups = append(visibleGroups, group)
-				continue
-			}
-			if _, ok := usableGroup[group]; ok {
-				visibleGroups = append(visibleGroups, group)
-			}
-		}
-		if len(visibleGroups) == 0 {
+		if common.StringsContains(item.EnableGroup, "all") {
+			filtered = append(filtered, item)
 			continue
 		}
-		item.EnableGroup = visibleGroups
-		filtered = append(filtered, item)
+		for _, group := range item.EnableGroup {
+			if _, ok := usableGroup[group]; ok {
+				filtered = append(filtered, item)
+				break
+			}
+		}
 	}
 	return filtered
 }
@@ -42,9 +40,7 @@ func GetPricing(c *gin.Context) {
 	userId, exists := c.Get("id")
 	usableGroup := map[string]string{}
 	groupRatio := map[string]float64{}
-	for s, f := range ratio_setting.GetGroupRatioCopy() {
-		groupRatio[s] = f
-	}
+	maps.Copy(groupRatio, ratio_setting.GetGroupRatioCopy())
 	var group string
 	if exists {
 		user, err := model.GetUserCache(userId.(int))

@@ -23,15 +23,7 @@ import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
-import {
-  Combobox,
-  ComboboxCollection,
-  ComboboxContent,
-  ComboboxEmpty,
-  ComboboxInput,
-  ComboboxItem,
-  ComboboxList,
-} from '@/components/ui/combobox'
+import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -44,72 +36,15 @@ import {
 } from '../../lib/cc-switch-sources'
 import type { ApiKey } from '../../types'
 
-type ModelOption = {
-  value: string
-  label: string
-}
-
-type ModelComboboxProps = {
-  id?: string
-  options: ModelOption[]
-  value: string
-  onValueChange: (value: string) => void
-  placeholder?: string
-  emptyText?: string
-  disabled?: boolean
-}
-
-function ModelCombobox(props: ModelComboboxProps) {
-  const labelMap = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const option of props.options) map.set(option.value, option.label)
-    return map
-  }, [props.options])
-
-  return (
-    <Combobox
-      items={props.options.map((option) => option.value)}
-      value={props.value || null}
-      inputValue={props.value}
-      onInputValueChange={props.onValueChange}
-      onValueChange={(nextValue) => props.onValueChange(nextValue ?? '')}
-      itemToStringLabel={(item) => labelMap.get(item) ?? item}
-      itemToStringValue={(item) => item}
-    >
-      <ComboboxInput
-        id={props.id}
-        placeholder={props.placeholder}
-        className='w-full'
-        showClear={props.value.length > 0}
-        disabled={props.disabled}
-      />
-      <ComboboxContent>
-        <ComboboxList>
-          <ComboboxCollection>
-            {(item: string) => (
-              <ComboboxItem key={item} value={item}>
-                <span className='truncate'>{labelMap.get(item) ?? item}</span>
-              </ComboboxItem>
-            )}
-          </ComboboxCollection>
-        </ComboboxList>
-        <ComboboxEmpty>{props.emptyText}</ComboboxEmpty>
-      </ComboboxContent>
-    </Combobox>
-  )
-}
-
 function getServerAddress(): string {
   try {
     const raw = localStorage.getItem('status')
     if (raw) {
-      const status = JSON.parse(raw) as { server_address?: unknown }
-      if (typeof status.server_address === 'string' && status.server_address) {
-        return status.server_address
-      }
+      const status = JSON.parse(raw)
+      if (status.server_address) return status.server_address
     }
   } catch {
-    // Fall back to the browser origin when the cached status is unavailable.
+    /* empty */
   }
   return window.location.origin
 }
@@ -147,17 +82,16 @@ export function CCSwitchDialog(props: Props) {
 
   const modelOptions = useMemo(() => {
     if (!canUseModels) return []
-    const items = modelsData ?? []
-    return [...new Set(items.map((model) => model.trim()).filter(Boolean))].map(
-      (model) => ({ value: model, label: model })
-    )
+    return [...new Set((modelsData ?? []).map((model) => model.trim()))]
+      .filter(Boolean)
+      .map((model) => ({ value: model, label: model }))
   }, [canUseModels, modelsData])
 
   useEffect(() => {
     if (!props.open) return
     setModels({})
     setApp('claude')
-    setName('coder')
+    setName(CCSWITCH_SOURCES[0].defaultName)
   }, [props.open])
 
   const currentSource =
@@ -165,11 +99,8 @@ export function CCSwitchDialog(props: Props) {
     CCSWITCH_SOURCES[0]
 
   let modelEmptyText = t('No models found')
-  if (isModelsFetching) {
-    modelEmptyText = t('Loading...')
-  } else if (isModelsError) {
-    modelEmptyText = t('Failed to load')
-  }
+  if (isModelsFetching) modelEmptyText = t('Loading...')
+  if (isModelsError) modelEmptyText = t('Failed to load')
 
   const handleAppChange = (value: string) => {
     const source = CCSWITCH_SOURCES.find((item) => item.appId === value)
@@ -185,7 +116,6 @@ export function CCSwitchDialog(props: Props) {
       toast.warning(t('Please select a primary model'))
       return
     }
-
     const key = props.tokenKey.startsWith('sk-')
       ? props.tokenKey
       : `sk-${props.tokenKey}`
@@ -208,9 +138,7 @@ export function CCSwitchDialog(props: Props) {
       title={t('Import to CC Switch')}
       contentClassName='sm:max-w-md'
       contentHeight='auto'
-      bodyClassName={
-        currentSource.modelFields.length === 1 ? 'space-y-4 pb-52' : 'space-y-4'
-      }
+      bodyClassName='space-y-4'
       footer={
         <>
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>
@@ -264,8 +192,9 @@ export function CCSwitchDialog(props: Props) {
           </p>
         ) : (
           <div className='space-y-2'>
-            <Label>{t('Name')}</Label>
+            <Label htmlFor='cc-switch-name'>{t('Name')}</Label>
             <Input
+              id='cc-switch-name'
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder={currentSource.defaultName}
@@ -275,17 +204,19 @@ export function CCSwitchDialog(props: Props) {
 
         {currentSource.modelFields.map((field) => (
           <div key={field.key} className='space-y-2'>
-            <Label>
+            <Label
+              htmlFor={`cc-switch-${field.key}`}
+              required={field.required}
+            >
               {t(field.labelKey)}
-              {field.required && (
-                <span className='text-destructive ml-0.5'>*</span>
-              )}
             </Label>
-            <ModelCombobox
+            <Combobox
+              id={`cc-switch-${field.key}`}
+              aria-label={t(field.labelKey)}
               options={modelOptions}
-              value={models[field.key] ?? ''}
-              onValueChange={(value) =>
-                setModels((previous) => ({ ...previous, [field.key]: value }))
+              value={models[field.key] || ''}
+              onValueChange={(v) =>
+                setModels((prev) => ({ ...prev, [field.key]: v ?? '' }))
               }
               placeholder={t('Select or enter model name')}
               emptyText={modelEmptyText}

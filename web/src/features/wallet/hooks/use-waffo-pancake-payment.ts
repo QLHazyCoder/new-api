@@ -20,8 +20,9 @@ import i18next from 'i18next'
 import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
 
+import { handleServerError } from '@/lib/handle-server-error'
+
 import { requestWaffoPancakePayment, isApiSuccess } from '../api'
-import { markPaymentFlowStart } from '../lib'
 
 function getCheckoutUrl(data: unknown): string | null {
   if (!data || typeof data !== 'object') {
@@ -57,7 +58,10 @@ function getErrorMessage(message: string | undefined, data: unknown): string {
     return data
   }
 
-  return message || i18next.t('Payment request failed')
+  return (
+    (message && message !== 'success' ? message : undefined) ||
+    i18next.t('Payment request failed')
+  )
 }
 
 /**
@@ -86,17 +90,18 @@ export function useWaffoPancakePayment() {
               toast.error(i18next.t('Invalid payment redirect URL'))
               return false
             }
-            markPaymentFlowStart('topup', 'same_tab')
             toast.success(i18next.t('Redirecting to payment page...'))
             window.location.href = checkoutUrl
             return true
           }
         }
 
-        toast.error(getErrorMessage(response.message, response.data))
+        handleServerError(response, undefined, {
+          title: getErrorMessage(response.message, response.data),
+        })
         return false
-      } catch {
-        toast.error(i18next.t('Payment request failed'))
+      } catch (_error) {
+        handleServerError(_error, i18next.t('Payment request failed'))
         return false
       } finally {
         setProcessing(false)

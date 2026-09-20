@@ -2,6 +2,8 @@ package model
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -20,12 +22,12 @@ const (
 	BatchUpdateTypeCount // if you add a new type, you need to add a new map and a new lock
 )
 
-var batchUpdateStores []map[int]int64
+var batchUpdateStores []map[int]int
 var batchUpdateLocks []sync.Mutex
 
 func init() {
-	for i := 0; i < BatchUpdateTypeCount; i++ {
-		batchUpdateStores = append(batchUpdateStores, make(map[int]int64))
+	for range BatchUpdateTypeCount {
+		batchUpdateStores = append(batchUpdateStores, make(map[int]int))
 		batchUpdateLocks = append(batchUpdateLocks, sync.Mutex{})
 	}
 }
@@ -39,25 +41,31 @@ func InitBatchUpdater() {
 	})
 }
 
-func addNewRecord(type_ int, id int, value int64) {
+func addNewRecord(type_ int, id int, value int) {
 	batchUpdateLocks[type_].Lock()
 	defer batchUpdateLocks[type_].Unlock()
-	if _, ok := batchUpdateStores[type_][id]; !ok {
+	old, ok := batchUpdateStores[type_][id]
+	if !ok {
 		batchUpdateStores[type_][id] = value
-	} else {
-		current := batchUpdateStores[type_][id]
-		if next, err := common.AddWalletQuota(current, value); err == nil {
-			batchUpdateStores[type_][id] = next
+		return
+	}
+
+	sum := old + value
+	if (value > 0 && sum < old) || (value < 0 && sum > old) {
+		common.SysError(fmt.Sprintf("batch update overflow: type=%d id=%d old=%d value=%d", type_, id, old, value))
+		if value > 0 {
+			sum = math.MaxInt
 		} else {
-			common.SysError("batch quota delta exceeds int64 range")
+			sum = math.MinInt
 		}
 	}
+	batchUpdateStores[type_][id] = sum
 }
 
 func batchUpdate() {
 	// check if there's any data to update
 	hasData := false
-	for i := 0; i < BatchUpdateTypeCount; i++ {
+	for i := range BatchUpdateTypeCount {
 		batchUpdateLocks[i].Lock()
 		if len(batchUpdateStores[i]) > 0 {
 			hasData = true
@@ -72,11 +80,11 @@ func batchUpdate() {
 	}
 
 	common.SysLog("batch update started")
-	stores := make([]map[int]int64, BatchUpdateTypeCount)
-	for i := 0; i < BatchUpdateTypeCount; i++ {
+	stores := make([]map[int]int, BatchUpdateTypeCount)
+	for i := range BatchUpdateTypeCount {
 		batchUpdateLocks[i].Lock()
 		stores[i] = batchUpdateStores[i]
-		batchUpdateStores[i] = make(map[int]int64)
+		batchUpdateStores[i] = make(map[int]int)
 		batchUpdateLocks[i].Unlock()
 	}
 
@@ -92,11 +100,7 @@ func batchUpdate() {
 					common.SysLog("failed to batch update token quota: " + err.Error())
 				}
 			case BatchUpdateTypeChannelUsedQuota:
-				if value > int64(^uint(0)>>1) || value < -int64(^uint(0)>>1)-1 {
-					common.SysLog("failed to batch update channel used quota: delta does not fit charge int")
-					continue
-				}
-				updateChannelUsedQuota(key, int(value))
+				updateChannelUsedQuota(key, value)
 			}
 		}
 	}

@@ -178,9 +178,6 @@ type SubscriptionPlan struct {
 	// Downgrade user group on expiry (empty = revert to the group held before purchase)
 	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
 
-	// Applicable group for subscription quota consumption (empty = all groups)
-	ApplicableGroup string `json:"applicable_group" gorm:"type:varchar(64);default:''"`
-
 	// Total quota (amount in quota units, 0 = unlimited)
 	TotalAmount int64 `json:"total_amount" gorm:"type:bigint;not null;default:0"`
 
@@ -276,9 +273,6 @@ type UserSubscription struct {
 	// Downgrade target group on expiry (snapshot from plan; empty = revert to PrevUserGroup)
 	DowngradeGroup string `json:"downgrade_group" gorm:"type:varchar(64);default:''"`
 
-	// Applicable group for subscription quota consumption (snapshot from plan; empty = all groups)
-	ApplicableGroup string `json:"applicable_group" gorm:"type:varchar(64);default:''"`
-
 	// Whether wallet fallback is allowed after this subscription's quota is exhausted (snapshot from plan)
 	AllowWalletOverflow bool `json:"allow_wallet_overflow"`
 
@@ -345,18 +339,6 @@ func NormalizeResetPeriod(period string) string {
 	default:
 		return SubscriptionResetNever
 	}
-}
-
-func NormalizeSubscriptionApplicableGroup(group string) string {
-	return strings.TrimSpace(group)
-}
-
-func SubscriptionAppliesToGroup(applicableGroup string, usingGroup string) bool {
-	applicableGroup = NormalizeSubscriptionApplicableGroup(applicableGroup)
-	if applicableGroup == "" {
-		return true
-	}
-	return applicableGroup == strings.TrimSpace(usingGroup)
 }
 
 func calcNextResetTime(base time.Time, plan *SubscriptionPlan, endUnix int64) int64 {
@@ -565,7 +547,6 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 		UpgradeGroup:        upgradeGroup,
 		PrevUserGroup:       prevGroup,
 		DowngradeGroup:      strings.TrimSpace(plan.DowngradeGroup),
-		ApplicableGroup:     NormalizeSubscriptionApplicableGroup(plan.ApplicableGroup),
 		AllowWalletOverflow: allowWalletOverflow,
 		CreatedAt:           common.GetTimestamp(),
 		UpdatedAt:           common.GetTimestamp(),
@@ -758,7 +739,7 @@ func AdminBindSubscription(userId int, planId int, sourceNote string) (string, e
 	return "", nil
 }
 
-func calcSubscriptionBalanceQuota(priceAmount float64) (int64, error) {
+func calcSubscriptionBalanceQuota(priceAmount float64) (int, error) {
 	if priceAmount <= 0 {
 		return 0, nil
 	}
@@ -768,7 +749,7 @@ func calcSubscriptionBalanceQuota(priceAmount float64) (int64, error) {
 	quota := decimal.NewFromFloat(priceAmount).
 		Mul(decimal.NewFromFloat(common.QuotaPerUnit)).
 		Ceil()
-	return common.WalletQuotaFromDecimal(quota)
+	return common.WalletQuotaFromDecimalStrict(quota)
 }
 
 // PurchaseSubscriptionWithBalance creates a subscription by deducting the user's wallet quota.
@@ -779,7 +760,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 
 	var logPlanTitle string
 	var logMoney float64
-	var chargedQuota int64
+	var chargedQuota int
 	var upgradeGroup string
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		plan, err := getSubscriptionPlanByIdTx(tx, planId)
@@ -809,7 +790,8 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 			return errors.New("余额不足")
 		}
 		if requiredQuota > 0 {
-			if err := updateUserQuotaFieldDeltaTx(tx, userId, "quota", -requiredQuota); err != nil {
+			if err := tx.Model(&User{}).Where("id = ?", userId).
+				Update("quota", gorm.Expr("quota - ?", requiredQuota)).Error; err != nil {
 				return err
 			}
 		}
@@ -895,26 +877,21 @@ func HasActiveUserSubscription(userId int) (bool, error) {
 }
 
 // UserActiveSubscriptionsAllowWalletOverflow returns whether wallet balance may be used
-// after applicable subscription quota is exhausted. A single active applicable
-// subscription that disallows wallet overflow blocks the fallback.
-func UserActiveSubscriptionsAllowWalletOverflow(userId int, usingGroup string) (bool, error) {
+// after the user's subscription quota is exhausted. A single active subscription that
+// disallows wallet overflow (allow_wallet_overflow = false) blocks the fallback.
+func UserActiveSubscriptionsAllowWalletOverflow(userId int) (bool, error) {
 	if userId <= 0 {
 		return false, errors.New("invalid userId")
 	}
 	now := common.GetTimestamp()
-	var subs []UserSubscription
-	if err := DB.
+	var strictCount int64
+	if err := DB.Model(&UserSubscription{}).
 		Where("user_id = ? AND status = ? AND end_time > ? AND allow_wallet_overflow = ?",
 			userId, "active", now, false).
-		Find(&subs).Error; err != nil {
+		Count(&strictCount).Error; err != nil {
 		return false, err
 	}
-	for _, sub := range subs {
-		if SubscriptionAppliesToGroup(sub.ApplicableGroup, usingGroup) {
-			return false, nil
-		}
-	}
-	return true, nil
+	return strictCount == 0, nil
 }
 
 // GetAllUserSubscriptions returns all subscriptions (active and expired) for a user.
@@ -962,7 +939,7 @@ func AdminInvalidateUserSubscription(userSubscriptionId int) (string, error) {
 			return err
 		}
 		userId = sub.UserId
-		if err := tx.Model(&sub).Updates(map[string]interface{}{
+		if err := tx.Model(&sub).Updates(map[string]any{
 			"status":     "cancelled",
 			"end_time":   now,
 			"updated_at": now,
@@ -1159,12 +1136,6 @@ type SubscriptionPreConsumeResult struct {
 	AmountUsedAfter    int64
 }
 
-type SubscriptionPartialPreConsumeResult struct {
-	*SubscriptionPreConsumeResult
-	RequestedAmount int64
-	RemainingAmount int64
-}
-
 // ExpireDueSubscriptions marks expired subscriptions and handles group downgrade.
 func ExpireDueSubscriptions(limit int) (int, error) {
 	if limit <= 0 {
@@ -1193,7 +1164,7 @@ func ExpireDueSubscriptions(limit int) (int, error) {
 		err := DB.Transaction(func(tx *gorm.DB) error {
 			res := tx.Model(&UserSubscription{}).
 				Where("user_id = ? AND status = ? AND end_time > 0 AND end_time <= ?", userId, "active", now).
-				Updates(map[string]interface{}{
+				Updates(map[string]any{
 					"status":     "expired",
 					"updated_at": common.GetTimestamp(),
 				})
@@ -1324,7 +1295,7 @@ func maybeResetUserSubscriptionWithPlanTx(tx *gorm.DB, sub *UserSubscription, pl
 }
 
 // PreConsumeUserSubscription pre-consumes from any active subscription total quota.
-func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64, usingGroup string) (*SubscriptionPreConsumeResult, error) {
+func PreConsumeUserSubscription(requestId string, userId int, modelName string, quotaType int, amount int64) (*SubscriptionPreConsumeResult, error) {
 	if userId <= 0 {
 		return nil, errors.New("invalid userId")
 	}
@@ -1372,9 +1343,6 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 		}
 		for _, candidate := range subs {
 			sub := candidate
-			if !SubscriptionAppliesToGroup(sub.ApplicableGroup, usingGroup) {
-				continue
-			}
 			plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
 			if err != nil {
 				return err
@@ -1422,152 +1390,6 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			returnValue.AmountUsedAfter = sub.AmountUsed
 			return nil
 		}
-		return fmt.Errorf("subscription quota insufficient, need=%d", amount)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return returnValue, nil
-}
-
-// PreConsumeUserSubscriptionPartial pre-consumes as much as possible from the
-// first active applicable subscription. It is intended for subscription_first
-// mixed billing, where wallet balance may cover the remaining amount.
-func PreConsumeUserSubscriptionPartial(requestId string, userId int, modelName string, quotaType int, amount int64, usingGroup string) (*SubscriptionPartialPreConsumeResult, error) {
-	if userId <= 0 {
-		return nil, errors.New("invalid userId")
-	}
-	if strings.TrimSpace(requestId) == "" {
-		return nil, errors.New("requestId is empty")
-	}
-	if amount <= 0 {
-		return nil, errors.New("amount must be > 0")
-	}
-	now := GetDBTimestamp()
-
-	returnValue := &SubscriptionPartialPreConsumeResult{
-		RequestedAmount: amount,
-		RemainingAmount: amount,
-	}
-
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		var existing SubscriptionPreConsumeRecord
-		query := tx.Where("request_id = ?", requestId).Limit(1).Find(&existing)
-		if query.Error != nil {
-			return query.Error
-		}
-		if query.RowsAffected > 0 {
-			if existing.Status == "refunded" {
-				return errors.New("subscription pre-consume already refunded")
-			}
-			var sub UserSubscription
-			if err := tx.Where("id = ?", existing.UserSubscriptionId).First(&sub).Error; err != nil {
-				return err
-			}
-			returnValue.SubscriptionPreConsumeResult = &SubscriptionPreConsumeResult{
-				UserSubscriptionId: sub.Id,
-				PreConsumed:        existing.PreConsumed,
-				AmountTotal:        sub.AmountTotal,
-				AmountUsedBefore:   sub.AmountUsed - existing.PreConsumed,
-				AmountUsedAfter:    sub.AmountUsed,
-			}
-			returnValue.RemainingAmount = amount - existing.PreConsumed
-			if returnValue.RemainingAmount < 0 {
-				returnValue.RemainingAmount = 0
-			}
-			return nil
-		}
-
-		var subs []UserSubscription
-		if err := lockForUpdate(tx).
-			Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
-			Order("end_time asc, id asc").
-			Find(&subs).Error; err != nil {
-			return errors.New("no active subscription")
-		}
-		if len(subs) == 0 {
-			return errors.New("no active subscription")
-		}
-
-		for _, candidate := range subs {
-			sub := candidate
-			if !SubscriptionAppliesToGroup(sub.ApplicableGroup, usingGroup) {
-				continue
-			}
-			plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
-			if err != nil {
-				return err
-			}
-			if err := maybeResetUserSubscriptionWithPlanTx(tx, &sub, plan, now); err != nil {
-				return err
-			}
-
-			usedBefore := sub.AmountUsed
-			preConsume := amount
-			if sub.AmountTotal > 0 {
-				remain := sub.AmountTotal - usedBefore
-				if remain <= 0 {
-					continue
-				}
-				if remain < preConsume {
-					preConsume = remain
-				}
-			}
-			if preConsume <= 0 {
-				continue
-			}
-
-			record := &SubscriptionPreConsumeRecord{
-				RequestId:          requestId,
-				UserId:             userId,
-				UserSubscriptionId: sub.Id,
-				PreConsumed:        preConsume,
-				Status:             "consumed",
-			}
-			if err := tx.Create(record).Error; err != nil {
-				var dup SubscriptionPreConsumeRecord
-				if err2 := tx.Where("request_id = ?", requestId).First(&dup).Error; err2 == nil {
-					if dup.Status == "refunded" {
-						return errors.New("subscription pre-consume already refunded")
-					}
-					var dupSub UserSubscription
-					if err3 := tx.Where("id = ?", dup.UserSubscriptionId).First(&dupSub).Error; err3 != nil {
-						return err3
-					}
-					returnValue.SubscriptionPreConsumeResult = &SubscriptionPreConsumeResult{
-						UserSubscriptionId: dupSub.Id,
-						PreConsumed:        dup.PreConsumed,
-						AmountTotal:        dupSub.AmountTotal,
-						AmountUsedBefore:   dupSub.AmountUsed - dup.PreConsumed,
-						AmountUsedAfter:    dupSub.AmountUsed,
-					}
-					returnValue.RemainingAmount = amount - dup.PreConsumed
-					if returnValue.RemainingAmount < 0 {
-						returnValue.RemainingAmount = 0
-					}
-					return nil
-				}
-				return err
-			}
-
-			sub.AmountUsed += preConsume
-			if err := tx.Save(&sub).Error; err != nil {
-				return err
-			}
-			returnValue.SubscriptionPreConsumeResult = &SubscriptionPreConsumeResult{
-				UserSubscriptionId: sub.Id,
-				PreConsumed:        preConsume,
-				AmountTotal:        sub.AmountTotal,
-				AmountUsedBefore:   usedBefore,
-				AmountUsedAfter:    sub.AmountUsed,
-			}
-			returnValue.RemainingAmount = amount - preConsume
-			if returnValue.RemainingAmount < 0 {
-				returnValue.RemainingAmount = 0
-			}
-			return nil
-		}
-
 		return fmt.Errorf("subscription quota insufficient, need=%d", amount)
 	})
 	if err != nil {
@@ -1699,10 +1521,7 @@ func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error
 			First(&sub).Error; err != nil {
 			return err
 		}
-		newUsed := sub.AmountUsed + delta
-		if newUsed < 0 {
-			newUsed = 0
-		}
+		newUsed := max(sub.AmountUsed+delta, 0)
 		if sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
 			return fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
 		}

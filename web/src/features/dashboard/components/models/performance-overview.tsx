@@ -24,101 +24,28 @@ import { useTranslation } from 'react-i18next'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
-import { usePerformanceMetricsVisibility } from '@/features/performance-metrics/hooks/use-performance-metrics-visibility'
-import {
-  sumPerformanceCounters,
-  weightedSuccessRate,
-} from '@/features/performance-metrics/lib/aggregate'
-import {
-  getPerformanceAvailability,
-  type PerformanceAvailability,
-  performanceAvailabilityDotClassName,
-  performanceAvailabilityTextClassName,
-} from '@/features/performance-metrics/lib/availability'
 import {
   formatLatency,
   formatThroughput,
   formatUptimePct,
+  getSuccessRateDotClass,
+  getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
 import type { PerfModelSummary } from '@/features/performance-metrics/types'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 const PERFORMANCE_WINDOW_HOURS = 24
 const TOP_MODEL_LIMIT = 6
 
-type WeightedMetric = 'avg_latency_ms' | 'avg_tps' | 'success_rate'
-
-type PerformanceSummary = {
-  totalRequests: number
-  avgLatencyMs: number
-  avgTps: number
-  successRate: number
-  availability: PerformanceAvailability
-}
-
-function simpleAverage(
-  rows: PerfModelSummary[],
-  metric: WeightedMetric,
-  isValid: (value: number) => boolean
-): number {
-  let total = 0
-  let count = 0
-
-  for (const row of rows) {
-    const value = Number(row[metric])
-    if (!isValid(value)) continue
-    total += value
-    count++
-  }
-
-  return count > 0 ? total / count : Number.NaN
-}
-
-function buildPerformanceSummary(rows: PerfModelSummary[]): PerformanceSummary {
-  const totals = sumPerformanceCounters(rows)
-  const availableCount = rows.filter(
-    (row) => getPerformanceAvailability(row) === 'available'
-  ).length
-  const unavailableCount = rows.filter(
-    (row) => getPerformanceAvailability(row) === 'unavailable'
-  ).length
-  const availability: PerformanceAvailability =
-    availableCount > 0
-      ? 'available'
-      : unavailableCount > 0
-        ? 'unavailable'
-        : 'unknown'
-
-  return {
-    totalRequests: totals.requestCount,
-    avgLatencyMs: Math.round(
-      simpleAverage(
-        rows,
-        'avg_latency_ms',
-        (value) => Number.isFinite(value) && value > 0
-      )
-    ),
-    avgTps: simpleAverage(
-      rows,
-      'avg_tps',
-      (value) => Number.isFinite(value) && value > 0
-    ),
-    successRate: weightedSuccessRate(rows),
-    availability,
-  }
-}
-
 export function PerformanceOverview() {
   const { t } = useTranslation()
-  const perfMetricsVisible = usePerformanceMetricsVisibility()
   const metricsQuery = useQuery({
-    queryKey: [
-      'perf-metrics-summary',
-      PERFORMANCE_WINDOW_HOURS,
-      perfMetricsVisible,
-    ],
-    queryFn: () => getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS),
-    enabled: perfMetricsVisible,
+    queryKey: ['perf-metrics-summary', PERFORMANCE_WINDOW_HOURS],
+    queryFn: async () =>
+      requireServerSuccess(
+        await getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS)
+      ),
     staleTime: 60 * 1000,
     retry: false,
   })
@@ -127,14 +54,17 @@ export function PerformanceOverview() {
     () => metricsQuery.data?.data.models ?? [],
     [metricsQuery.data]
   )
-  const summary = useMemo(() => buildPerformanceSummary(models), [models])
-  const summaryAvailability = getPerformanceAvailability(summary)
+  const summary = metricsQuery.data?.data.summary
   const topModels = useMemo(() => models.slice(0, TOP_MODEL_LIMIT), [models])
   const loading = metricsQuery.isLoading
   const hasData = models.length > 0
 
-  if (!perfMetricsVisible) {
-    return null
+  if (!loading && !hasData) {
+    return (
+      <div className='text-muted-foreground overflow-hidden rounded-lg border px-4 py-3 text-center text-xs'>
+        {t('No performance data available')}
+      </div>
+    )
   }
 
   return (
@@ -168,22 +98,22 @@ export function PerformanceOverview() {
             <InlineMetric
               icon={HeartPulse}
               label={t('Success rate')}
-              value={formatUptimePct(summary.successRate)}
-              valueClassName={performanceAvailabilityTextClassName(
-                summaryAvailability
+              value={formatUptimePct(summary?.success_rate ?? Number.NaN)}
+              valueClassName={getSuccessRateTextClass(
+                summary?.success_rate ?? Number.NaN
               )}
               tone='success'
             />
             <InlineMetric
               icon={Timer}
               label={t('Average latency')}
-              value={formatLatency(summary.avgLatencyMs)}
+              value={formatLatency(summary?.avg_latency_ms ?? 0)}
               tone='warning'
             />
             <InlineMetric
               icon={Gauge}
               label={t('Throughput')}
-              value={formatThroughput(summary.avgTps)}
+              value={formatThroughput(summary?.avg_tps ?? 0)}
               tone='info'
             />
           </div>
@@ -243,16 +173,14 @@ function ModelBadge(props: { model: PerfModelSummary }) {
       <span
         className={cn(
           'size-1.5 rounded-full',
-          performanceAvailabilityDotClassName(getPerformanceAvailability(model))
+          getSuccessRateDotClass(model.success_rate)
         )}
         aria-hidden='true'
       />
       <span
         className={cn(
           'font-mono text-[11px] font-semibold tabular-nums',
-          performanceAvailabilityTextClassName(
-            getPerformanceAvailability(model)
-          )
+          getSuccessRateTextClass(model.success_rate)
         )}
       >
         {formatUptimePct(model.success_rate)}

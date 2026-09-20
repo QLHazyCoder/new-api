@@ -17,6 +17,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
 import {
   Copy,
   Check,
@@ -32,25 +50,26 @@ import {
   Info,
   LogIn,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
-import { StatusBadge } from '@/components/status-badge'
+import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Label } from '@/components/ui/label'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
+import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
+import { BILLING_PRICING_VARS } from '@/features/pricing/lib/billing-expr'
+import { pluginUsageSchema } from '@/features/pricing/lib/plugin-pricing'
+import { PolicyDecisionRecord } from '@/features/system-settings/request-policies/decision-record'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
-import { api } from '@/lib/api'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+import { AuditDetailFields } from '../../audit/components/audit-detail-fields'
 import type { UsageLog } from '../../data/schema'
 import {
   parseLogOther,
-  getLogStatusDisplay,
   getParamOverrideActionLabel,
   parseAuditLine,
   decodeBillingExprB64,
@@ -62,16 +81,16 @@ import {
   getReasoningEffortVariant,
   renderAuditContent,
 } from '../../lib/format'
+import { buildQuotaAuditOperation } from '../../lib/quota-audit-operation'
 import {
   getLogTypeConfig,
   isPerCallBilling,
   isTimingLogType,
 } from '../../lib/utils'
-import {
-  USAGE_BILLING_PATH,
-  type KeywordFilterLogData,
-  type LogOtherData,
-} from '../../types'
+import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
+import { ResponseModelDetails } from '../model-badge'
+import { PluginAuthorLink } from '../plugin-author-link'
+import { DetailRow, DetailSection } from './log-detail-layout'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
 // to its i18n label key for display in the audit details.
@@ -90,68 +109,6 @@ function timingTextColorClass(
   if (variant === 'success') return 'text-emerald-600'
   if (variant === 'warning') return 'text-amber-600'
   return 'text-rose-600'
-}
-
-function DetailRow(props: {
-  label: React.ReactNode
-  value: React.ReactNode
-  mono?: boolean
-  muted?: boolean
-}) {
-  return (
-    <div className='grid min-w-0 grid-cols-[5.25rem_minmax(0,1fr)] gap-2 text-sm sm:grid-cols-[7rem_minmax(0,1fr)] sm:gap-3'>
-      <span className='text-muted-foreground min-w-0 text-xs'>
-        {props.label}
-      </span>
-      <span
-        className={cn(
-          'max-w-full min-w-0 text-xs break-all sm:wrap-break-word',
-          props.mono && 'font-mono',
-          props.muted && 'text-muted-foreground'
-        )}
-      >
-        {props.value}
-      </span>
-    </div>
-  )
-}
-
-function DetailSection(props: {
-  icon?: React.ReactNode
-  iconTone?: IconBadgeTone
-  label: string
-  variant?: 'default' | 'danger'
-  children: React.ReactNode
-}) {
-  const isDanger = props.variant === 'danger'
-  const iconTone = isDanger ? 'destructive' : props.iconTone
-  return (
-    <div className='min-w-0 space-y-1.5'>
-      <Label
-        className={cn(
-          'flex items-center gap-1.5 text-xs font-semibold',
-          isDanger && 'text-red-500'
-        )}
-      >
-        {props.icon && (
-          <IconBadge tone={iconTone} size='xs'>
-            {props.icon}
-          </IconBadge>
-        )}
-        {props.label}
-      </Label>
-      <div
-        className={cn(
-          'min-w-0 space-y-1 overflow-hidden rounded-md border p-2.5 max-sm:p-2',
-          isDanger
-            ? 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/20'
-            : 'bg-muted/30'
-        )}
-      >
-        {props.children}
-      </div>
-    </div>
-  )
 }
 
 function formatRatio(ratio: number | undefined): string {
@@ -237,13 +194,13 @@ function BillingBreakdown(props: {
       for (const entry of tieredSummary.priceEntries) {
         rows.push({
           label: t(entry.shortLabel),
-          value: `${fmtPrice(entry.price)}/M`,
+          value: `${fmtPrice(entry.price)}/${entry.unit ? t(entry.unit) : 'M'}`,
         })
       }
     } else {
       rows.push({
         label: t('Matched Tier'),
-        value: t('No matching results'),
+        value: other.matched_tier || t('No matching results'),
       })
     }
   } else if (isPerCall) {
@@ -377,18 +334,38 @@ function BillingBreakdown(props: {
     })
   }
 
-  rows.push({
-    label: t('Total Cost'),
-    value: formatLogQuota(log.quota),
-  })
-
-  if (rows.length === 0) return null
+  const usageFacts =
+    other.usage_facts != null &&
+    typeof other.usage_facts === 'object' &&
+    !Array.isArray(other.usage_facts)
+      ? Object.entries(other.usage_facts)
+      : []
 
   return (
     <DetailSection label={t('Billing Details')}>
       {rows.map((row) => (
         <DetailRow key={row.label} label={row.label} value={row.value} mono />
       ))}
+      {usageFacts.length > 0 && (
+        <>
+          <Label className='text-xs font-semibold'>
+            {t('Usage parameters')}
+          </Label>
+          {usageFacts.map(([key, value]) => (
+            <DetailRow
+              key={`usage-fact-${key}`}
+              label={key}
+              value={String(value)}
+              mono
+            />
+          ))}
+        </>
+      )}
+      <DetailRow
+        label={t('Total Cost')}
+        value={formatLogQuota(log.quota)}
+        mono
+      />
     </DetailSection>
   )
 }
@@ -419,6 +396,13 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
     rows.push({
       label: t('Cache Read'),
       value: cacheRead.toLocaleString(),
+    })
+  }
+
+  if (other.image_cache_tokens !== undefined) {
+    rows.push({
+      label: t('Image Cache'),
+      value: other.image_cache_tokens.toLocaleString(),
     })
   }
 
@@ -455,291 +439,37 @@ function TokenBreakdown(props: { log: UsageLog; other: LogOtherData }) {
       {rows.map((row) => (
         <DetailRow key={row.label} label={row.label} value={row.value} mono />
       ))}
-    </DetailSection>
-  )
-}
-
-type SensitiveWordAuditDetail = {
-  id: number
-  request_id: string
-  user_id: number
-  username_snapshot: string
-  token_id: number
-  token_name_snapshot: string
-  group_name: string
-  model_name: string
-  endpoint: string
-  protocol: string
-  prompt_hash: string
-  redacted_preview: string
-  full_prompt: string
-  matched_rule_ids: string
-  matched_rule_names: string
-  matched_words: string
-  matched_snippets: string
-  matched_scope: string
-  whitelist_bypassed: boolean
-  blocked: boolean
-  observe_only: boolean
-  violation_count: number
-  auto_banned: boolean
-  user_status_before: number
-  user_status_after: number
-  quota_before: number
-  quota_after: number
-  rule_version: number
-}
-
-function parseAuditStringList(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.map(String).filter(Boolean)
-  }
-  if (typeof value !== 'string' || value.trim() === '') return []
-  try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : []
-  } catch {
-    return [value]
-  }
-}
-
-function sensitiveWordActionLabel(
-  filter: KeywordFilterLogData | undefined
-): string {
-  if (filter?.whitelist_bypassed) return '白名单放行'
-  if (filter?.observe_only) return '观察记录'
-  if (filter?.blocked) return '已拦截'
-  return '已记录'
-}
-
-function sensitiveUserStatusLabel(value: number | undefined): string {
-  if (value === 1) return '启用'
-  if (value === 2) return '禁用'
-  if (value == null) return '—'
-  return String(value)
-}
-
-function SensitiveWordAuditDetails(props: {
-  log: UsageLog
-  other: LogOtherData | null
-  isAdmin: boolean
-  open: boolean
-  copiedText: string | null
-  onCopy: (text: string) => void
-}) {
-  const isSensitiveWordLog = props.log.type === 8
-  const filter = props.other?.keyword_filter
-  const auditID = filter?.audit_id ?? props.other?.audit_id
-  const [audit, setAudit] = useState<SensitiveWordAuditDetail | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [loadFailed, setLoadFailed] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    if (!props.open || !isSensitiveWordLog || !props.isAdmin || !auditID) {
-      setAudit(null)
-      setIsLoading(false)
-      setLoadFailed(false)
-      return () => {
-        cancelled = true
-      }
-    }
-
-    setIsLoading(true)
-    setLoadFailed(false)
-    void api
-      .get(`/api/sensitive-words/audits/${auditID}`)
-      .then((response) => {
-        if (cancelled) return
-        setAudit(
-          (response.data?.data as SensitiveWordAuditDetail | undefined) ?? null
-        )
-      })
-      .catch(() => {
-        if (!cancelled) setLoadFailed(true)
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [auditID, isSensitiveWordLog, props.isAdmin, props.open])
-
-  if (!isSensitiveWordLog) return null
-
-  const actionFilter: KeywordFilterLogData = {
-    ...filter,
-    whitelist_bypassed: audit?.whitelist_bypassed ?? filter?.whitelist_bypassed,
-    blocked: audit?.blocked ?? filter?.blocked,
-    observe_only: audit?.observe_only ?? filter?.observe_only,
-    auto_banned: audit?.auto_banned ?? filter?.auto_banned,
-    violation_count: audit?.violation_count ?? filter?.violation_count,
-  }
-  const matchedWords = audit
-    ? parseAuditStringList(audit.matched_words)
-    : (filter?.matched_words ?? [])
-  const matchedRules = audit
-    ? parseAuditStringList(audit.matched_rule_ids)
-    : (filter?.rule_ids ?? []).map(String)
-  const matchedRuleNames = audit
-    ? parseAuditStringList(audit.matched_rule_names)
-    : (filter?.rule_names ?? [])
-  const matchedSnippets = audit
-    ? parseAuditStringList(audit.matched_snippets)
-    : []
-  const group = audit?.group_name || filter?.group || props.log.group || '—'
-  const model =
-    audit?.model_name || filter?.model || props.log.model_name || '—'
-  const requestID =
-    audit?.request_id || filter?.request_id || props.log.request_id || '—'
-  const blocked = actionFilter.blocked === true
-  let promptEvidence: React.ReactNode
-  if (isLoading) {
-    promptEvidence = (
-      <p className='text-muted-foreground text-xs'>正在加载审计详情</p>
-    )
-  } else if (loadFailed) {
-    promptEvidence = (
-      <p className='text-muted-foreground text-xs'>
-        审计详情加载失败，当前仍可查看日志摘要。
-      </p>
-    )
-  } else {
-    promptEvidence = (
-      <>
-        <DetailRow
-          label='提示词哈希'
-          value={audit?.prompt_hash || filter?.prompt_hash || '—'}
-          mono
-        />
-        <DetailRow
-          label='脱敏摘要'
-          value={audit?.redacted_preview || '未保存或已过期'}
-        />
-        <div className='bg-background/60 relative mt-2 min-w-0 rounded-md border p-2'>
-          <Button
-            type='button'
-            variant='ghost'
-            size='icon-xs'
-            className='absolute top-1 right-1'
-            onClick={() => props.onCopy(audit?.full_prompt || '')}
-            disabled={!audit?.full_prompt}
-            title='复制完整提示词'
-            aria-label='复制完整提示词'
-          >
-            {props.copiedText === audit?.full_prompt ? (
-              <Check className='size-3 text-green-600' />
-            ) : (
-              <Copy className='size-3' />
-            )}
-          </Button>
-          <p className='mb-1 text-xs font-medium'>完整规范化提示词</p>
-          <pre className='max-h-72 overflow-auto pr-6 text-xs leading-relaxed break-all whitespace-pre-wrap'>
-            {audit?.full_prompt || '未保存或已过期'}
-          </pre>
+      {other.billing_tokens && (
+        <div
+          role='group'
+          aria-label={t('Billable token breakdown')}
+          className='space-y-2'
+        >
+          <Label className='text-xs font-semibold'>
+            {t('Billable token breakdown')}
+          </Label>
+          {BILLING_PRICING_VARS.map((variable) => {
+            const count = other.billing_tokens?.[variable.key]
+            if (count === undefined || !Number.isFinite(count)) return null
+            return (
+              <DetailRow
+                key={variable.key}
+                label={t(variable.shortLabel)}
+                value={count.toLocaleString()}
+                mono
+              />
+            )
+          })}
         </div>
-      </>
-    )
-  }
-
-  return (
-    <>
-      <DetailSection
-        icon={<ShieldCheck className='size-3.5' aria-hidden='true' />}
-        iconTone={blocked ? 'destructive' : 'info'}
-        label='关键词拦截详情'
-        variant={blocked ? 'danger' : 'default'}
-      >
-        <DetailRow
-          label='处理结果'
-          value={sensitiveWordActionLabel(actionFilter)}
-        />
-        <DetailRow
-          label='白名单放行'
-          value={actionFilter.whitelist_bypassed ? '是' : '否'}
-        />
-        <DetailRow
-          label='观察模式'
-          value={actionFilter.observe_only ? '是' : '否'}
-        />
-        <DetailRow label='请求 ID' value={requestID} mono />
-        <DetailRow label='分组' value={group} mono />
-        <DetailRow label='模型' value={model} mono />
-        <DetailRow
-          label='违规次数'
-          value={String(actionFilter.violation_count ?? 0)}
-          mono
-        />
-        <DetailRow
-          label='自动封禁'
-          value={actionFilter.auto_banned ? '是' : '否'}
-        />
-        <DetailRow label='余额处理' value='未修改' />
-        {props.isAdmin && (
-          <>
-            <DetailRow
-              label='协议'
-              value={audit?.protocol || filter?.protocol || '—'}
-              mono
-            />
-            <DetailRow
-              label='端点'
-              value={audit?.endpoint || filter?.endpoint || '—'}
-              mono
-            />
-            <DetailRow
-              label='用户状态'
-              value={`${sensitiveUserStatusLabel(audit?.user_status_before ?? filter?.user_status_before)} -> ${sensitiveUserStatusLabel(audit?.user_status_after ?? filter?.user_status_after)}`}
-            />
-            <DetailRow
-              label='规则范围'
-              value={audit?.matched_scope || filter?.scope || '—'}
-              mono
-            />
-            <DetailRow
-              label='规则版本'
-              value={String(audit?.rule_version ?? filter?.rule_version ?? '—')}
-              mono
-            />
-          </>
-        )}
-      </DetailSection>
-
-      {props.isAdmin && (
-        <DetailSection label='命中规则与词条'>
-          <DetailRow
-            label='规则 ID'
-            value={matchedRules.length > 0 ? matchedRules.join(', ') : '—'}
-            mono
-          />
-          <DetailRow
-            label='规则名称'
-            value={
-              matchedRuleNames.length > 0 ? matchedRuleNames.join('、') : '—'
-            }
-          />
-          <DetailRow
-            label='命中词'
-            value={matchedWords.length > 0 ? matchedWords.join('、') : '—'}
-          />
-          {matchedSnippets.length > 0 && (
-            <DetailRow label='匹配片段' value={matchedSnippets.join('\n')} />
-          )}
-        </DetailSection>
       )}
-
-      {props.isAdmin && (
-        <DetailSection label='提示词证据'>{promptEvidence}</DetailSection>
-      )}
-    </>
+    </DetailSection>
   )
 }
 
 interface DetailsDialogProps {
   log: UsageLog
   isAdmin: boolean
+  isRoot: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -747,14 +477,12 @@ interface DetailsDialogProps {
 export function DetailsDialog(props: DetailsDialogProps) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
-  const details = props.log.content ?? ''
   const other = parseLogOther(props.log.other)
-  const status = getLogStatusDisplay(getLogTypeConfig(props.log.type), other)
+  const typeConfig = getLogTypeConfig(props.log.type)
 
   const isViolation = isViolationFeeLog(other)
   const isRefund = props.log.type === 6
   const isConsume = props.log.type === 2
-  const isSensitiveWordLog = props.log.type === 8
   const isTopup = props.log.type === 1
   const isManage = props.log.type === 3
   const isSubscription = other?.billing_source === 'subscription'
@@ -763,6 +491,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
     !isViolation &&
     other?.billing_mode === 'tiered_expr' &&
     !!other?.expr_b64
+  const pricingData = usePricingData(props.open && isTieredBilling)
+  const billingUsageSchema = pluginUsageSchema(
+    pricingData.models.find(
+      (model) => model.model_name === props.log.model_name
+    ),
+    other?.admin_info?.task_plugin?.key
+  )
   const hasAudioTokens = other?.ws || other?.audio
   const showTiming = isTimingLogType(props.log.type)
   const showAdminIp =
@@ -820,9 +555,17 @@ export function DetailsDialog(props: DetailsDialogProps) {
     return String(adminInfo.auth_method)
   })()
 
-  // Localized operation text rendered from the language-independent op
-  // descriptor (shared by audit type=3 and login type=7).
+  // Top-up, audit, and login logs share the language-independent descriptor.
+  const quotaOperation = isTopup
+    ? buildQuotaAuditOperation(
+        other?.op?.action ?? '',
+        other?.op?.params ?? {},
+        true,
+        t
+      )
+    : null
   const operationText = renderAuditContent(other, t)
+  const details = (isTopup ? operationText : null) ?? props.log.content ?? ''
   const auditRoute = isManage && props.isAdmin ? other?.audit_info : undefined
   // Channel update records which fields changed (stable field tokens); render
   // them with their localized labels for admins.
@@ -885,8 +628,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
         <>
           {t('Log Details')}
           <StatusBadge
-            label={t(status.label)}
-            variant={status.variant}
+            label={t(typeConfig.label)}
+            variant={typeConfig.color as StatusBadgeProps['variant']}
             size='sm'
             copyable={false}
           />
@@ -895,10 +638,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
       description={t('View the complete details for this log entry')}
       contentClassName={cn(
         'min-w-0 overflow-hidden',
-        'max-sm:max-h-[calc(100dvh-1.5rem)] max-sm:w-[calc(100vw-1.5rem)] max-sm:max-w-[calc(100vw-1.5rem)] max-sm:p-4',
-        isTieredBilling || isSensitiveWordLog
-          ? 'sm:max-w-4xl lg:max-w-5xl'
-          : 'sm:max-w-lg'
+        'max-sm:max-h-(--dialog-available-height) max-sm:w-[calc(100vw-1.5rem)] max-sm:max-w-[calc(100vw-1.5rem)] max-sm:p-4',
+        isTieredBilling ? 'sm:max-w-4xl lg:max-w-5xl' : 'sm:max-w-lg'
       )}
       headerClassName='max-sm:gap-1'
       titleClassName='flex items-center gap-2 text-base'
@@ -1008,15 +749,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
           )}
         </div>
 
-        <SensitiveWordAuditDetails
-          log={props.log}
-          other={other}
-          isAdmin={props.isAdmin}
-          open={props.open}
-          copiedText={copiedText}
-          onCopy={copyToClipboard}
-        />
-
         {/* Request conversion (admin only, not for refund) */}
         {showConversion && (
           <DetailSection label={t('Request Conversion')}>
@@ -1058,6 +790,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
         )}
 
         {/* Quota saturation marker (admin only) */}
+        {props.isAdmin && adminInfo?.request_policy?.length ? (
+          <DetailSection
+            label={t('Request policy decisions')}
+            icon={<Route className='size-4' />}
+          >
+            <PolicyDecisionRecord events={adminInfo.request_policy} />
+          </DetailSection>
+        ) : null}
         {props.isAdmin && other?.admin_info?.quota_saturation && (
           <DetailSection
             icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
@@ -1093,13 +833,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
         )}
 
         {/* Reject reason (admin only) */}
-        {props.isAdmin && other?.reject_reason && (
+        {props.isAdmin && adminInfo?.reject_reason && (
           <DetailSection
             icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
             label={t('Reject Reason')}
             variant='danger'
           >
-            <p className='text-xs wrap-break-word'>{other.reject_reason}</p>
+            <p className='text-xs wrap-break-word'>{adminInfo.reject_reason}</p>
           </DetailSection>
         )}
 
@@ -1143,6 +883,68 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
+        {props.isAdmin && adminInfo?.task_plugin ? (
+          <DetailSection label={t('Task Plugin')}>
+            <DetailRow
+              label={t('Plugin key')}
+              value={adminInfo.task_plugin.key}
+              mono
+            />
+            <DetailRow label={t('Name')} value={adminInfo.task_plugin.name} />
+            {adminInfo.task_plugin.version ? (
+              <DetailRow
+                label={t('Version')}
+                value={adminInfo.task_plugin.version}
+                mono
+              />
+            ) : null}
+            {adminInfo.task_plugin.author ? (
+              <DetailRow
+                label={t('Plugin author')}
+                value={
+                  <PluginAuthorLink
+                    author={adminInfo.task_plugin.author}
+                    showUrl
+                  />
+                }
+              />
+            ) : null}
+          </DetailSection>
+        ) : null}
+
+        {props.isRoot && other?.root_info ? (
+          <DetailSection label={t('Root Diagnostics')}>
+            {other.root_info.task_plugin ? (
+              <>
+                <DetailRow
+                  label={t('API Version')}
+                  value={String(other.root_info.task_plugin.api_version)}
+                  mono
+                />
+                <DetailRow
+                  label={t('Plugin Generation')}
+                  value={String(other.root_info.task_plugin.generation)}
+                  mono
+                />
+              </>
+            ) : null}
+            {other.root_info.upstream_task_id ? (
+              <DetailRow
+                label={t('Upstream Task ID')}
+                value={other.root_info.upstream_task_id}
+                mono
+              />
+            ) : null}
+            {other.root_info.node_name ? (
+              <DetailRow
+                label={t('Node Name')}
+                value={other.root_info.node_name}
+                mono
+              />
+            ) : null}
+          </DetailSection>
+        ) : null}
+
         {/* Top-up audit info (type=1, admin only) */}
         {showTopupAuditSection && (
           <DetailSection
@@ -1168,6 +970,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 </span>
               </div>
             )}
+          </DetailSection>
+        )}
+
+        {quotaOperation && (
+          <DetailSection label={t('Quota adjustment details')}>
+            <AuditDetailFields fields={quotaOperation.fields} />
           </DetailSection>
         )}
 
@@ -1320,21 +1128,28 @@ export function DetailsDialog(props: DetailsDialogProps) {
           />
         )}
 
-        {/* Model mapping */}
-        {other?.is_model_mapped && other?.upstream_model_name && (
-          <DetailSection label={t('Model Mapping')}>
-            <DetailRow
-              label={t('Request Model')}
-              value={props.log.model_name}
-              mono
-            />
-            <DetailRow
-              label={t('Actual Model')}
-              value={other.upstream_model_name}
-              mono
-            />
+        {other?.response_model && (
+          <DetailSection label={t('Response Model')}>
+            <ResponseModelDetails observation={other.response_model} />
           </DetailSection>
         )}
+        {/* Model mapping for logs without response observations */}
+        {!other?.response_model &&
+          other?.is_model_mapped &&
+          other?.upstream_model_name && (
+            <DetailSection label={t('Model Mapping')}>
+              <DetailRow
+                label={t('Request Model')}
+                value={props.log.model_name}
+                mono
+              />
+              <DetailRow
+                label={t('Actual Model')}
+                value={other.upstream_model_name}
+                mono
+              />
+            </DetailSection>
+          )}
 
         {/* Token breakdown (for consume/error types with token data) */}
         {isDisplayableType(props.log.type) && other && (
@@ -1353,12 +1168,22 @@ export function DetailsDialog(props: DetailsDialogProps) {
         {/* Tiered pricing breakdown (when billing_mode is tiered_expr) */}
         {isTieredBilling && other?.expr_b64 && (
           <DetailSection label={t('Dynamic Pricing')}>
+            {other.image_count !== undefined && (
+              <DetailRow
+                label={t('Billable image count')}
+                value={other.image_count}
+              />
+            )}
             <DynamicPricingBreakdown
               compact
               billingExpr={decodeBillingExprB64(other.expr_b64)}
               matchedTierLabel={other.matched_tier}
+              matchedBillingUnit={other.billing_unit}
+              matchedFixedPrice={other.fixed_price}
               requestRules={other.request_rules}
               hideCacheColumns={!hasAnyCacheTokens(other)}
+              usageSchema={billingUsageSchema}
+              usageFacts={other.usage_facts}
             />
           </DetailSection>
         )}
