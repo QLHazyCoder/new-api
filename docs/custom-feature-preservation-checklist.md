@@ -39,6 +39,10 @@
   前者保护图片历史清理的查询边界，后两者把图片能力配置外置并统一 GPT 图片模型能力。
 - 清单上次更新后新增的独立自研功能提交为 `b2e905185`（CC Switch 多来源导入）、
   `afab95b53`（钱包额度 int64 迁移）和 `66759ee72`（分层定价表达式编辑器保留）。
+- rc.39 合并前新增的独立自研修复为 `5e5c79c1b`（CC Switch 名称与作用域整理）和
+  `f0a62f2c6`（按所选 API Key 查询模型）；二者共同归入 P-34。当前合并目标固定为
+  上游正式标签 `v1.0.0-rc.39@9978ee1e25a647bfe004e96c8719a2cb62c24732`，具体决策
+  与验证证据记录在 `upstream-merge-v1.0.0-rc.39.md`。
 - `955243896` 与 `d1529b6eb`、`22eeed171` 与 `4c9c5209f` 分别是已回滚的功能/回滚对，
   当前主分支不保留其注册提示或自动封禁后重试文案契约；`78ae12181`、`3dda71a37` 等
   仅记录该回滚过程的文档提交也不新增保护项。
@@ -578,6 +582,24 @@
 - 验证入口：`web/src/features/system-settings/models/__tests__/tiered-pricing-editor.test.tsx`。
 - 来源提交：`66759ee72`。
 
+### P-34 CC Switch 所选密钥授权模型与可访问下拉框
+
+- 必须保留：CC Switch 的模型列表必须由当前所选 API Key 授权的 `/v1/models` 决定，
+  不得改用登录用户的全局 `/api/user/models`。请求显式携带所选 Key 的 Bearer token，
+  并使用 `skipSessionAuthorization` 防止共享客户端把 session JWT 覆盖到该请求上。
+- 必须保留：切换 Key、刷新中或请求失败时隐藏旧模型、禁用模型选择及导入；不得将已
+  缓存但不再授权的模型用于深链导入。
+- 必须保留：模型 Combobox 采用可脱离 Dialog 裁剪的 Portal 结构，支持过滤、键盘选择、
+  Escape 关闭及异步模型到达；名称输入不应意外打开模型下拉框。上游具备等价或更完整
+  UI 行为时优先采用上游组件布局和测试，保留本项的模型数据提供者与来源注册表边界。
+- 当前位置：`web/src/features/keys/api.ts`、
+  `web/src/features/keys/lib/cc-switch-sources.ts`、
+  `web/src/features/keys/components/dialogs/cc-switch-dialog.tsx`、
+  `web/src/features/keys/components/dialogs/__tests__/cc-switch-dialog.test.tsx`。
+- 验证入口：所选 Key 的 `/v1/models` 授权、加载/失败隐藏、Portal、键盘、异步更新及
+  七类来源的深链构造测试。
+- 来源提交：`5e5c79c1b`、`f0a62f2c6`。
+
 ## 5. 提交映射完整性
 
 以下映射用于机械核对。未来合并前，应从历史基线列出本地非合并提交并与本节比较；
@@ -619,6 +641,7 @@
 | P-31 | `b2e905185` |
 | P-32 | `afab95b53` |
 | P-33 | `66759ee72` |
+| P-34 | `5e5c79c1`, `f0a62f2c` |
 
 ## 6. 本次及以后维护记录模板
 
