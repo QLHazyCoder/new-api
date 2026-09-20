@@ -193,9 +193,10 @@ function RulePowerIcon(props: { enabled: boolean; isLoading: boolean }) {
   return <Power />
 }
 
-export function SensitiveWordsSection({ defaultValues }: Props) {
-  const { t } = useTranslation()
-  const [config, setConfig] = useState<SensitiveWordConfig>({
+function createDefaultSensitiveWordConfig(
+  defaultValues: Props['defaultValues']
+): SensitiveWordConfig {
+  return {
     enabled: defaultValues.CheckSensitiveEnabled,
     check_prompt: defaultValues.CheckSensitiveOnPromptEnabled,
     mode: 'block',
@@ -205,7 +206,17 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
     full_prompt_retention_days: 180,
     max_prompt_runes: 65536,
     rule_version: 1,
-  })
+  }
+}
+
+export function SensitiveWordsSection({ defaultValues }: Props) {
+  const { t } = useTranslation()
+  const defaultConfigRef = useRef<SensitiveWordConfig>(
+    createDefaultSensitiveWordConfig(defaultValues)
+  )
+  const [config, setConfig] = useState<SensitiveWordConfig>(
+    () => defaultConfigRef.current
+  )
   const [rules, setRules] = useState<RuleSummary[]>([])
   const [groups, setGroups] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -249,7 +260,7 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
       if (hasConfig) {
         const mode = nextConfig.mode as SensitiveWordConfig['mode']
         const mergedConfig: SensitiveWordConfig = {
-          ...config,
+          ...defaultConfigRef.current,
           ...nextConfig,
           mode,
           block_message:
@@ -293,11 +304,12 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
       const computedStyle = window.getComputedStyle(textarea)
       const parsedLineHeight = Number.parseFloat(computedStyle.lineHeight)
       const fontSize = Number.parseFloat(computedStyle.fontSize)
-      const lineHeight = Number.isFinite(parsedLineHeight)
-        ? parsedLineHeight
-        : Number.isFinite(fontSize)
-          ? fontSize * 1.5
-          : 20
+      let lineHeight = 20
+      if (Number.isFinite(parsedLineHeight)) {
+        lineHeight = parsedLineHeight
+      } else if (Number.isFinite(fontSize)) {
+        lineHeight = fontSize * 1.5
+      }
 
       const lineNumber = textarea.value.slice(0, start).split('\n').length - 1
       const lineTop = lineNumber * lineHeight
