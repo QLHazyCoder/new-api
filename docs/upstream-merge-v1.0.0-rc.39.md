@@ -65,6 +65,10 @@
 `trust_quota_usd=0`、`pre_consume_multiplier=1`。已有 task/video 模型先做价格等价
 映射，不自动重写生产价格。
 
+分层表达式的最终预扣估算遵循 rc.39：预扣只使用已知输入量，未知 completion 不做本地
+8192 token 猜测；最终结算仍使用完整原始表达式和实际 usage。这样本地不会与上游维护两套
+预扣算法，同时保留表达式、分组价格和结算精度语义。
+
 首次候选实例的兼容配置（只记录，不在本轮写入生产）为：
 
 | 配置 | 值 | 目的 |
@@ -97,7 +101,9 @@
 | 安全中心 | A/B | 采用上游 Security、2FA、Passkey、访问令牌审计和 Telegram OAuth；只恢复本地确有契约的窄接口。 |
 | Gemini/GPT-image-2 能力 | C | rc.39 没有等价的 Gemini 原生图片/Imagen 与 GPT-image-2 请求校验，保留本地 capability/validation 实现。 |
 | 注册分组/充值/用户模型 | B | 采用上游页面和接口结构，恢复注册分组策略、充值完成/邀请账本、管理员价格快照及 endpoint metadata。 |
-| 性能指标 | B | 采用上游指标主体，保留图片上游 400 排除、本地/映射 400 以及 5xx/429 失败归类契约。 |
+| 性能指标 | B | 采用上游指标主体和响应隐私字段；控制器仅注入当前用户可见分组，保留图片上游 400 排除、本地/映射 400 以及 5xx/429 失败归类契约。 |
+| 认证扩展表兼容 | B | 2FA/Passkey 表尚未完成 expand migration 时按不可用能力处理，旧版/备用库仍可完成密码或 OAuth 登录。 |
+| 额度写入边界 | B | token JSON 同时接受 number/decimal string；上下文额度统一按 int64 读取，禁止退回 JS 安全整数或 Go int。 |
 
 ## 6. 数据库与发布门禁
 
@@ -120,6 +126,8 @@
 - 删除本地 GPT 图片质量/尺寸动态价格回退，使用上游统一工具价格实现。
 - 恢复 `pkg/imagecapability` 外置配置初始化、master 邀请计数同步，以及 Playground 执行器
   注册；这些是本地运行时契约，rc.39 没有等价替代。
+- 保留价格/指标/认证的窄适配：价格组列表只返回用户可见分组，性能指标查询按角色过滤，
+  认证投影在 2FA/Passkey expand migration 前使用零能力列；这些不是第二套主流程。
 - 未删除公开 REST 路径、钱包历史字段、Playground 历史数据表或敏感词审计数据；本轮没有
   数据库写入、删除或生产配置变更。
 
@@ -130,9 +138,9 @@
 | 基线冻结 | 完成 | 本文第 1 节 |
 | P-34 / 审计文档 | 完成 | `87bc5a7c4`；本文件和保护清单已更新 |
 | 祖先合并 | 完成 | `fd74c42d9`；固定标签一次性合并，当前无未解决冲突标记 |
-| 语义收敛 | 基本完成 | 后端、CC Switch、Task Plugin、Playground、钱包、敏感词、安全、定价已按本节决策收敛；`main.go` 运行时 wiring 已恢复 |
+| 语义收敛 | 完成 | 后端、CC Switch、Task Plugin、Playground、钱包、敏感词、安全、定价已按本节决策收敛；`main.go` 运行时 wiring 已恢复；上游更优的旧任务适配器、简单 RequestChecks、GPT 动态加价和 completion 预扣猜测均未保留 |
 | 数据库克隆验证 | 未完成/阻断 | 尚未执行生产 MySQL 克隆与旧版 `f0a62f2c` 兼容矩阵；仅完成代码级 SQLite migration/schema、钱包和任务测试 |
-| 本地 Go 验证 | 部分完成 | `go build ./...`、RelayKit 独立 build/test、非 controller short tests 通过；完整 controller suite 在环境测试中挂起，未宣称全绿 |
+| 本地 Go 验证 | 完成 | `go test ./...`、`go build ./...`、`go test ./controller -short`、model/service/perf/relay 专项及 RelayKit `GOWORK=off go test ./...` 全部通过；最后一次修复提交 `daf01437e` |
 | 本地 Web 验证 | 部分完成 | typecheck、lint（仅 warning）、format check、build 通过；CC Switch/敏感词专项 12/12 通过；全量测试 2074 通过、5 个 timeout，另有 8 个内置 `node:test`/`bun:test` runner 不兼容套件 |
 | CI 与主线交付 | 未执行 | 未 push、未构建候选镜像、未合入 `main`；待数据库和测试阻断项解除 |
 | 生产发布 | 未授权 | 需单独执行蓝绿流程 |
@@ -145,12 +153,11 @@
 3. 前端全量测试存在 runner 无法 bundle 内置 `node:test`/`bun:test` 的基础设施问题，以及
    5 个实际超时（models metadata、channel configuration 三项、visual billing editor）；
    需要单独修复或隔离后才能宣称全量 Web 门禁通过。
-4. Go 完整 `controller` 测试在当前环境挂起；专项 controller/model/service 测试和构建已通过，
-   但这不等价于全量通过。
+4. 尚未在生产 MySQL/Redis 克隆库执行候选版本迁移并用旧版 `f0a62f2c` 回读；代码级 SQLite
+   migration/schema 和全量 Go 测试通过，不替代真实数据库兼容证据。
 
 以上阻断项只影响交付门禁，不改变已经完成的代码合并；未经用户另行授权，不修改生产容器、
 数据库、Caddy 或流量。
-+
 
 ## 10. 135 个冲突路径的机械核对清单
 
@@ -166,8 +173,8 @@
 | controller/misc.go | A | rc.39 等价/更好实现，采用上游原文件 |
 | controller/model_sync.go | A | rc.39 等价/更好实现，采用上游原文件 |
 | controller/oauth.go | B | 上游主体 + 本地窄适配 |
-| controller/perf_metrics.go | A | rc.39 等价/更好实现，采用上游原文件 |
-| controller/pricing.go | A | rc.39 等价/更好实现，采用上游原文件 |
+| controller/perf_metrics.go | B | 上游查询主体 + 当前用户可见分组窄适配 |
+| controller/pricing.go | B | 上游价格主体 + 返回 payload 的可见分组裁剪 |
 | controller/redemption.go | B | 上游主体 + 本地窄适配 |
 | controller/relay.go | B/C | 上游主体 + 本地运行时/业务契约 |
 | controller/token.go | B | 上游主体 + 本地窄适配 |
@@ -293,7 +300,6 @@
 | web/src/i18n/locales/zh-TW.json | B | 上游主体 + 本地窄适配 |
 | web/src/i18n/locales/zh.json | B | 上游主体 + 本地窄适配 |
 | web/src/routes/rankings/index.tsx | B | 上游主体 + 本地窄适配 |
-+
 
 ## 11. 本地 177 个提交映射
 
