@@ -141,7 +141,7 @@
 | 语义收敛 | 完成 | 后端、CC Switch、Task Plugin、Playground、钱包、敏感词、安全、定价已按本节决策收敛；`main.go` 运行时 wiring 已恢复；上游更优的旧任务适配器、简单 RequestChecks、GPT 动态加价和 completion 预扣猜测均未保留 |
 | 数据库克隆验证 | 未完成/阻断 | 尚未执行生产 MySQL 克隆与旧版 `f0a62f2c` 兼容矩阵；仅完成代码级 SQLite migration/schema、钱包和任务测试 |
 | 本地 Go 验证 | 完成 | `go test ./...`、`go build ./...`、`go test ./controller -short`、model/service/perf/relay 专项及 RelayKit `GOWORK=off go test ./...` 全部通过；最后一次修复提交 `daf01437e` |
-| 本地 Web 验证 | 部分完成 | typecheck、lint（仅 warning）、format check、build 通过；CC Switch/敏感词专项 12/12 通过；全量测试 2074 通过、5 个 timeout，另有 8 个内置 `node:test`/`bun:test` runner 不兼容套件 |
+| 本地 Web 验证 | 部分完成 | typecheck、lint（仅 warning）、format check、build 通过；CC Switch/敏感词专项 3 个文件、20/20 测试通过；全量测试 2074 通过、5 个 timeout，另有 8 个内置 `node:test`/`bun:test` runner 不兼容套件 |
 | CI 与主线交付 | 未执行 | 未 push、未构建候选镜像、未合入 `main`；待数据库和测试阻断项解除 |
 | 生产发布 | 未授权 | 需单独执行蓝绿流程 |
 
