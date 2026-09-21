@@ -250,6 +250,45 @@ func TestTaskListsOmitPersistedSnapshot(t *testing.T) {
 	assert.JSONEq(t, string(task.Data), string(stored.Data), "single-task lookups keep the snapshot")
 }
 
+func TestGetUserTaskProjectsUpstreamModelByRole(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	task.Properties = model.Properties{
+		Input:             "user-visible input",
+		OriginModelName:   "requested-model",
+		UpstreamModelName: "upstream-model",
+	}
+	require.NoError(t, model.DB.Save(task).Error)
+
+	for _, tc := range []struct {
+		name    string
+		role    int
+		visible bool
+	}{
+		{name: "common user", role: common.RoleCommonUser},
+		{name: "admin", role: common.RoleAdminUser, visible: true},
+		{name: "root", role: common.RoleRootUser, visible: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodGet, "/api/task/self?p=1&page_size=10", nil)
+			context.Set("id", task.UserId)
+			context.Set("role", tc.role)
+
+			GetUserTask(context)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			if tc.visible {
+				assert.Contains(t, recorder.Body.String(), "upstream-model")
+			} else {
+				assert.NotContains(t, recorder.Body.String(), "upstream_model_name")
+				assert.NotContains(t, recorder.Body.String(), "upstream-model")
+				assert.Contains(t, recorder.Body.String(), "requested-model")
+			}
+		})
+	}
+}
+
 func TestTaskArtifactAccessRequiresActiveOwner(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	task.Action = constant.TaskActionTextToVideo

@@ -14,6 +14,11 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	task := &model.Task{
 		TaskID:   "task_public",
 		Platform: "document-parser",
+		Properties: model.Properties{
+			Input:             "user-visible input",
+			OriginModelName:   "requested-model",
+			UpstreamModelName: "upstream-model",
+		},
 		PrivateData: model.TaskPrivateData{
 			Key:            "channel-secret-canary",
 			UpstreamTaskID: "upstream-private",
@@ -39,6 +44,11 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	userView := tasksToDto([]*model.Task{task}, false, common.RoleCommonUser)[0]
 	assert.Nil(t, userView.AdminInfo)
 	assert.Nil(t, userView.RootInfo)
+	userProperties, ok := userView.Properties.(model.Properties)
+	require.True(t, ok)
+	assert.Equal(t, "user-visible input", userProperties.Input)
+	assert.Equal(t, "requested-model", userProperties.OriginModelName)
+	assert.Empty(t, userProperties.UpstreamModelName)
 
 	adminView := tasksToDto([]*model.Task{task}, false, common.RoleAdminUser)[0]
 	require.NotNil(t, adminView.AdminInfo)
@@ -52,6 +62,9 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	assert.Equal(t, "request-public", adminView.AdminInfo.RequestID)
 	assert.Equal(t, "/v1/documents", adminView.AdminInfo.RequestPath)
 	assert.Nil(t, adminView.RootInfo)
+	adminProperties, ok := adminView.Properties.(model.Properties)
+	require.True(t, ok)
+	assert.Equal(t, "upstream-model", adminProperties.UpstreamModelName)
 
 	rootView := tasksToDto([]*model.Task{task}, false, common.RoleRootUser)[0]
 	require.NotNil(t, rootView.AdminInfo)
@@ -66,11 +79,16 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(adminJSON), "channel-secret-canary")
 	assert.NotContains(t, string(adminJSON), "upstream-private")
+	assert.Contains(t, string(adminJSON), "upstream-model")
 
 	rootJSON, err := common.Marshal(rootView)
 	require.NoError(t, err)
 	assert.NotContains(t, string(rootJSON), "channel-secret-canary")
 	assert.Contains(t, string(rootJSON), "upstream-private")
+
+	userJSON, err := common.Marshal(userView)
+	require.NoError(t, err)
+	assert.NotContains(t, string(userJSON), "upstream-model")
 }
 
 func TestTaskLogDTODoesNotInventHistoricalPluginProvenance(t *testing.T) {

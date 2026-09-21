@@ -102,6 +102,22 @@ func TestTaskModel2DtoNormalizesLegacyAction(t *testing.T) {
 	assert.Equal(t, "firstTailGenerate", task.Action)
 }
 
+func TestTaskModel2DtoKeepsUpstreamModelForNativeTaskResponses(t *testing.T) {
+	task := &model.Task{Properties: model.Properties{
+		Input:             "native input",
+		OriginModelName:   "requested-model",
+		UpstreamModelName: "upstream-model",
+	}}
+
+	dtoTask := TaskModel2Dto(task)
+	properties, ok := dtoTask.Properties.(model.Properties)
+
+	require.True(t, ok)
+	assert.Equal(t, "native input", properties.Input)
+	assert.Equal(t, "requested-model", properties.OriginModelName)
+	assert.Equal(t, "upstream-model", properties.UpstreamModelName)
+}
+
 const mappingOrderSubmitPlugin = `
 export const meta = {apiVersion:1,key:"maporder",name:"Map Order",version:"1.0.0",author:{name:"Test"},models:["declared-model"],fetchMode:"per_task"};
 export function buildSubmitRequest(ctx) {

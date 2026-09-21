@@ -138,43 +138,56 @@ export interface KeywordFilterLogData {
   rule_version?: number
 }
 
+export interface ResponseModelLogInfo {
+  requested_model: string
+  upstream_model: string
+  returned_model: string
+}
+
+export interface LogOtherAdminInfo {
+  request_policy?: PolicyEvent[]
+  is_multi_key?: boolean
+  multi_key_index?: number
+  use_channel?: number[]
+  local_count_tokens?: boolean
+  usage_billing_path?: UsageBillingPath | string
+  channel_affinity?: ChannelAffinityInfo
+  // Top-up audit fields (type=1, admin only)
+  payment_method?: string
+  callback_payment_method?: string
+  caller_ip?: string
+  server_ip?: string
+  version?: string
+  node_name?: string
+  // Operator identity for audit logs (type=3, admin only)
+  admin_username?: string
+  admin_id?: number | string
+  admin_role?: number
+  auth_method?: 'session' | 'access_token' | string
+  // Quota saturation marker: set when a quota conversion clamped at the
+  // supported single-request bound (overflow/underflow) or hit a NaN fallback while computing
+  // this request's charge. Admin-only (nested under admin_info).
+  quota_saturation?: {
+    op: string
+    kind: 'overflow' | 'underflow' | 'nan'
+    original: number
+    clamped: number
+  }
+  // Reject / intercept reason (admin only)
+  reject_reason?: string
+  task_plugin?: TaskPluginInfo
+  is_model_mapped?: boolean
+  upstream_model_name?: string
+  // Diagnostic only. Whether the names disagree is derived in the UI via
+  // isResponseModelMismatch so rows follow the current comparison rule.
+  response_model?: ResponseModelLogInfo
+}
+
 export interface LogOtherData {
   action?: string
   audit_id?: number
   keyword_filter?: KeywordFilterLogData
-  admin_info?: {
-    request_policy?: PolicyEvent[]
-    is_multi_key?: boolean
-    multi_key_index?: number
-    use_channel?: number[]
-    local_count_tokens?: boolean
-    usage_billing_path?: UsageBillingPath | string
-    channel_affinity?: ChannelAffinityInfo
-    // Top-up audit fields (type=1, admin only)
-    payment_method?: string
-    callback_payment_method?: string
-    caller_ip?: string
-    server_ip?: string
-    version?: string
-    node_name?: string
-    // Operator identity for audit logs (type=3, admin only)
-    admin_username?: string
-    admin_id?: number | string
-    admin_role?: number
-    auth_method?: 'session' | 'access_token' | string
-    // Quota saturation marker: set when a quota conversion clamped at the
-    // supported single-request bound (overflow/underflow) or hit a NaN fallback while computing
-    // this request's charge. Admin-only (nested under admin_info).
-    quota_saturation?: {
-      op: string
-      kind: 'overflow' | 'underflow' | 'nan'
-      original: number
-      clamped: number
-    }
-    // Reject / intercept reason (admin only)
-    reject_reason?: string
-    task_plugin?: TaskPluginInfo
-  }
+  admin_info?: LogOtherAdminInfo
   root_info?: {
     task_plugin?: TaskPluginRuntimeInfo
     upstream_task_id?: string
@@ -222,15 +235,6 @@ export interface LogOtherData {
   cache_creation_ratio?: number
   cache_creation_ratio_5m?: number
   cache_creation_ratio_1h?: number
-  is_model_mapped?: boolean
-  upstream_model_name?: string
-  // Diagnostic only. Whether the names disagree is derived in the UI via
-  // isResponseModelMismatch so old rows follow the current comparison rule.
-  response_model?: {
-    requested_model: string
-    upstream_model: string
-    returned_model: string
-  }
   audio_ratio?: number
   audio_completion_ratio?: number
   frt?: number

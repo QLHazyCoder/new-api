@@ -63,19 +63,21 @@ func TestResponseModelComparisonAndLog(t *testing.T) {
 			}
 			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
 			var stored struct {
-				ResponseModel *relaycommon.ResponseModel `json:"response_model"`
+				AdminInfo struct {
+					ResponseModel *relaycommon.ResponseModel `json:"response_model"`
+				} `json:"admin_info"`
 			}
 			require.NoError(t, common.UnmarshalJsonStr(other.JSONString(), &stored))
 			if tc.returned == "" {
-				assert.Nil(t, stored.ResponseModel)
+				assert.Nil(t, stored.AdminInfo.ResponseModel)
 				return
 			}
-			require.NotNil(t, stored.ResponseModel)
+			require.NotNil(t, stored.AdminInfo.ResponseModel)
 			assert.Equal(t, &relaycommon.ResponseModel{
 				RequestedModel: "requested", UpstreamModel: "mapped", ReturnedModel: tc.returned,
-			}, stored.ResponseModel)
+			}, stored.AdminInfo.ResponseModel)
 			assert.NotContains(t, other.JSONString(), "mismatch")
-			assert.Equal(t, tc.mismatch, stored.ResponseModel.Mismatch())
+			assert.Equal(t, tc.mismatch, stored.AdminInfo.ResponseModel.Mismatch())
 			assert.Equal(t, "mapped", info.UpstreamModelName)
 		})
 	}
@@ -107,10 +109,14 @@ func TestResponseModelLogOmitsUnchangedModel(t *testing.T) {
 			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
 			require.NotNil(t, info.ResponseModel)
 			assert.Equal(t, float64(1), other.Snapshot()["model_ratio"])
+			adminInfo, ok := other.Snapshot()["admin_info"].(map[string]any)
 			if tc.record {
-				assert.Equal(t, *info.ResponseModel, other.Snapshot()["response_model"])
+				require.True(t, ok)
+				assert.Equal(t, *info.ResponseModel, adminInfo["response_model"])
 			} else {
-				assert.NotContains(t, other.Snapshot(), "response_model")
+				if ok {
+					assert.NotContains(t, adminInfo, "response_model")
+				}
 			}
 		})
 	}
@@ -232,7 +238,9 @@ func TestResponseModelHandlersCaptureBeforeConversion(t *testing.T) {
 			assert.Equal(t, &relaycommon.ResponseModel{RequestedModel: "requested", UpstreamModel: "mapped", ReturnedModel: "returned"}, info.ResponseModel)
 			assert.True(t, info.ResponseModel.Mismatch())
 			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
-			assert.Equal(t, *info.ResponseModel, other.Snapshot()["response_model"])
+			adminInfo, ok := other.Snapshot()["admin_info"].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, *info.ResponseModel, adminInfo["response_model"])
 		})
 	}
 }

@@ -200,6 +200,24 @@ func makeTask(userId, channelId, quota, tokenId int, billingSource string, subsc
 	}
 }
 
+func TestTaskBillingOtherStoresMappedModelDiagnosticsInAdminInfo(t *testing.T) {
+	other := taskBillingOther(&model.Task{
+		Properties: model.Properties{
+			OriginModelName:   "requested-model",
+			UpstreamModelName: "upstream-model",
+		},
+	})
+
+	snapshot := other.Snapshot()
+	for _, key := range []string{"is_model_mapped", "upstream_model_name", "response_model"} {
+		assert.NotContains(t, snapshot, key)
+	}
+	adminInfo, ok := snapshot["admin_info"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, true, adminInfo["is_model_mapped"])
+	assert.Equal(t, "upstream-model", adminInfo["upstream_model_name"])
+}
+
 func newBillingTestContext(tokenQuota int) *gin.Context {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(nil)

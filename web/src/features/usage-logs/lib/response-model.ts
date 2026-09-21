@@ -16,11 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { LogOtherData } from '../types'
+import type { ResponseModelLogInfo } from '../types'
 
-export type ResponseModelObservation = NonNullable<
-  LogOtherData['response_model']
->
+export type ResponseModelObservation = ResponseModelLogInfo
 
 /**
  * Decide whether an upstream response model deserves a mismatch warning.

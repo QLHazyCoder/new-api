@@ -64,7 +64,11 @@ function makeLog(other: LogOtherData): UsageLog {
   }
 }
 
-function renderDetails(other: LogOtherData, promptTokens = 0): QueryClient {
+function renderDetails(
+  other: LogOtherData,
+  promptTokens = 0,
+  isAdmin = false
+): QueryClient {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -80,7 +84,7 @@ function renderDetails(other: LogOtherData, promptTokens = 0): QueryClient {
     <QueryClientProvider client={queryClient}>
       <DetailsDialog
         log={{ ...makeLog(other), prompt_tokens: promptTokens }}
-        isAdmin={false}
+        isAdmin={isAdmin}
         isRoot={false}
         open
         onOpenChange={() => undefined}
@@ -95,13 +99,19 @@ function rowValue(label: string): string | null {
 }
 
 test('shows the recorded request and response models in log details', () => {
-  const queryClient = renderDetails({
-    response_model: {
-      requested_model: 'requested-model',
-      upstream_model: 'mapped-model',
-      returned_model: 'unexpected-model',
+  const queryClient = renderDetails(
+    {
+      admin_info: {
+        response_model: {
+          requested_model: 'requested-model',
+          upstream_model: 'mapped-model',
+          returned_model: 'unexpected-model',
+        },
+      },
     },
-  })
+    0,
+    true
+  )
   expect(screen.getByText('Response model: unexpected-model')).toBeVisible()
   expect(rowValue('Request Model')).toBe('requested-model')
   expect(rowValue('Upstream Model')).toBe('mapped-model')

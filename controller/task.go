@@ -427,7 +427,7 @@ func GetUserTask(c *gin.Context) {
 	queryParams := model.SyncTaskQueryParams{Platform: constant.TaskPlatform(c.Query("platform")), TaskID: c.Query("task_id"), Status: c.Query("status"), Action: c.Query("action"), StartTimestamp: startTimestamp, EndTimestamp: endTimestamp}
 	items := model.TaskGetAllUserTask(userID, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	pageInfo.SetTotal(int(model.TaskCountAllUserTask(userID, queryParams)))
-	pageInfo.SetItems(tasksToDto(items, false, common.RoleCommonUser))
+	pageInfo.SetItems(tasksToDto(items, false, c.GetInt("role")))
 	common.ApiSuccess(c, pageInfo)
 }
 
@@ -453,6 +453,12 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			}
 		}
 		item := relay.TaskModel2Dto(task)
+		if viewerRole < common.RoleAdminUser {
+			item.Properties = model.Properties{
+				Input:           task.Properties.Input,
+				OriginModelName: task.Properties.OriginModelName,
+			}
+		}
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
 		item.ResultDiscarded = task.PrivateData.ResultDiscarded
 		if task.Status == model.TaskStatusSuccess {

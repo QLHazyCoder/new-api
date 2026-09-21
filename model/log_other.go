@@ -26,6 +26,14 @@ var legacySensitiveLogOtherKeys = []string{
 	"audit_id",
 }
 
+// modelDiagnosticLogOtherKeys are upstream model observations intended for
+// operators. They are stored under admin_info and must never be public.
+var modelDiagnosticLogOtherKeys = []string{
+	"is_model_mapped",
+	"upstream_model_name",
+	"response_model",
+}
+
 type logOtherVisibility int
 
 const (
@@ -53,7 +61,8 @@ func isReservedLogOtherKey(key string) bool {
 	case logOtherAdminInfoKey, logOtherRootInfoKey, logOtherAuditInfoKey:
 		return true
 	default:
-		return slices.Contains(legacySensitiveLogOtherKeys, key)
+		return slices.Contains(legacySensitiveLogOtherKeys, key) ||
+			slices.Contains(modelDiagnosticLogOtherKeys, key)
 	}
 }
 
@@ -237,6 +246,12 @@ func formatLogOtherJSON(value string, visibility logOtherVisibility) string {
 			}
 		}
 		for _, key := range legacySensitiveLogOtherKeys {
+			if _, exists := values[key]; exists {
+				delete(values, key)
+				changed = true
+			}
+		}
+		for _, key := range modelDiagnosticLogOtherKeys {
 			if _, exists := values[key]; exists {
 				delete(values, key)
 				changed = true

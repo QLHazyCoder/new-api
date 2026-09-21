@@ -35,6 +35,63 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 	require.Contains(t, parsed, "model_price")
 }
 
+func TestModelDiagnosticsAreVisibleOnlyToOperators(t *testing.T) {
+	other := common.MapToJsonStr(map[string]any{
+		"model_ratio":         1,
+		"is_model_mapped":     true,
+		"upstream_model_name": "legacy-upstream",
+		"response_model": map[string]any{
+			"requested_model": "requested",
+			"upstream_model":  "legacy-upstream",
+			"returned_model":  "legacy-returned",
+		},
+		"admin_info": map[string]any{
+			"is_model_mapped":     true,
+			"upstream_model_name": "scoped-upstream",
+			"response_model": map[string]any{
+				"requested_model": "requested",
+				"upstream_model":  "scoped-upstream",
+				"returned_model":  "scoped-returned",
+			},
+		},
+	})
+
+	t.Run("user", func(t *testing.T) {
+		logs := []*Log{{Other: other}}
+		formatSelfLogs(logs, 0, common.RoleCommonUser)
+
+		parsed, err := common.StrToMap(logs[0].Other)
+		require.NoError(t, err)
+		assert.Equal(t, float64(1), parsed["model_ratio"])
+		assert.NotContains(t, parsed, "admin_info")
+		for _, key := range modelDiagnosticLogOtherKeys {
+			assert.NotContains(t, parsed, key)
+		}
+	})
+
+	t.Run("admin self view", func(t *testing.T) {
+		logs := []*Log{{Other: other}}
+		formatSelfLogs(logs, 0, common.RoleAdminUser)
+
+		parsed, err := common.StrToMap(logs[0].Other)
+		require.NoError(t, err)
+		assert.Equal(t, "legacy-upstream", parsed["upstream_model_name"])
+		adminInfo, ok := parsed["admin_info"].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "scoped-upstream", adminInfo["upstream_model_name"])
+	})
+
+	t.Run("root self view", func(t *testing.T) {
+		logs := []*Log{{Other: other}}
+		formatSelfLogs(logs, 0, common.RoleRootUser)
+
+		parsed, err := common.StrToMap(logs[0].Other)
+		require.NoError(t, err)
+		assert.Contains(t, parsed, "response_model")
+		assert.Contains(t, parsed, "admin_info")
+	})
+}
+
 func TestTaskPluginLogVisibilityIsRoleSeparated(t *testing.T) {
 	other := common.MapToJsonStr(map[string]any{
 		"model_price": 1.25,

@@ -26,7 +26,7 @@ import {
 } from '@/features/pricing/lib/billing-expr'
 
 import type { UsageLog } from '../data/schema'
-import type { LogOtherData } from '../types'
+import type { LogOtherData, ResponseModelLogInfo } from '../types'
 import { buildQuotaAuditOperation } from './quota-audit-operation'
 
 export { normalizeTierLabel }
@@ -261,20 +261,21 @@ export function formatModelName(log: UsageLog): {
   name: string
   isMapped: boolean
   actualModel?: string
-  responseModel?: LogOtherData['response_model']
+  responseModel?: ResponseModelLogInfo
 } {
   const other = parseLogOther(log.other)
+  const diagnostics = other?.admin_info
   const isMapped = !!(
-    other?.is_model_mapped &&
-    other?.upstream_model_name &&
-    other.upstream_model_name !== ''
+    diagnostics?.is_model_mapped &&
+    diagnostics?.upstream_model_name &&
+    diagnostics.upstream_model_name !== ''
   )
 
   return {
     name: log.model_name,
     isMapped,
-    actualModel: isMapped ? other.upstream_model_name : undefined,
-    responseModel: other?.response_model,
+    actualModel: isMapped ? diagnostics?.upstream_model_name : undefined,
+    responseModel: diagnostics?.response_model,
   }
 }
 

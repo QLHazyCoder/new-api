@@ -117,9 +117,21 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 }
 
 func formatUserLogs(logs []*Log, startIdx int) {
+	formatSelfLogs(logs, startIdx, common.RoleCommonUser)
+}
+
+// formatSelfLogs keeps self views scoped to their owner while preserving the
+// operator-only metadata for an administrator inspecting their own requests.
+func formatSelfLogs(logs []*Log, startIdx int, viewerRole int) {
+	visibility := logOtherVisibilityUser
+	if viewerRole >= common.RoleRootUser {
+		visibility = logOtherVisibilityRoot
+	} else if viewerRole >= common.RoleAdminUser {
+		visibility = logOtherVisibilityAdmin
+	}
 	for i := range logs {
 		logs[i].ChannelName = ""
-		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser)
+		logs[i].Other = formatLogOtherJSON(logs[i].Other, visibility)
 	}
 	assignDisplayLogIds(logs, startIdx)
 }
@@ -561,6 +573,12 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 const logSearchCountLimit = 10000
 
 func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
+	return GetUserLogsForRole(userId, common.RoleCommonUser, logType, startTimestamp, endTimestamp, modelName, tokenName, startIdx, num, group, requestId, upstreamRequestId)
+}
+
+// GetUserLogsForRole returns one user's logs. Dashboard administrators retain
+// admin-scoped diagnostics even when they choose the self-only view.
+func GetUserLogsForRole(userId int, viewerRole int, logType int, startTimestamp int64, endTimestamp int64, modelName string, tokenName string, startIdx int, num int, group string, requestId string, upstreamRequestId string) (logs []*Log, total int64, err error) {
 	var tx *gorm.DB
 	if logType == LogTypeUnknown {
 		tx = LOG_DB.Where("logs.user_id = ?", userId)
@@ -604,7 +622,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 		return nil, 0, errors.New("查询日志失败")
 	}
 
-	formatUserLogs(logs, startIdx)
+	formatSelfLogs(logs, startIdx, viewerRole)
 	return logs, total, err
 }
 

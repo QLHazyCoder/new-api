@@ -32,13 +32,13 @@ import { resolveModelProvider } from '@/lib/model-provider'
 import { cn } from '@/lib/utils'
 
 import { isResponseModelMismatch } from '../lib/response-model'
-import type { LogOtherData } from '../types'
+import type { ResponseModelLogInfo } from '../types'
 import { DetailRow } from './dialogs/log-detail-layout'
 
 interface ModelBadgeProps {
   modelName: string
   actualModel?: string
-  responseModel?: LogOtherData['response_model']
+  responseModel?: ResponseModelLogInfo
   className?: string
   wrapText?: boolean
   onInspect?: () => void
@@ -205,7 +205,7 @@ export function ModelBadge(props: ModelBadgeProps) {
 }
 
 export function ResponseModelDetails(props: {
-  observation: NonNullable<LogOtherData['response_model']>
+  observation: ResponseModelLogInfo
 }) {
   const { t } = useTranslation()
   const mismatch = isResponseModelMismatch(props.observation)
