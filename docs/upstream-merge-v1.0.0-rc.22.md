@@ -65,7 +65,6 @@ The following commits form one protected feature and must be evaluated as a unit
 All paths below move from `web/default` to the same relative location under `web`:
 
 - `src/features/performance-metrics/hooks/use-performance-metrics-visibility.ts`
-- `src/features/performance-metrics/lib/aggregate.ts`
 - `src/features/performance-metrics/lib/availability.ts`
 - `src/features/playground/components/playground-image-input.tsx`
 - `src/features/playground/components/playground-image-task-grid.tsx`
