@@ -73,7 +73,11 @@ func (w *WalletFunding) Refund() error {
 	}
 	// IncreaseUserQuota 是 quota += N 的非幂等操作，不能重试，否则会多退额度。
 	// 订阅的 RefundSubscriptionPreConsume 有 requestId 幂等保护所以可以重试。
-	return model.IncreaseUserQuota(w.userId, int64(w.consumed), false)
+	if err := model.IncreaseUserQuota(w.userId, int64(w.consumed), false); err != nil {
+		return err
+	}
+	w.consumed = 0
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -126,9 +130,13 @@ func (s *SubscriptionFunding) Refund() error {
 	if s.preConsumed <= 0 {
 		return nil
 	}
-	return refundWithRetry(func() error {
+	err := refundWithRetry(func() error {
 		return model.RefundSubscriptionPreConsume(s.requestId)
 	})
+	if err == nil {
+		s.preConsumed = 0
+	}
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -184,20 +192,36 @@ func (m *MixedFunding) PreConsume(amount int) error {
 	if m.walletAmount > 0 {
 		userQuota, err := model.GetUserQuota(m.wallet.userId, false)
 		if err != nil {
-			_ = m.subscription.Refund()
+			if rollbackErr := m.refundSubscription(); rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("rollback subscription pre-consume: %w", rollbackErr))
+			}
 			return err
 		}
 		if userQuota < int64(m.walletAmount) {
-			_ = m.subscription.Refund()
-			return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota64(userQuota), logger.FormatQuota(m.walletAmount))
+			insufficientErr := fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota64(userQuota), logger.FormatQuota(m.walletAmount))
+			if rollbackErr := m.refundSubscription(); rollbackErr != nil {
+				return errors.Join(insufficientErr, fmt.Errorf("rollback subscription pre-consume: %w", rollbackErr))
+			}
+			return insufficientErr
 		}
 		if err := m.wallet.PreConsume(m.walletAmount); err != nil {
-			if m.subscription != nil && m.subscription.preConsumed > 0 {
-				_ = m.subscription.Refund()
+			if rollbackErr := m.refundSubscription(); rollbackErr != nil {
+				return errors.Join(err, fmt.Errorf("rollback subscription pre-consume: %w", rollbackErr))
 			}
 			return err
 		}
 	}
+	return nil
+}
+
+func (m *MixedFunding) refundSubscription() error {
+	if m == nil || m.subscription == nil || m.subscription.preConsumed <= 0 {
+		return nil
+	}
+	if err := m.subscription.Refund(); err != nil {
+		return err
+	}
+	m.subscriptionAmount = 0
 	return nil
 }
 
@@ -280,15 +304,23 @@ func (m *MixedFunding) settleNegative(refund int) error {
 }
 
 func (m *MixedFunding) Refund() error {
+	if m == nil {
+		return nil
+	}
+	var refundErrors []error
 	if m.wallet != nil && m.wallet.consumed > 0 {
 		if err := m.wallet.Refund(); err != nil {
-			return err
+			refundErrors = append(refundErrors, fmt.Errorf("refund wallet funding: %w", err))
+		} else {
+			m.walletAmount = 0
 		}
 	}
 	if m.subscription != nil && m.subscription.preConsumed > 0 {
-		return m.subscription.Refund()
+		if err := m.refundSubscription(); err != nil {
+			refundErrors = append(refundErrors, fmt.Errorf("refund subscription funding: %w", err))
+		}
 	}
-	return nil
+	return errors.Join(refundErrors...)
 }
 
 func (m *MixedFunding) Allocations() []relaycommon.BillingAllocation {

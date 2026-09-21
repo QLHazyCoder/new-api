@@ -17,7 +17,6 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
-	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -329,7 +328,7 @@ func TestMixedTaskBillingPersistsAllocationsAcrossRecalculateAndRefund(t *testin
 	assert.Contains(t, other, "billing_refund_allocations")
 }
 
-func TestNewBillingSessionStrictSubscriptionDoesNotFallbackToWallet(t *testing.T) {
+func TestNewBillingSessionStrictSubscriptionUsesMixedBilling(t *testing.T) {
 	truncate(t)
 
 	const userID, tokenID, subID, planID = 311, 311, 311, 311
@@ -349,12 +348,18 @@ func TestNewBillingSessionStrictSubscriptionDoesNotFallbackToWallet(t *testing.T
 	}
 
 	session, apiErr := NewBillingSession(newBillingTestContext(1_000), info, 100)
-	require.Nil(t, session)
-	require.NotNil(t, apiErr)
-	assert.Equal(t, relaytypes.ErrorCodeInsufficientUserQuota, apiErr.GetErrorCode())
-	assert.EqualValues(t, 1_000, getUserQuota(t, userID))
-	assert.EqualValues(t, 950, getSubscriptionUsed(t, subID))
-	assert.EqualValues(t, 1_000, getTokenRemainQuota(t, tokenID))
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	assert.Equal(t, BillingSourceMixed, info.BillingSource)
+	assert.Equal(t, 100, info.FinalPreConsumedQuota)
+	assert.EqualValues(t, 950, getUserQuota(t, userID))
+	assert.EqualValues(t, 1_000, getSubscriptionUsed(t, subID))
+	assert.EqualValues(t, 900, getTokenRemainQuota(t, tokenID))
+	require.Len(t, info.BillingAllocations, 2)
+	assert.Equal(t, BillingSourceSubscription, info.BillingAllocations[0].Source)
+	assert.Equal(t, 50, info.BillingAllocations[0].Quota)
+	assert.Equal(t, BillingSourceWallet, info.BillingAllocations[1].Source)
+	assert.Equal(t, 50, info.BillingAllocations[1].Quota)
 }
 
 func TestPriceDataOtherRatiosFilterAndSnapshot(t *testing.T) {

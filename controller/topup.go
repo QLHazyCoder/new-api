@@ -24,6 +24,11 @@ import (
 
 func GetTopUpInfo(c *gin.Context) {
 	complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
+	group, err := model.GetUserGroup(c.GetInt("id"), true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
 	// 获取支付方式
 	payMethods := operation_setting.PayMethods
@@ -118,7 +123,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"waffo_min_topup":         setting.WaffoMinTopUp,
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
-		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
+		"discount":                operation_setting.GetAmountDiscountsForGroup(group),
 		"topup_link":              common.TopUpLink,
 	}
 	common.ApiSuccess(c, data)

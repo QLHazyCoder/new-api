@@ -546,15 +546,10 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		session, apiErr := trySubscription()
 		if apiErr != nil {
 			if apiErr.GetErrorCode() == types.ErrorCodeInsufficientUserQuota {
-				// 仅当用户的活跃订阅允许钱包回退时才回退到钱包，否则返回订阅额度不足错误
-				allowOverflow, overflowErr := model.UserActiveSubscriptionsAllowWalletOverflow(relayInfo.UserId, relayInfo.UsingGroup)
-				if overflowErr != nil {
-					return nil, types.NewError(overflowErr, types.ErrorCodeQueryDataError, types.ErrOptionWithSkipRetry())
-				}
-				if allowOverflow {
-					return tryMixedSubscriptionWallet()
-				}
-				return nil, apiErr
+				// subscription_first always consumes the remaining subscription quota
+				// first, then covers the remainder from the wallet. The plan flag is
+				// not a gate for this billing preference.
+				return tryMixedSubscriptionWallet()
 			}
 			return nil, apiErr
 		}
