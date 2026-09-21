@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +34,7 @@ func TestShouldAllowSensitiveAuditFailureOnlyInObserveMode(t *testing.T) {
 	}, errors.New("unrelated database failure")))
 }
 
-func TestSensitiveWordAuditListRedactsFullPrompt(t *testing.T) {
+func TestSensitiveWordAuditDetailRetainsFullPrompt(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.SensitiveWordAuditEvent{}))
 	event := model.SensitiveWordAuditEvent{
@@ -54,30 +53,12 @@ func TestSensitiveWordAuditListRedactsFullPrompt(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&event).Error)
 
-	gin.SetMode(gin.TestMode)
-	listRecorder := httptest.NewRecorder()
-	listContext, _ := gin.CreateTestContext(listRecorder)
-	listContext.Request = httptest.NewRequest(http.MethodGet, "/api/sensitive-words/audits", nil)
-	GetSensitiveWordAudits(listContext)
-
-	require.Equal(t, http.StatusOK, listRecorder.Code, listRecorder.Body.String())
-	require.NotContains(t, listRecorder.Body.String(), event.FullPrompt)
-	var listResponse struct {
-		Success bool `json:"success"`
-		Data    struct {
-			Items []model.SensitiveWordAuditEvent `json:"items"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(listRecorder.Body.Bytes(), &listResponse))
-	require.True(t, listResponse.Success)
-	require.Len(t, listResponse.Data.Items, 1)
-	require.Empty(t, listResponse.Data.Items[0].FullPrompt)
-
 	// The router protects this detail handler with AdminAuth. Its payload must
 	// retain the evidence for the authorized administrator review flow.
+	gin.SetMode(gin.TestMode)
 	detailRecorder := httptest.NewRecorder()
 	detailContext, _ := gin.CreateTestContext(detailRecorder)
-	detailContext.Request = httptest.NewRequest(http.MethodGet, "/api/sensitive-words/audits/"+strconv.FormatInt(event.ID, 10), nil)
+	detailContext.Request = httptest.NewRequest(http.MethodGet, "/api/log/sensitive-word-audit/"+strconv.FormatInt(event.ID, 10), nil)
 	detailContext.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(event.ID, 10)}}
 	GetSensitiveWordAudit(detailContext)
 
@@ -92,6 +73,7 @@ func TestRelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery(t *testin
 		&model.SensitiveWordRule{},
 		&model.SensitiveWordRuleWord{},
 		&model.SensitiveWordRuleGroup{},
+		&model.SensitiveWordPolicy{},
 		&model.SensitiveWordAuditEvent{},
 	))
 
@@ -107,37 +89,37 @@ func TestRelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery(t *testin
 		AuthVersion: 1,
 	}
 	require.NoError(t, db.Create(&user).Error)
-	require.NoError(t, model.SaveSensitiveWordConfig(model.SensitiveWordConfig{
+	require.NoError(t, model.SaveSensitiveWordPolicy(model.SensitiveWordPolicy{
 		Enabled:                 true,
 		CheckPrompt:             true,
-		Mode:                    "block",
-		AuditEnabled:            true,
+		RetainFullPrompt:        true,
+		BlockMessage:            "你的请求因命中敏感词已被拦截，已记录 1 次；累计达到 {{threshold}} 次将立即封号，余额不退，如果有攻击破解别人网站等情节严重的情况将会直接报警。请勿使用当前分组进行违规对话；如有误判，请联系群主审核并清理你的记录。",
 		BanThreshold:            5,
 		FullPromptRetentionDays: 180,
 		MaxPromptRunes:          model.SensitiveWordMaxPromptRunes,
-	}))
-	_, err := model.UpsertSensitiveWordRule(
+	}, 1))
+	_, err := model.UpsertSensitiveWordRuleWithMode(
 		0,
 		"Relay 拦截测试",
 		[]string{"relay-sensitive-marker"},
 		model.SensitiveWordScopeGlobal,
 		nil,
 		1,
-		nil,
+		model.SensitiveWordModeBlock,
 	)
 	require.NoError(t, err)
 	// Invalidate the process-local snapshot before the temporary test database
 	// is released by setupManageUserTestDB.
 	t.Cleanup(func() {
-		_ = model.SaveSensitiveWordConfig(model.SensitiveWordConfig{
+		_ = model.SaveSensitiveWordPolicy(model.SensitiveWordPolicy{
 			Enabled:                 false,
 			CheckPrompt:             true,
-			Mode:                    "off",
-			AuditEnabled:            false,
+			RetainFullPrompt:        false,
+			BlockMessage:            "",
 			BanThreshold:            5,
 			FullPromptRetentionDays: 180,
 			MaxPromptRunes:          model.SensitiveWordMaxPromptRunes,
-		})
+		}, 1)
 	})
 
 	gin.SetMode(gin.TestMode)
@@ -162,7 +144,7 @@ func TestRelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery(t *testin
 
 	Relay(ctx, types.RelayFormatOpenAI)
 
-	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
+	require.Equal(t, http.StatusUnprocessableEntity, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), "sensitive_words_detected")
 	require.Contains(t, recorder.Body.String(), "攻击破解别人网站")
 

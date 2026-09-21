@@ -1132,7 +1132,34 @@ func ManageUser(c *gin.Context) {
 			return
 		}
 	case "enable":
-		user.Status = common.UserStatusEnabled
+		reset, err := model.EnableUserAndResetSensitiveWordViolations(user.Id)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		recordManageAuditFor(c, user.Id, "sensitive_word.enable_reset", map[string]any{
+			"target_user_id":         user.Id,
+			"username":               user.Username,
+			"status_before":          reset.StatusBefore,
+			"status_after":           reset.StatusAfter,
+			"violation_count_before": reset.ViolationCountBefore,
+			"violation_count_after":  reset.ViolationCountAfter,
+			"quota_before":           reset.QuotaBefore,
+			"quota_after":            reset.QuotaAfter,
+			"used_quota_before":      reset.UsedQuotaBefore,
+			"used_quota_after":       reset.UsedQuotaAfter,
+			"balance_changed":        false,
+			"entrypoint":             "user.manage",
+		})
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "",
+			"data": gin.H{
+				"role":   user.Role,
+				"status": common.UserStatusEnabled,
+			},
+		})
+		return
 	case "delete":
 		if user.Role == common.RoleRootUser {
 			common.ApiErrorI18n(c, i18n.MsgUserCannotDeleteRootUser)

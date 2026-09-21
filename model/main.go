@@ -386,7 +386,7 @@ func migrateDB() error {
 		&SensitiveWordRule{},
 		&SensitiveWordRuleWord{},
 		&SensitiveWordRuleGroup{},
-		&SensitiveWordWhitelist{},
+		&SensitiveWordPolicy{},
 		&SensitiveWordAuditEvent{},
 		&PlaygroundImageBatch{},
 		&PlaygroundImageTask{},
@@ -404,7 +404,11 @@ func migrateDB() error {
 		return err
 	}
 	if err := MigrateSensitiveWordData(); err != nil {
-		return err
+		// Sensitive-word migration is deliberately isolated from the primary
+		// service startup. A node with an incomplete schema fails open for this
+		// optional policy while the administrator can repair the migration and
+		// rerun it without taking the API offline.
+		common.SysLog("sensitive-word migration skipped: " + err.Error())
 	}
 	if err := ReconcileAffiliateCounts(); err != nil {
 		return err

@@ -17,24 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
+import { useEffect, useState } from 'react'
 import {
   Copy,
   Check,
@@ -65,6 +48,7 @@ import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { api } from '@/lib/api'
 
 import { AuditDetailFields } from '../../audit/components/audit-detail-fields'
 import type { UsageLog } from '../../data/schema'
@@ -87,7 +71,11 @@ import {
   isPerCallBilling,
   isTimingLogType,
 } from '../../lib/utils'
-import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
+import {
+  USAGE_BILLING_PATH,
+  type LogOtherData,
+  type SensitiveWordAuditEvent,
+} from '../../types'
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
 import { DetailRow, DetailSection } from './log-detail-layout'
@@ -474,6 +462,134 @@ interface DetailsDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+function parseAuditList(value: string | undefined): string[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return Array.isArray(parsed) ? parsed.map(String) : []
+  } catch {
+    return value ? [value] : []
+  }
+}
+
+function SensitiveWordAuditSection(props: {
+  auditId: number
+  isAdmin: boolean
+}) {
+  const { t } = useTranslation()
+  const [event, setEvent] = useState<SensitiveWordAuditEvent | null>(null)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setEvent(null)
+    setError(false)
+    if (!props.isAdmin || !props.auditId) return
+    void api
+      .get(`/api/log/sensitive-word-audit/${props.auditId}`)
+      .then((response) => {
+        if (cancelled) return
+        setEvent(response.data?.data ?? null)
+      })
+      .catch(() => {
+        if (!cancelled) setError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [props.auditId, props.isAdmin])
+
+  if (!props.isAdmin) return null
+
+  const matchedWords = parseAuditList(event?.matched_words)
+  const matchedRules = parseAuditList(event?.matched_rule_names)
+  const matchedSnippets = parseAuditList(event?.matched_snippets)
+  let resultLabel = ''
+  if (event?.blocked) {
+    resultLabel = t('Blocked')
+  } else if (event?.observe_only) {
+    resultLabel = t('Observed')
+  } else if (event) {
+    resultLabel = t('Whitelist bypassed')
+  }
+  return (
+    <DetailSection
+      icon={<ShieldCheck className='size-3.5' aria-hidden='true' />}
+      iconTone='destructive'
+      variant='danger'
+      label={t('Sensitive word audit')}
+    >
+      {error && (
+        <DetailRow label={t('Evidence')} value={t('Unable to load evidence')} />
+      )}
+      {!event && !error && (
+        <DetailRow label={t('Evidence')} value={t('Loading...')} />
+      )}
+      {event && (
+        <>
+          {event.username_snapshot && (
+            <DetailRow
+              label={t('User')}
+              value={`${event.username_snapshot} (#${event.user_id ?? '-'})`}
+            />
+          )}
+          {event.endpoint && (
+            <DetailRow label={t('Endpoint')} value={event.endpoint} mono />
+          )}
+          {event.protocol && (
+            <DetailRow label={t('Protocol')} value={event.protocol} mono />
+          )}
+          {matchedWords.length > 0 && (
+            <DetailRow label={t('Matched')} value={matchedWords.join(', ')} />
+          )}
+          {matchedRules.length > 0 && (
+            <DetailRow
+              label={t('Rules')}
+              value={matchedRules.join(', ')}
+            />
+          )}
+          <DetailRow
+            label={t('Result')}
+            value={resultLabel}
+          />
+          <DetailRow
+            label={t('Violation Count')}
+            value={String(event.violation_count ?? 0)}
+          />
+          <DetailRow
+            label={t('Automatic Ban')}
+            value={event.auto_banned ? t('Yes') : t('No')}
+          />
+          {event.redacted_preview && (
+            <div className='space-y-1'>
+              <Label className='text-xs font-semibold'>{t('Redacted preview')}</Label>
+              <pre className='bg-background/60 max-h-32 overflow-y-auto rounded border p-2 text-xs leading-relaxed whitespace-pre-wrap'>
+                {event.redacted_preview}
+              </pre>
+            </div>
+          )}
+          {matchedSnippets.length > 0 && (
+            <div className='space-y-1'>
+              <Label className='text-xs font-semibold'>{t('Matched snippets')}</Label>
+              <pre className='bg-background/60 max-h-32 overflow-y-auto rounded border p-2 text-xs leading-relaxed whitespace-pre-wrap'>
+                {matchedSnippets.join('\n')}
+              </pre>
+            </div>
+          )}
+          {event.full_prompt && (
+            <div className='space-y-1'>
+              <Label className='text-xs font-semibold'>{t('Full prompt')}</Label>
+              <pre className='bg-background/60 max-h-72 overflow-y-auto rounded border p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap'>
+                {event.full_prompt}
+              </pre>
+            </div>
+          )}
+        </>
+      )}
+    </DetailSection>
+  )
+}
+
 export function DetailsDialog(props: DetailsDialogProps) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
@@ -486,6 +602,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const isTopup = props.log.type === 1
   const isManage = props.log.type === 3
   const isSubscription = other?.billing_source === 'subscription'
+  const sensitiveAuditId =
+    props.log.type === 8 ? other?.keyword_filter?.audit_id : undefined
   const isTieredBilling =
     isConsume &&
     !isViolation &&
@@ -1330,6 +1448,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
         )}
 
         {/* Content */}
+        {sensitiveAuditId != null && (
+          <SensitiveWordAuditSection
+            auditId={sensitiveAuditId}
+            isAdmin={props.isAdmin}
+          />
+        )}
         {details && (
           <div className='space-y-1.5'>
             <Label className='text-xs font-semibold'>{t('Content')}</Label>

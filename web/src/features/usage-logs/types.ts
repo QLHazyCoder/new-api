@@ -121,6 +121,7 @@ export interface KeywordFilterLogData {
   rule_ids?: number[]
   rule_names?: string[]
   matched_words?: string[]
+  matched_snippets?: string[]
   scope?: 'global' | 'group' | 'global+group' | string
   group?: string
   model?: string
@@ -136,6 +137,38 @@ export interface KeywordFilterLogData {
   balance_changed?: boolean
   prompt_hash?: string
   rule_version?: number
+}
+
+export interface SensitiveWordAuditEvent {
+  id: number
+  request_id?: string
+  user_id?: number
+  username_snapshot?: string
+  token_id?: number
+  token_name_snapshot?: string
+  group_name?: string
+  model_name?: string
+  endpoint?: string
+  protocol?: string
+  prompt_hash?: string
+  redacted_preview?: string
+  full_prompt?: string
+  matched_rule_ids?: string
+  matched_rule_names?: string
+  matched_words?: string
+  matched_snippets?: string
+  matched_scope?: string
+  whitelist_bypassed?: boolean
+  blocked?: boolean
+  violation_count?: number
+  auto_banned?: boolean
+  observe_only?: boolean
+  user_status_before?: number
+  user_status_after?: number
+  quota_before?: number
+  quota_after?: number
+  rule_version?: number
+  created_at?: string
 }
 
 export interface ResponseModelLogInfo {

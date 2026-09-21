@@ -97,7 +97,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			service.RecordRequestPolicyTermination(c, newAPIError)
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
-			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			// Keep the administrator-configured sensitive-word message intact. A
+			// request ID is already available in the structured log and appending it
+			// here made the configured client warning unreadable.
+			if newAPIError.GetErrorCode() != types.ErrorCodeSensitiveWordsDetected {
+				newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())

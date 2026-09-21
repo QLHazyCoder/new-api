@@ -23,7 +23,7 @@
 敏感词策略页只管理策略和规则。它不显示命中记录、白名单清单、用户违规历史或完整提示词。
 
 - 规则：系统设置中的敏感词策略页。
-- 违规次数和白名单：用户管理的用户编辑右抽屉，内容安全区。
+- 违规次数和白名单：用户管理的用户编辑左抽屉，内容安全区。
 - 命中记录和完整提示词：使用日志，类型 8“关键词拦截”的详情抽屉。
 
 规则编辑弹窗的敏感词条搜索是纯前端草稿工具：它只查找当前弹窗中的 `draft.wordsText`，不调用后端、不改写文本，也不会改变保存请求。搜索框在“导入 TXT”按钮左侧，输入后可用 `Enter`/`Shift+Enter` 循环定位；草稿编辑只更新计数，不抢占文本框光标；关闭弹窗后搜索状态会清空。
@@ -32,9 +32,9 @@
 
 ### 2.2 运行时边界
 
-Relay 在预扣费、计费、选渠道、上游调用和自动重试之前检查提示词。正常用户命中后返回 403；这类请求不能产生预扣费、消费日志或上游请求。
+Relay 在 token 估算、预扣费、计费、选渠道、上游调用和自动重试之前检查提示词。普通用户命中 block 规则后返回不可重试的 HTTP 422 `sensitive_words_detected`；后续已封禁账号请求才返回 HTTP 403 `user_banned`。这类请求不能产生预扣费、消费日志或上游请求。
 
-白名单命中和观察模式命中仍写一条类型 8 日志与主库审计事件，但不会增加用户违规次数。第五次有效拦截禁用用户并撤销会话。任何敏感词路径都不得修改 users.quota、充值记录、历史消费或内部余额。
+白名单命中和观察模式命中仍写一条类型 8 日志与主库审计事件，但不会增加用户违规次数。达到策略阈值（默认 50）时禁用用户并撤销会话。任何敏感词路径都不得修改 users.quota、充值记录、历史消费或内部余额。
 
 审计落库失败也按模式处理：`block` 模式失败关闭并返回不可重试 503；`observe` 模式仅对
 已经确认命中且错误类型为审计事件写入失败时放行，并在服务日志记录降级。规则/用户读取、
@@ -62,7 +62,7 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
 
 ### 2.4 封禁后启用的边界
 
-用户列表的“启用”和敏感词兼容接口的“解封”必须走同一个行锁事务：
+用户列表的“启用”必须走行锁事务：
 
 - 无论是自动封禁后、人工禁用后，还是已启用但仍有记录，启用都会把当前
   `sensitive_word_violation_count` 清零；下一次命中从第 1 次开始。
@@ -76,9 +76,9 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
 
 ### 2.5 旧配置与迁移
 
-旧 SensitiveWords Option 在第一次启动时导入独立规则表。成功后写 SensitiveWordRulesMigrationVersion=1，新的规则表成为权威来源，删除导入规则不会重新回退旧词库。
+旧 SensitiveWords Option 在第一次启动时导入独立规则表。成功后写 SensitiveWordRulesMigrationVersion=2，新的规则表成为唯一运行时来源，删除导入规则不会重新回退旧词库。
 
-若旧 Option 含有超过新限制的词条，迁移会保留兼容匹配、不写完成标记并在系统日志提示；这不会阻断服务，但管理员必须在规则编辑器中修正旧数据。不要手工删除迁移标记或旧 Option，除非已按架构文档完成迁移复核。
+若旧 Option 含有超过新限制的词条，迁移会跳过无效值、不写完成标记并在系统日志提示；这些值不会通过旧 Option fallback 继续运行时匹配。管理员应在规则编辑器中重新整理有效词条，再复核迁移状态。
 
 ### 2.6 数据库和日志库
 
@@ -108,8 +108,9 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
 敏感词改动至少执行：
 
     gofmt -w <changed-go-files>
-    go test ./model -run 'Test(MigrateSensitiveWordData|SaveSensitiveWordConfig|SensitiveWord)' -count=1
-    go test ./controller -run 'Test(SensitiveWordAuditListRedactsFullPrompt|RelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery|UpdateUserPersistsSensitiveWordControlsWithoutChangingQuota|ManageUserEnableResets|SensitiveWordUnbanEndpoint)' -count=1
+    go test ./model -run 'SensitiveWord' -count=1
+    go test ./controller -run 'SensitiveWord|RelaySensitive' -count=1
+    go test ./router -count=1
     go test ./model -run 'Test(SensitiveWordAuditPrompt(GormTypeForSupportedDialects|UsesDialectSizedTypes)|TruncateSensitivePromptIsByteSafeForLargeUnicodeInput|SensitiveWordObserveAuditPersistenceErrorIsTyped)' -count=1
     go test ./controller -run 'TestShouldAllowSensitiveAuditFailureOnlyInObserveMode' -count=1
     go test ./...
@@ -120,11 +121,10 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
     go build ./...
 
     cd ../web
-    npm run typecheck
-    npm run build:check
-    npm run lint
-    npm test -- --run src/features/system-settings/request-limits/sensitive-word-search.test.ts src/features/system-settings/request-limits/sensitive-words-section.test.tsx
-    npm test
+    bun run typecheck
+    bun run build:check
+    bun run lint
+    bunx vitest run src/features/system-settings/request-limits/sensitive-word-search.test.ts src/features/system-settings/request-limits/sensitive-words-section.test.tsx
 
 还要检查：没有乱码或 replacement character；列表没有完整提示词；普通用户日志没有 audit_id/命中词；白名单不影响计数以外的用户属性；任何自动封禁路径不写 quota。
 
@@ -156,7 +156,7 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
 
 切流后使用管理员 API 或页面做最小验证，不向真实用户发送违规请求：
 
-1. 打开敏感词策略页，确认规则数量、分组多选和默认提示显示正确。
+1. 打开敏感词策略页，确认策略、统一规则表、分组多选和默认提示显示正确。
 2. 创建临时本地测试用户和临时规则，在非生产流量环境验证一次观察模式日志。
 3. 确认类型 8 日志详情能读取审计事件，普通用户日志不显示完整词条。
 4. 确认用户抽屉能编辑违规次数和白名单，且修改后 quota 不变。

@@ -188,13 +188,9 @@ func InitOptionMap() {
 	common.OptionMap["MjModeClearEnabled"] = strconv.FormatBool(setting.MjModeClearEnabled)
 	common.OptionMap["MjForwardUrlEnabled"] = strconv.FormatBool(setting.MjForwardUrlEnabled)
 	common.OptionMap["MjActionCheckSuccessEnabled"] = strconv.FormatBool(setting.MjActionCheckSuccessEnabled)
-	common.OptionMap["CheckSensitiveEnabled"] = strconv.FormatBool(setting.CheckSensitiveEnabled)
 	common.OptionMap["DemoSiteEnabled"] = strconv.FormatBool(operation_setting.DemoSiteEnabled)
 	common.OptionMap["SelfUseModeEnabled"] = strconv.FormatBool(operation_setting.SelfUseModeEnabled)
 	common.OptionMap["ModelRequestRateLimitEnabled"] = strconv.FormatBool(setting.ModelRequestRateLimitEnabled)
-	common.OptionMap["CheckSensitiveOnPromptEnabled"] = strconv.FormatBool(setting.CheckSensitiveOnPromptEnabled)
-	common.OptionMap["StopOnSensitiveEnabled"] = strconv.FormatBool(setting.StopOnSensitiveEnabled)
-	common.OptionMap["SensitiveWords"] = setting.SensitiveWordsToString()
 	common.OptionMap["StreamCacheQueueLength"] = strconv.Itoa(setting.StreamCacheQueueLength)
 	common.OptionMap["AutomaticDisableKeywords"] = operation_setting.AutomaticDisableKeywordsToString()
 	common.OptionMap["AutomaticDisableStatusCodes"] = operation_setting.AutomaticDisableStatusCodesToString()
@@ -478,13 +474,6 @@ func updateOptionMap(key string, value string) (err error) {
 		return nil
 	}
 	common.OptionMap[key] = value
-	if key == "SensitiveWords" || key == "SensitiveWordConfig" {
-		// Request Policies own the upstream execution framework, while the
-		// advanced sensitive-word engine remains this fork's authoritative
-		// matcher. Invalidate its snapshot on either legacy option change.
-		invalidateSensitiveWordRuntime()
-	}
-
 	// 检查是否是模型配置 - 使用更规范的方式处理
 	if handleConfigUpdate(key, value) {
 		return nil // 已由配置系统处理
@@ -568,18 +557,12 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.MjForwardUrlEnabled = boolValue
 		case "MjActionCheckSuccessEnabled":
 			setting.MjActionCheckSuccessEnabled = boolValue
-		case "CheckSensitiveEnabled":
-			setting.CheckSensitiveEnabled = boolValue
 		case "DemoSiteEnabled":
 			operation_setting.DemoSiteEnabled = boolValue
 		case "SelfUseModeEnabled":
 			operation_setting.SelfUseModeEnabled = boolValue
-		case "CheckSensitiveOnPromptEnabled":
-			setting.CheckSensitiveOnPromptEnabled = boolValue
 		case "ModelRequestRateLimitEnabled":
 			setting.ModelRequestRateLimitEnabled = boolValue
-		case "StopOnSensitiveEnabled":
-			setting.StopOnSensitiveEnabled = boolValue
 		case "SMTPSSLEnabled":
 			common.SMTPSSLEnabled = boolValue
 		case "SMTPStartTLSEnabled":
@@ -793,8 +776,6 @@ func updateOptionMap(key string, value string) (err error) {
 		common.ChannelDisableThreshold, _ = strconv.ParseFloat(value, 64)
 	case "QuotaPerUnit":
 		common.QuotaPerUnit, _ = strconv.ParseFloat(value, 64)
-	case "SensitiveWords":
-		setting.SensitiveWordsFromString(value)
 	case "AutomaticDisableKeywords":
 		operation_setting.AutomaticDisableKeywordsFromString(value)
 	case "AutomaticDisableStatusCodes":

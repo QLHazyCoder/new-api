@@ -1028,6 +1028,9 @@ func (user *User) Edit(updatePassword bool) error {
 }
 
 func (user *User) EditWithTx(tx *gorm.DB, updatePassword bool) error {
+	if user.SensitiveWordViolationCount < 0 {
+		return errors.New("敏感词违规次数不能为负数")
+	}
 	var err error
 	if updatePassword {
 		user.Password, err = common.HashAccountPassword(user.Password)
@@ -1038,10 +1041,12 @@ func (user *User) EditWithTx(tx *gorm.DB, updatePassword bool) error {
 
 	newUser := *user
 	updates := map[string]any{
-		"username":     newUser.Username,
-		"display_name": newUser.DisplayName,
-		"group":        newUser.Group,
-		"remark":       newUser.Remark,
+		"username":                       newUser.Username,
+		"display_name":                   newUser.DisplayName,
+		"group":                          newUser.Group,
+		"remark":                         newUser.Remark,
+		"sensitive_word_violation_count": newUser.SensitiveWordViolationCount,
+		"sensitive_word_whitelist":       newUser.SensitiveWordWhitelist,
 	}
 	if updatePassword {
 		updates["password"] = newUser.Password

@@ -22,8 +22,6 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
-  Power,
-  PowerOff,
   Search,
   Trash2,
   X,
@@ -84,18 +82,17 @@ import {
 } from './sensitive-word-search'
 
 const DEFAULT_BLOCK_MESSAGE =
-  '你的请求因命中敏感词已被拦截，已记录 1 次；累计超过 5 次将立即封号，余额不退，如果有攻击破解别人网站等情节严重的情况将会直接报警。请勿使用当前分组进行违规对话；如有误判，请联系群主审核并清理你的记录。'
+  '你的请求因命中敏感词已被拦截，已记录 1 次；累计达到 {{threshold}} 次将立即封号，余额不退，如果有攻击破解别人网站等情节严重的情况将会直接报警。请勿使用当前分组进行违规对话；如有误判，请联系群主审核并清理你的记录。'
 
-type SensitiveWordConfig = {
+type SensitiveWordPolicy = {
   enabled: boolean
   check_prompt: boolean
-  mode: 'block' | 'observe' | 'off'
-  audit_enabled: boolean
+  retain_full_prompt: boolean
   block_message: string
   ban_threshold: number
   full_prompt_retention_days: number
   max_prompt_runes: number
-  rule_version: number
+  version: number
 }
 
 type RuleSummary = {
@@ -104,7 +101,7 @@ type RuleSummary = {
   scope: 'global' | 'group'
   groups: string[]
   word_count: number
-  enabled: boolean
+  mode: 'block' | 'observe' | 'off'
   created_by: number
   version: number
   created_at: string
@@ -121,7 +118,7 @@ type RuleDraft = {
   wordsText: string
   scope: 'global' | 'group'
   groups: string[]
-  enabled: boolean
+  mode: 'block' | 'observe' | 'off'
 }
 
 type ParsedWords = {
@@ -131,20 +128,12 @@ type ParsedWords = {
   tooLongCount: number
 }
 
-type Props = {
-  defaultValues: {
-    CheckSensitiveEnabled: boolean
-    CheckSensitiveOnPromptEnabled: boolean
-    SensitiveWords?: string
-  }
-}
-
 const emptyDraft = (): RuleDraft => ({
   name: '',
   wordsText: '',
   scope: 'global',
   groups: [],
-  enabled: true,
+  mode: 'observe',
 })
 
 function parseWords(value: string): ParsedWords {
@@ -187,34 +176,25 @@ function formatTime(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
 }
 
-function RulePowerIcon(props: { enabled: boolean; isLoading: boolean }) {
-  if (props.isLoading) return <Loader2 className='animate-spin' />
-  if (props.enabled) return <PowerOff />
-  return <Power />
-}
-
-function createDefaultSensitiveWordConfig(
-  defaultValues: Props['defaultValues']
-): SensitiveWordConfig {
+function createDefaultSensitiveWordConfig(): SensitiveWordPolicy {
   return {
-    enabled: defaultValues.CheckSensitiveEnabled,
-    check_prompt: defaultValues.CheckSensitiveOnPromptEnabled,
-    mode: 'block',
-    audit_enabled: true,
+    enabled: false,
+    check_prompt: false,
+    retain_full_prompt: true,
     block_message: DEFAULT_BLOCK_MESSAGE,
-    ban_threshold: 5,
+    ban_threshold: 50,
     full_prompt_retention_days: 180,
     max_prompt_runes: 65536,
-    rule_version: 1,
+    version: 1,
   }
 }
 
-export function SensitiveWordsSection({ defaultValues }: Props) {
+export function SensitiveWordsSection() {
   const { t } = useTranslation()
-  const defaultConfigRef = useRef<SensitiveWordConfig>(
-    createDefaultSensitiveWordConfig(defaultValues)
+  const defaultConfigRef = useRef<SensitiveWordPolicy>(
+    createDefaultSensitiveWordConfig()
   )
-  const [config, setConfig] = useState<SensitiveWordConfig>(
+  const [config, setConfig] = useState<SensitiveWordPolicy>(
     () => defaultConfigRef.current
   )
   const [rules, setRules] = useState<RuleSummary[]>([])
@@ -222,7 +202,7 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSavingConfig, setIsSavingConfig] = useState(false)
   const [isSavingRule, setIsSavingRule] = useState(false)
-  const [togglingRuleID, setTogglingRuleID] = useState<number | null>(null)
+  const [changingModeRuleID, setChangingModeRuleID] = useState<number | null>(null)
   const [ruleDialogOpen, setRuleDialogOpen] = useState(false)
   const [draft, setDraft] = useState<RuleDraft>(emptyDraft)
   const [deleteTarget, setDeleteTarget] = useState<RuleSummary | null>(null)
@@ -232,37 +212,24 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [wordSearch, setWordSearch] = useState('')
   const [activeMatchIndex, setActiveMatchIndex] = useState(0)
-  const [legacyWords, setLegacyWords] = useState(
-    defaultValues.SensitiveWords ?? ''
-  )
-  const initialConfigRef = useRef<SensitiveWordConfig | null>(null)
-  const initialLegacyRef = useRef({
-    enabled: defaultValues.CheckSensitiveEnabled,
-    check_prompt: defaultValues.CheckSensitiveOnPromptEnabled,
-    words: defaultValues.SensitiveWords ?? '',
-  })
+  const initialConfigRef = useRef<SensitiveWordPolicy | null>(null)
 
   const reload = useCallback(async () => {
     setIsLoading(true)
     try {
       const [configRes, rulesRes, groupsRes] = await Promise.all([
-        api.get('/api/sensitive-words/config'),
+        api.get('/api/sensitive-words/policy'),
         api.get('/api/sensitive-words/rules'),
         api.get('/api/sensitive-words/groups'),
       ])
-      const nextConfig = configRes.data?.data as Partial<SensitiveWordConfig>
+      const nextConfig = configRes.data?.data as Partial<SensitiveWordPolicy>
       const hasConfig =
         typeof nextConfig?.enabled === 'boolean' &&
-        typeof nextConfig?.check_prompt === 'boolean' &&
-        (nextConfig?.mode === 'block' ||
-          nextConfig?.mode === 'observe' ||
-          nextConfig?.mode === 'off')
+        typeof nextConfig?.check_prompt === 'boolean'
       if (hasConfig) {
-        const mode = nextConfig.mode as SensitiveWordConfig['mode']
-        const mergedConfig: SensitiveWordConfig = {
+        const mergedConfig: SensitiveWordPolicy = {
           ...defaultConfigRef.current,
           ...nextConfig,
-          mode,
           block_message:
             nextConfig.block_message?.trim() || DEFAULT_BLOCK_MESSAGE,
         }
@@ -368,62 +335,39 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
   }, [activeMatchIndex, locateWordMatch, ruleDialogOpen, wordSearch])
 
   const saveConfig = async () => {
-    const banThreshold = Math.max(
-      1,
-      Math.min(1000, Number(config.ban_threshold) || 5)
-    )
+    const banThreshold = Math.max(1, Math.min(1000, Number(config.ban_threshold) || 50))
     const retentionDays = Math.max(
       1,
       Math.min(3650, Number(config.full_prompt_retention_days) || 180)
     )
-    const normalizedConfig: SensitiveWordConfig = {
+    const normalizedConfig: SensitiveWordPolicy = {
       ...config,
       ban_threshold: banThreshold,
       full_prompt_retention_days: retentionDays,
-      max_prompt_runes: 65536,
+      max_prompt_runes: Math.max(
+        1,
+        Math.min(65536, Number(config.max_prompt_runes) || 65536)
+      ),
       block_message: config.block_message.trim() || DEFAULT_BLOCK_MESSAGE,
     }
     const initialConfig = initialConfigRef.current ?? config
     const configChanged =
       JSON.stringify(normalizedConfig) !== JSON.stringify(initialConfig)
-    const initialLegacy = initialLegacyRef.current
-    const legacyChanges: Record<string, string> = {}
-    if (normalizedConfig.enabled !== initialLegacy.enabled) {
-      legacyChanges.CheckSensitiveEnabled = String(normalizedConfig.enabled)
-    }
-    if (normalizedConfig.check_prompt !== initialLegacy.check_prompt) {
-      legacyChanges.CheckSensitiveOnPromptEnabled = String(
-        normalizedConfig.check_prompt
-      )
-    }
-    if (legacyWords !== initialLegacy.words) {
-      legacyChanges.SensitiveWords = legacyWords
-    }
-    if (!configChanged && Object.keys(legacyChanges).length === 0) return
+    if (!configChanged) return
 
     setIsSavingConfig(true)
     try {
       if (configChanged) {
-        const response = await api.put('/api/sensitive-words/config', {
+        const response = await api.put('/api/sensitive-words/policy', {
           ...normalizedConfig,
         })
-        const saved = response.data?.data as SensitiveWordConfig | undefined
+        const saved = response.data?.data as SensitiveWordPolicy | undefined
         if (saved) {
           setConfig(saved)
           initialConfigRef.current = saved
         } else {
           setConfig(normalizedConfig)
           initialConfigRef.current = normalizedConfig
-        }
-      }
-      if (Object.keys(legacyChanges).length > 0) {
-        await api.patch('/api/option/request_policy', {
-          options: legacyChanges,
-        })
-        initialLegacyRef.current = {
-          enabled: normalizedConfig.enabled,
-          check_prompt: normalizedConfig.check_prompt,
-          words: legacyWords,
         }
       }
       toast.success('敏感词策略已保存')
@@ -452,7 +396,7 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
         wordsText: detail.words.join('\n'),
         scope: detail.scope,
         groups: detail.groups,
-        enabled: detail.enabled,
+        mode: detail.mode,
       })
       resetWordSearch()
       setRuleDialogOpen(true)
@@ -483,7 +427,7 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
         words: parsedWords.words,
         scope: draft.scope,
         groups: draft.scope === 'group' ? draft.groups : [],
-        enabled: draft.enabled,
+        mode: draft.mode,
       }
       if (draft.id) {
         await api.put(`/api/sensitive-words/rules/${draft.id}`, payload)
@@ -501,18 +445,16 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
     }
   }
 
-  const toggleRule = async (rule: RuleSummary) => {
-    setTogglingRuleID(rule.id)
+  const changeRuleMode = async (rule: RuleSummary, mode: RuleSummary['mode']) => {
+    setChangingModeRuleID(rule.id)
     try {
-      await api.patch(`/api/sensitive-words/rules/${rule.id}/status`, {
-        enabled: !rule.enabled,
-      })
+      await api.patch(`/api/sensitive-words/rules/${rule.id}/mode`, { mode })
       await reload()
-      toast.success(rule.enabled ? '规则已停用' : '规则已启用')
+      toast.success('规则处理模式已更新')
     } catch (error) {
       toast.error(getErrorMessage(error, '更新规则状态失败'))
     } finally {
-      setTogglingRuleID(null)
+      setChangingModeRuleID(null)
     }
   }
 
@@ -588,7 +530,7 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
       <SettingsPageFormActions
         onSave={() => void saveConfig()}
         isSaving={isSavingConfig}
-        saveLabel='Save sensitive words'
+        saveLabel='保存敏感词策略'
         savingLabel='正在保存'
       />
 
@@ -598,8 +540,8 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
             <div>
               <h3 className='text-sm font-semibold'>策略设置</h3>
               <p className='text-muted-foreground mt-1 text-xs'>
-                规则版本 {config.rule_version || 1}
-                ；第五次有效拦截会禁用账号，但不会处理余额。
+                规则版本 {config.version || 1}
+                ；达到封禁阈值会禁用账号，但不会处理余额。
               </p>
             </div>
             <Button
@@ -659,44 +601,16 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
                   </span>
                 </span>
                 <Switch
-                  checked={config.audit_enabled}
-                  onCheckedChange={(audit_enabled) =>
-                    setConfig((current) => ({ ...current, audit_enabled }))
+                  checked={config.retain_full_prompt}
+                  onCheckedChange={(retain_full_prompt) =>
+                    setConfig((current) => ({ ...current, retain_full_prompt }))
                   }
                 />
               </label>
             </div>
 
             <div className='space-y-4'>
-              <div className='space-y-2'>
-                <Label>处理模式</Label>
-                <div
-                  className='inline-flex rounded-md border p-1'
-                  role='group'
-                  aria-label='处理模式'
-                >
-                  {(
-                    [
-                      ['block', '拦截'],
-                      ['observe', '观察'],
-                      ['off', '关闭'],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <Button
-                      key={value}
-                      type='button'
-                      size='sm'
-                      variant={config.mode === value ? 'secondary' : 'ghost'}
-                      onClick={() =>
-                        setConfig((current) => ({ ...current, mode: value }))
-                      }
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-              <div className='grid grid-cols-2 gap-3'>
+              <div className='grid gap-3 sm:grid-cols-3'>
                 <div className='space-y-2'>
                   <Label htmlFor='sensitive-ban-threshold'>封禁阈值</Label>
                   <Input
@@ -728,6 +642,22 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
                           Number(event.target.value) || 1,
                       }))
                     }
+                    />
+                </div>
+                <div className='space-y-2'>
+                  <Label htmlFor='sensitive-max-prompt-runes'>最大提示词长度</Label>
+                  <Input
+                    id='sensitive-max-prompt-runes'
+                    type='number'
+                    min={1}
+                    max={65536}
+                    value={config.max_prompt_runes}
+                    onChange={(event) =>
+                      setConfig((current) => ({
+                        ...current,
+                        max_prompt_runes: Number(event.target.value) || 1,
+                      }))
+                    }
                   />
                 </div>
               </div>
@@ -749,20 +679,6 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
             />
           </div>
 
-          <div className='mt-4 space-y-2'>
-            <Label htmlFor='legacy-sensitive-words'>Blocked keywords</Label>
-            <Textarea
-              id='legacy-sensitive-words'
-              aria-label='Blocked keywords'
-              rows={4}
-              value={legacyWords}
-              onChange={(event) => setLegacyWords(event.target.value)}
-              placeholder='每行一个敏感词（兼容旧版全局设置）'
-            />
-            <p className='text-muted-foreground text-xs'>
-              高级规则启用时由上方规则引擎负责拦截；此列表仅保留旧版设置兼容性。
-            </p>
-          </div>
         </section>
 
         <section className='space-y-3'>
@@ -787,7 +703,7 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
                   <th className='px-3 py-2 font-medium'>范围</th>
                   <th className='px-3 py-2 font-medium'>使用分组</th>
                   <th className='px-3 py-2 font-medium'>词条数</th>
-                  <th className='px-3 py-2 font-medium'>状态</th>
+                  <th className='px-3 py-2 font-medium'>处理模式</th>
                   <th className='px-3 py-2 font-medium'>更新时间</th>
                   <th className='w-28 px-3 py-2 text-right font-medium'>
                     操作
@@ -851,9 +767,28 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
                         {rule.word_count}
                       </td>
                       <td className='px-3 py-2'>
-                        <Badge variant={rule.enabled ? 'secondary' : 'outline'}>
-                          {rule.enabled ? '启用' : '停用'}
-                        </Badge>
+                        <Select
+                          value={rule.mode}
+                          disabled={changingModeRuleID === rule.id}
+                          onValueChange={(value) => {
+                            if (
+                              value === 'block' ||
+                              value === 'observe' ||
+                              value === 'off'
+                            ) {
+                              void changeRuleMode(rule, value)
+                            }
+                          }}
+                        >
+                          <SelectTrigger className='w-24'>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value='block'>拦截</SelectItem>
+                            <SelectItem value='observe'>观察</SelectItem>
+                            <SelectItem value='off'>关闭</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </td>
                       <td className='text-muted-foreground px-3 py-2 text-xs'>
                         {formatTime(rule.updated_at)}
@@ -876,30 +811,6 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
                             </TooltipTrigger>
                             <TooltipContent>编辑规则</TooltipContent>
                           </Tooltip>
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <Button
-                                  type='button'
-                                  size='icon-sm'
-                                  variant='ghost'
-                                  aria-label={
-                                    rule.enabled ? '停用规则' : '启用规则'
-                                  }
-                                  disabled={togglingRuleID === rule.id}
-                                  onClick={() => void toggleRule(rule)}
-                                />
-                              }
-                            >
-                              <RulePowerIcon
-                                enabled={rule.enabled}
-                                isLoading={togglingRuleID === rule.id}
-                              />
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {rule.enabled ? '停用规则' : '启用规则'}
-                            </TooltipContent>
-                          </Tooltip>
                           <DropdownMenu>
                             <DropdownMenuTrigger
                               render={
@@ -919,12 +830,6 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
                               >
                                 <Pencil />
                                 编辑
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => void toggleRule(rule)}
-                              >
-                                {rule.enabled ? <PowerOff /> : <Power />}
-                                {rule.enabled ? '停用' : '启用'}
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
@@ -1165,20 +1070,31 @@ export function SensitiveWordsSection({ defaultValues }: Props) {
           </div>
         </div>
 
-        <label className='flex items-center justify-between gap-4 border-t pt-4'>
-          <span>
-            <span className='block text-sm font-medium'>创建后立即启用</span>
-            <span className='text-muted-foreground block pt-1 text-xs'>
-              停用的规则仍保留，且不会参与请求匹配。
-            </span>
-          </span>
-          <Switch
-            checked={draft.enabled}
-            onCheckedChange={(enabled) =>
-              setDraft((current) => ({ ...current, enabled }))
-            }
-          />
-        </label>
+        <div className='grid gap-3 border-t pt-4 sm:grid-cols-2'>
+          <div className='space-y-2'>
+            <Label>处理模式</Label>
+            <Select
+              value={draft.mode}
+              onValueChange={(mode) => {
+                if (mode === 'block' || mode === 'observe' || mode === 'off') {
+                  setDraft((current) => ({ ...current, mode }))
+                }
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='block'>拦截</SelectItem>
+                <SelectItem value='observe'>观察</SelectItem>
+                <SelectItem value='off'>关闭</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className='text-muted-foreground text-xs'>
+              关闭仅停用当前规则；全局审计证据由策略区统一控制。
+            </p>
+          </div>
+        </div>
       </Dialog>
 
       <ConfirmDialog

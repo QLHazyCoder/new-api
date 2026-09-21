@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -26,24 +25,18 @@ func setupSensitiveWordTest(t *testing.T) {
 		&SensitiveWordRule{},
 		&SensitiveWordRuleWord{},
 		&SensitiveWordRuleGroup{},
-		&SensitiveWordWhitelist{},
 		&SensitiveWordAuditEvent{},
+		&SensitiveWordPolicy{},
 	))
 
-	oldWords := append([]string(nil), setting.SensitiveWords...)
-	oldCheckEnabled := setting.CheckSensitiveEnabled
-	oldCheckPromptEnabled := setting.CheckSensitiveOnPromptEnabled
 	oldRedisEnabled := common.RedisEnabled
-	setting.SensitiveWords = nil
-	setting.CheckSensitiveEnabled = true
-	setting.CheckSensitiveOnPromptEnabled = true
 	common.RedisEnabled = false
 
 	require.NoError(t, DB.Exec("DELETE FROM sensitive_word_audit_events").Error)
 	require.NoError(t, DB.Exec("DELETE FROM sensitive_word_rule_words").Error)
 	require.NoError(t, DB.Exec("DELETE FROM sensitive_word_rule_groups").Error)
-	require.NoError(t, DB.Exec("DELETE FROM sensitive_word_whitelists").Error)
 	require.NoError(t, DB.Exec("DELETE FROM sensitive_word_rules").Error)
+	require.NoError(t, DB.Exec("DELETE FROM sensitive_word_policy").Error)
 	require.NoError(t, DB.Where(&Option{Key: "SensitiveWordConfig"}).Delete(&Option{}).Error)
 	require.NoError(t, DB.Where(&Option{Key: sensitiveWordMigrationKey}).Delete(&Option{}).Error)
 	require.NoError(t, LOG_DB.Where("type = ?", LogTypeSensitiveWordBlock).Delete(&Log{}).Error)
@@ -53,14 +46,11 @@ func setupSensitiveWordTest(t *testing.T) {
 		_ = DB.Exec("DELETE FROM sensitive_word_audit_events").Error
 		_ = DB.Exec("DELETE FROM sensitive_word_rule_words").Error
 		_ = DB.Exec("DELETE FROM sensitive_word_rule_groups").Error
-		_ = DB.Exec("DELETE FROM sensitive_word_whitelists").Error
 		_ = DB.Exec("DELETE FROM sensitive_word_rules").Error
+		_ = DB.Exec("DELETE FROM sensitive_word_policy").Error
 		_ = DB.Where(&Option{Key: "SensitiveWordConfig"}).Delete(&Option{}).Error
 		_ = DB.Where(&Option{Key: sensitiveWordMigrationKey}).Delete(&Option{}).Error
 		_ = LOG_DB.Where("type = ?", LogTypeSensitiveWordBlock).Delete(&Log{}).Error
-		setting.SensitiveWords = oldWords
-		setting.CheckSensitiveEnabled = oldCheckEnabled
-		setting.CheckSensitiveOnPromptEnabled = oldCheckPromptEnabled
 		common.RedisEnabled = oldRedisEnabled
 		invalidateSensitiveWordRuntime()
 	})
@@ -68,16 +58,16 @@ func setupSensitiveWordTest(t *testing.T) {
 
 func saveSensitiveWordTestConfig(t *testing.T, mode string, auditEnabled bool, threshold int) {
 	t.Helper()
-	require.NoError(t, SaveSensitiveWordConfig(SensitiveWordConfig{
+	_ = mode // Rule actions are configured on each test rule, not globally.
+	require.NoError(t, SaveSensitiveWordPolicy(SensitiveWordPolicy{
 		Enabled:                 true,
 		CheckPrompt:             true,
-		Mode:                    mode,
-		AuditEnabled:            auditEnabled,
+		RetainFullPrompt:        auditEnabled,
 		BlockMessage:            sensitiveWordBlockMessage,
 		BanThreshold:            threshold,
 		FullPromptRetentionDays: 180,
 		MaxPromptRunes:          SensitiveWordMaxPromptRunes,
-	}))
+	}, 1))
 }
 
 func createSensitiveWordTestUser(t *testing.T, quota int64, whitelisted bool) *User {
@@ -104,7 +94,14 @@ func createSensitiveWordTestUser(t *testing.T, quota int64, whitelisted bool) *U
 
 func addSensitiveWordTestRule(t *testing.T, name string, words []string, scope string, groups []string) *SensitiveWordRuleDetail {
 	t.Helper()
-	detail, err := UpsertSensitiveWordRule(0, name, words, scope, groups, 1, nil)
+	detail, err := UpsertSensitiveWordRuleWithMode(0, name, words, scope, groups, 1, SensitiveWordModeBlock)
+	require.NoError(t, err)
+	return detail
+}
+
+func addSensitiveWordTestRuleWithMode(t *testing.T, name string, words []string, scope string, groups []string, mode string) *SensitiveWordRuleDetail {
+	t.Helper()
+	detail, err := UpsertSensitiveWordRuleWithMode(0, name, words, scope, groups, 1, mode)
 	require.NoError(t, err)
 	return detail
 }
@@ -214,7 +211,7 @@ func TestSensitiveWordObserveAuditPersistenceErrorIsTyped(t *testing.T) {
 	setupSensitiveWordTest(t)
 	saveSensitiveWordTestConfig(t, "observe", true, SensitiveWordBanThreshold)
 	user := createSensitiveWordTestUser(t, 4200000, false)
-	addSensitiveWordTestRule(t, "审计故障规则", []string{"审计故障命中词"}, SensitiveWordScopeGlobal, nil)
+	addSensitiveWordTestRuleWithMode(t, "审计故障规则", []string{"审计故障命中词"}, SensitiveWordScopeGlobal, nil, SensitiveWordModeObserve)
 
 	triggerName := fmt.Sprintf("sensitive_audit_failure_%d", time.Now().UnixNano())
 	triggerSQL := fmt.Sprintf(
@@ -249,7 +246,6 @@ func TestMigrateSensitiveWordDataImportsPersistedLegacyOptionOnce(t *testing.T) 
 		_ = DB.Where(&Option{Key: "SensitiveWords"}).Delete(&Option{}).Error
 	})
 
-	setting.SensitiveWords = []string{"memory-only-word"}
 	require.NoError(t, DB.Save(&Option{Key: "SensitiveWords", Value: "legacy-one\nlegacy-two"}).Error)
 	require.NoError(t, MigrateSensitiveWordData())
 
@@ -260,16 +256,20 @@ func TestMigrateSensitiveWordDataImportsPersistedLegacyOptionOnce(t *testing.T) 
 	detail, err := GetSensitiveWordRuleDetail(rules[0].ID)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"legacy-one", "legacy-two"}, detail.Words)
-	require.True(t, isSensitiveWordMigrationComplete())
+	var marker Option
+	require.NoError(t, DB.Where(&Option{Key: sensitiveWordMigrationKey, Value: sensitiveWordMigrationValue}).First(&marker).Error)
 
 	require.NoError(t, DeleteSensitiveWordRule(detail.ID))
+	// A later startup must honor the committed migration marker. Deleting the
+	// imported rule must not resurrect the legacy Option value.
+	require.NoError(t, MigrateSensitiveWordData())
 	user := createSensitiveWordTestUser(t, 6800000, false)
 	result, err := CheckSensitiveRequest(sensitiveWordTestInput(user, "legacy-after-delete", "legacy-one"))
 	require.NoError(t, err)
 	require.False(t, result.Matched, "新规则删除后不得回退到旧 SensitiveWords 配置")
 }
 
-func TestMigrateSensitiveWordDataKeepsInvalidLegacyOptionActive(t *testing.T) {
+func TestMigrateSensitiveWordDataSkipsInvalidLegacyOption(t *testing.T) {
 	setupSensitiveWordTest(t)
 	var previous Option
 	previousExists := DB.Where(&Option{Key: "SensitiveWords"}).First(&previous).Error == nil
@@ -292,31 +292,27 @@ func TestMigrateSensitiveWordDataKeepsInvalidLegacyOptionActive(t *testing.T) {
 	user := createSensitiveWordTestUser(t, 42000000, false)
 	result, err := CheckSensitiveRequest(sensitiveWordTestInput(user, "legacy-invalid-word", "前缀"+legacyWord+"后缀"))
 	require.NoError(t, err)
-	require.True(t, result.Matched, "不符合新编辑器限制的旧词仍必须保持拦截")
-	require.True(t, result.Blocked)
+	require.False(t, result.Matched, "无法导入的新规则词条不得在运行时继续走旧配置回退")
 }
 
-func TestSaveSensitiveWordConfigInvalidatesLocalSnapshot(t *testing.T) {
+func TestSaveSensitiveWordPolicyInvalidatesRuntimeSnapshot(t *testing.T) {
 	setupSensitiveWordTest(t)
-	initial := GetSensitiveWordConfig()
-	require.Equal(t, "block", initial.Mode)
-	require.NoError(t, SaveSensitiveWordConfig(SensitiveWordConfig{
+	initial := GetSensitiveWordPolicy()
+	require.False(t, initial.Enabled)
+	require.NoError(t, SaveSensitiveWordPolicy(SensitiveWordPolicy{
 		Enabled:                 true,
 		CheckPrompt:             true,
-		Mode:                    "observe",
-		AuditEnabled:            false,
+		RetainFullPrompt:        false,
 		BlockMessage:            sensitiveWordBlockMessage,
 		BanThreshold:            7,
 		FullPromptRetentionDays: 30,
 		MaxPromptRunes:          4096,
-	}))
-	updated := GetSensitiveWordConfig()
-	require.Equal(t, "observe", updated.Mode)
-	require.False(t, updated.AuditEnabled)
+	}, 1))
+	updated := GetSensitiveWordPolicy()
+	require.True(t, updated.Enabled)
+	require.False(t, updated.RetainFullPrompt)
 	require.Equal(t, 7, updated.BanThreshold)
 	require.Equal(t, 4096, updated.MaxPromptRunes)
-	// Exercise the cached read path as well as the post-save reload above.
-	require.Equal(t, updated, GetSensitiveWordConfig())
 }
 
 func TestSensitiveWordRulesApplyGlobalAndCandidateGroupOnce(t *testing.T) {
@@ -360,9 +356,32 @@ func TestSensitiveWordRulesApplyGlobalAndCandidateGroupOnce(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestSensitiveWordBlockModeWinsOverObserveAndOff(t *testing.T) {
+	setupSensitiveWordTest(t)
+	saveSensitiveWordTestConfig(t, SensitiveWordModeBlock, true, SensitiveWordBanThreshold)
+	observeRule := addSensitiveWordTestRuleWithMode(t, "观察规则", []string{"模式优先词"}, SensitiveWordScopeGlobal, nil, SensitiveWordModeObserve)
+	blockRule := addSensitiveWordTestRuleWithMode(t, "拦截规则", []string{"模式优先词"}, SensitiveWordScopeGlobal, nil, SensitiveWordModeBlock)
+	user := createSensitiveWordTestUser(t, 1000000, false)
+
+	result, err := CheckSensitiveRequest(sensitiveWordTestInput(user, "mode-priority-block", "模式优先词"))
+	require.NoError(t, err)
+	require.True(t, result.Blocked)
+	require.False(t, result.ObserveOnly)
+	require.Equal(t, 1, result.ViolationCount)
+	require.ElementsMatch(t, []int64{observeRule.ID, blockRule.ID}, result.MatchedRuleIDs)
+
+	require.NoError(t, SetSensitiveWordRuleMode(blockRule.ID, SensitiveWordModeOff))
+	result, err = CheckSensitiveRequest(sensitiveWordTestInput(user, "mode-priority-observe", "模式优先词"))
+	require.NoError(t, err)
+	require.True(t, result.Matched)
+	require.False(t, result.Blocked)
+	require.True(t, result.ObserveOnly)
+	require.Equal(t, 1, result.ViolationCount)
+}
+
 func TestSensitiveWordWhitelistAndObserveModeRecordWithoutCounting(t *testing.T) {
 	setupSensitiveWordTest(t)
-	addSensitiveWordTestRule(t, "审计规则", []string{"命中词"}, SensitiveWordScopeGlobal, nil)
+	rule := addSensitiveWordTestRule(t, "审计规则", []string{"命中词"}, SensitiveWordScopeGlobal, nil)
 	whitelisted := createSensitiveWordTestUser(t, 19000000, true)
 	saveSensitiveWordTestConfig(t, "block", true, SensitiveWordBanThreshold)
 
@@ -382,6 +401,7 @@ func TestSensitiveWordWhitelistAndObserveModeRecordWithoutCounting(t *testing.T)
 
 	observed := createSensitiveWordTestUser(t, 23000000, false)
 	saveSensitiveWordTestConfig(t, "observe", false, SensitiveWordBanThreshold)
+	require.NoError(t, SetSensitiveWordRuleMode(rule.ID, SensitiveWordModeObserve))
 	result, err = CheckSensitiveRequest(sensitiveWordTestInput(observed, "observe-request", "命中词只观察"))
 	require.NoError(t, err)
 	require.True(t, result.Matched)
@@ -396,17 +416,17 @@ func TestSensitiveWordWhitelistAndObserveModeRecordWithoutCounting(t *testing.T)
 	require.Contains(t, getSensitiveWordTestLog(t, "observe-request").Other, "\"action\":\"observe\"")
 }
 
-func TestSensitiveWordUserWhitelistFieldOverridesLegacyCompatibilityRow(t *testing.T) {
+func TestSensitiveWordUserWhitelistFieldControlsBypass(t *testing.T) {
 	setupSensitiveWordTest(t)
 	saveSensitiveWordTestConfig(t, "block", true, SensitiveWordBanThreshold)
 	addSensitiveWordTestRule(t, "白名单一致性规则", []string{"一致性命中词"}, SensitiveWordScopeGlobal, nil)
-	user := createSensitiveWordTestUser(t, 12000000, false)
-	require.NoError(t, DB.Create(&SensitiveWordWhitelist{UserID: user.Id, Enabled: true, CreatedBy: 1}).Error)
+	user := createSensitiveWordTestUser(t, 12000000, true)
 
-	result, err := CheckSensitiveRequest(sensitiveWordTestInput(user, "legacy-row-disabled", "一致性命中词"))
+	result, err := CheckSensitiveRequest(sensitiveWordTestInput(user, "whitelist-field", "一致性命中词"))
 	require.NoError(t, err)
-	require.True(t, result.Blocked, "用户抽屉关闭白名单后，旧兼容记录不得继续放行")
-	require.False(t, result.WhitelistBypassed)
+	require.True(t, result.WhitelistBypassed)
+	require.False(t, result.Blocked)
+	require.Zero(t, result.ViolationCount)
 }
 
 func TestSensitiveWordFifthViolationBansWithoutChangingBalance(t *testing.T) {
@@ -708,4 +728,24 @@ func TestSensitiveWordRuntimeRefreshAndUserLogRedaction(t *testing.T) {
 	require.NotContains(t, filter, "rule_names")
 	require.NotContains(t, filter, "prompt_hash")
 	require.Equal(t, false, filter["balance_changed"])
+}
+
+func TestSensitiveWordGeneratesSharedRequestIDWhenInputIsEmpty(t *testing.T) {
+	setupSensitiveWordTest(t)
+	saveSensitiveWordTestConfig(t, SensitiveWordModeBlock, true, SensitiveWordBanThreshold)
+	addSensitiveWordTestRule(t, "请求 ID 关联规则", []string{"空请求 ID 命中词"}, SensitiveWordScopeGlobal, nil)
+	user := createSensitiveWordTestUser(t, 4000000, false)
+
+	input := sensitiveWordTestInput(user, "", "空请求 ID 命中词")
+	result, err := CheckSensitiveRequest(input)
+	require.NoError(t, err)
+	require.True(t, result.Blocked)
+	require.NotZero(t, result.AuditID)
+
+	var event SensitiveWordAuditEvent
+	require.NoError(t, DB.First(&event, result.AuditID).Error)
+	require.NotEmpty(t, event.RequestID)
+	var log Log
+	require.NoError(t, LOG_DB.Where("request_id = ? AND type = ?", event.RequestID, LogTypeSensitiveWordBlock).First(&log).Error)
+	require.Equal(t, event.RequestID, log.RequestId)
 }

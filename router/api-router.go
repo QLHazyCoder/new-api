@@ -165,6 +165,22 @@ func SetApiRouter(router *gin.Engine) {
 			}
 		}
 
+		// Sensitive-word policy and rule management. Audit details are exposed
+		// through usage-log type 8, so this route only owns policy configuration.
+		sensitiveWordRoute := apiRouter.Group("/sensitive-words")
+		sensitiveWordRoute.Use(middleware.AdminAuth())
+		{
+			sensitiveWordRoute.GET("/policy", controller.GetSensitiveWordPolicy)
+			sensitiveWordRoute.PUT("/policy", controller.UpdateSensitiveWordPolicy)
+			sensitiveWordRoute.GET("/groups", controller.GetSensitiveWordGroups)
+			sensitiveWordRoute.GET("/rules", controller.GetSensitiveWordRules)
+			sensitiveWordRoute.POST("/rules", controller.CreateSensitiveWordRule)
+			sensitiveWordRoute.GET("/rules/:id", controller.GetSensitiveWordRule)
+			sensitiveWordRoute.PUT("/rules/:id", controller.UpdateSensitiveWordRule)
+			sensitiveWordRoute.DELETE("/rules/:id", controller.DeleteSensitiveWordRule)
+			sensitiveWordRoute.PATCH("/rules/:id/mode", controller.SetSensitiveWordRuleMode)
+		}
+
 		// Subscription billing (plans, purchase, admin management)
 		subscriptionRoute := apiRouter.Group("/subscription")
 		subscriptionRoute.Use(middleware.UserAuth())
@@ -313,6 +329,9 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/audit/self", middleware.DisableCache(), middleware.UserAuth(), controller.GetAuditLogs)
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)
+		// Type 8 log rows keep only redacted metadata. Administrators can fetch
+		// the linked evidence from the primary database when opening details.
+		logRoute.GET("/sensitive-word-audit/:id", middleware.AdminAuth(), controller.GetSensitiveWordAudit)
 		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)

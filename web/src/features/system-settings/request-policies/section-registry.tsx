@@ -26,15 +26,7 @@ const POLICY_SECTIONS = [
   {
     id: 'filtering',
     titleKey: 'Request checks',
-    build: (settings: RequestPolicySettings) => (
-      <SensitiveWordsSection
-        defaultValues={{
-          CheckSensitiveEnabled: settings.CheckSensitiveEnabled,
-          CheckSensitiveOnPromptEnabled: settings.CheckSensitiveOnPromptEnabled,
-          SensitiveWords: settings.SensitiveWords,
-        }}
-      />
-    ),
+    build: () => <SensitiveWordsSection />,
   },
   {
     id: 'routing',

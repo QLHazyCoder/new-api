@@ -14,7 +14,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	goahocorasick "github.com/anknown/ahocorasick"
 	"gorm.io/gorm"
@@ -26,7 +25,7 @@ const (
 	SensitiveWordScopeGlobal    = "global"
 	SensitiveWordScopeGroup     = "group"
 	SensitiveWordLogAction      = "sensitive_word_block"
-	SensitiveWordBanThreshold   = 5
+	SensitiveWordBanThreshold   = 50
 	SensitiveWordMaxRunes       = 200
 	SensitiveWordMaxPromptRunes = 65536
 	// The audit prompt limit is intentionally larger than MySQL TEXT's byte
@@ -34,9 +33,14 @@ const (
 	// remains a final guard if the configured rune limit changes in the future.
 	SensitiveWordMaxPromptBytes = 512 * 1024
 	SensitiveWordMaxRules       = 10000
-	sensitiveWordConfigCacheTTL = 5 * time.Second
 	sensitiveWordMigrationKey   = "SensitiveWordRulesMigrationVersion"
-	sensitiveWordMigrationValue = "1"
+	sensitiveWordMigrationValue = "2"
+)
+
+const (
+	SensitiveWordModeBlock   = "block"
+	SensitiveWordModeObserve = "observe"
+	SensitiveWordModeOff     = "off"
 )
 
 // SensitiveWordAuditPrompt keeps the public JSON shape as a string while
@@ -65,9 +69,12 @@ type SensitiveWordRule struct {
 	Name string `json:"name" gorm:"type:varchar(64);not null;default:'';index"`
 	// Word is retained for migration and compatibility with installations that
 	// predate the rule-word child table. New writes use Words instead.
-	Word      string                   `json:"-" gorm:"type:varchar(200);not null;index"`
-	Scope     string                   `json:"scope" gorm:"type:varchar(16);not null;index"`
-	Enabled   bool                     `json:"enabled" gorm:"not null;default:true;index"`
+	Word  string `json:"-" gorm:"type:varchar(200);not null;index"`
+	Scope string `json:"scope" gorm:"type:varchar(16);not null;index"`
+	Mode  string `json:"mode" gorm:"type:varchar(16);not null;default:'observe';index"`
+	// Enabled is retained for one migration window so old databases can be
+	// imported. It is never exposed or consulted by runtime matching.
+	Enabled   bool                     `json:"-" gorm:"not null;default:true;index"`
 	CreatedBy int                      `json:"created_by" gorm:"index"`
 	Version   int64                    `json:"version" gorm:"not null;default:1"`
 	CreatedAt time.Time                `json:"created_at"`
@@ -88,9 +95,9 @@ type SensitiveWordRuleSummary struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
 	Scope     string    `json:"scope"`
+	Mode      string    `json:"mode"`
 	Groups    []string  `json:"groups"`
 	WordCount int       `json:"word_count"`
-	Enabled   bool      `json:"enabled"`
 	CreatedBy int       `json:"created_by"`
 	Version   int64     `json:"version"`
 	CreatedAt time.Time `json:"created_at"`
@@ -107,20 +114,22 @@ type SensitiveWordRuleGroup struct {
 	GroupName string `json:"group_name" gorm:"type:varchar(64);primaryKey;index"`
 }
 
-type SensitiveWordWhitelist struct {
-	ID        int64     `json:"id" gorm:"primaryKey"`
-	UserID    int       `json:"user_id" gorm:"uniqueIndex;not null"`
-	Enabled   bool      `json:"enabled" gorm:"not null;default:true;index"`
-	Remark    string    `json:"remark" gorm:"type:varchar(255)"`
-	CreatedBy int       `json:"created_by" gorm:"index"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID"`
+// legacySensitiveWordWhitelist is used only while importing installations
+// that still have the former standalone whitelist table. Runtime decisions
+// use users.sensitive_word_whitelist exclusively.
+type legacySensitiveWordWhitelist struct {
+	ID      int64 `gorm:"primaryKey"`
+	UserID  int   `gorm:"column:user_id"`
+	Enabled bool  `gorm:"column:enabled"`
+}
+
+func (legacySensitiveWordWhitelist) TableName() string {
+	return "sensitive_word_whitelists"
 }
 
 type SensitiveWordAuditEvent struct {
 	ID                int64                    `json:"id" gorm:"primaryKey"`
-	RequestID         string                   `json:"request_id" gorm:"type:varchar(128);index"`
+	RequestID         string                   `json:"request_id" gorm:"type:varchar(128);index:idx_sensitive_word_audit_request"`
 	UserID            int                      `json:"user_id" gorm:"index"`
 	UsernameSnapshot  string                   `json:"username_snapshot"`
 	TokenID           int                      `json:"token_id" gorm:"index"`
@@ -150,28 +159,25 @@ type SensitiveWordAuditEvent struct {
 	CreatedAt         time.Time                `json:"created_at" gorm:"index"`
 }
 
-type SensitiveWordStats struct {
-	TotalRules     int64 `json:"total_rules"`
-	GlobalRules    int64 `json:"global_rules"`
-	GroupRules     int64 `json:"group_rules"`
-	WhitelistUsers int64 `json:"whitelist_users"`
-	TodayHits      int64 `json:"today_hits"`
-	TodayBlocks    int64 `json:"today_blocks"`
-	TodayWhitelist int64 `json:"today_whitelist"`
-	TodayAutoBans  int64 `json:"today_auto_bans"`
+// SensitiveWordPolicy is the singleton policy shared by all rules. Rule
+// action is intentionally kept on SensitiveWordRule so a global observe rule
+// cannot accidentally change the action of a local blocking rule.
+type SensitiveWordPolicy struct {
+	ID                      int64     `json:"id" gorm:"primaryKey"`
+	Enabled                 bool      `json:"enabled" gorm:"not null;default:true"`
+	CheckPrompt             bool      `json:"check_prompt" gorm:"not null;default:true"`
+	RetainFullPrompt        bool      `json:"retain_full_prompt" gorm:"not null;default:true"`
+	BlockMessage            string    `json:"block_message" gorm:"type:text;not null"`
+	BanThreshold            int       `json:"ban_threshold" gorm:"not null;default:50"`
+	FullPromptRetentionDays int       `json:"full_prompt_retention_days" gorm:"not null;default:180"`
+	MaxPromptRunes          int       `json:"max_prompt_runes" gorm:"not null;default:65536"`
+	Version                 int64     `json:"version" gorm:"not null;default:1"`
+	UpdatedBy               int       `json:"updated_by" gorm:"index"`
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 }
 
-type SensitiveWordConfig struct {
-	Enabled                 bool   `json:"enabled"`
-	CheckPrompt             bool   `json:"check_prompt"`
-	Mode                    string `json:"mode"`
-	AuditEnabled            bool   `json:"audit_enabled"`
-	BlockMessage            string `json:"block_message"`
-	BanThreshold            int    `json:"ban_threshold"`
-	FullPromptRetentionDays int    `json:"full_prompt_retention_days"`
-	MaxPromptRunes          int    `json:"max_prompt_runes"`
-	RuleVersion             int64  `json:"rule_version"`
-}
+func (SensitiveWordPolicy) TableName() string { return "sensitive_word_policy" }
 
 type SensitiveCheckInput struct {
 	RequestID string
@@ -203,22 +209,22 @@ type SensitiveCheckResult struct {
 	QuotaBefore       int64
 	QuotaAfter        int64
 	ObserveOnly       bool
+	MatchedRuleModes  []string
 }
 
 type sensitiveRuntimeRule struct {
 	ID      int64
 	Name    string
 	Scope   string
+	Mode    string
 	Version int64
 	Groups  map[string]struct{}
 }
 
 type sensitiveRuntimeSnapshot struct {
-	machine           *goahocorasick.Machine
-	words             map[string][]sensitiveRuntimeRule
-	version           int64
-	migrationComplete bool
-	legacyWords       []string
+	machine *goahocorasick.Machine
+	words   map[string][]sensitiveRuntimeRule
+	version int64
 }
 
 var sensitiveRuntime struct {
@@ -226,30 +232,28 @@ var sensitiveRuntime struct {
 	snapshot *sensitiveRuntimeSnapshot
 }
 
-var sensitiveConfigRuntime struct {
-	sync.RWMutex
-	config   SensitiveWordConfig
-	loadedAt time.Time
-	loaded   bool
-}
-
 const (
-	sensitiveWordBlockMessage       = "你的请求因命中敏感词已被拦截，已记录 1 次；累计超过 5 次将立即封号，余额不退，如果有攻击破解别人网站等情节严重的情况将会直接报警。请勿使用当前分组进行违规对话；如有误判，请联系群主审核并清理你的记录。"
-	legacySensitiveWordBlockMessage = "你的请求因命中敏感词已被拦截，已记录 1 次；累计超过 5 次将立即封号，但不会清理余额。请勿使用当前分组进行违规对话；如有误判，请联系群主审核并清理你的记录。"
+	sensitiveWordBlockMessage = "你的请求因命中敏感词已被拦截，已记录 1 次；累计达到 {{threshold}} 次将立即封号，余额不退，如果有攻击破解别人网站等情节严重的情况将会直接报警。请勿使用当前分组进行违规对话；如有误判，请联系群主审核并清理你的记录。"
 )
+
+// legacySensitiveWordConfig is a migration DTO only. It is never read by the
+// relay or exposed by a management route after the policy row is created.
+type legacySensitiveWordConfig struct {
+	Enabled                 bool   `json:"enabled"`
+	CheckPrompt             bool   `json:"check_prompt"`
+	AuditEnabled            bool   `json:"audit_enabled"`
+	BlockMessage            string `json:"block_message"`
+	BanThreshold            int    `json:"ban_threshold"`
+	FullPromptRetentionDays int    `json:"full_prompt_retention_days"`
+	MaxPromptRunes          int    `json:"max_prompt_runes"`
+	RuleVersion             int64  `json:"rule_version"`
+}
 
 func invalidateSensitiveWordRuntime() {
 	sensitiveRuntime.Lock()
 	sensitiveRuntime.snapshot = nil
 	sensitiveRuntime.Unlock()
 
-	// Rules and policy share the same relay path. Clear both local snapshots
-	// together so a successful admin save takes effect on the next request.
-	sensitiveConfigRuntime.Lock()
-	sensitiveConfigRuntime.config = SensitiveWordConfig{}
-	sensitiveConfigRuntime.loadedAt = time.Time{}
-	sensitiveConfigRuntime.loaded = false
-	sensitiveConfigRuntime.Unlock()
 }
 
 func normalizeSensitiveWord(word string) (string, error) {
@@ -290,154 +294,91 @@ func validSensitiveGroups(groups []string) ([]string, error) {
 	return result, nil
 }
 
-func defaultSensitiveWordConfig() SensitiveWordConfig {
-	return SensitiveWordConfig{
-		Enabled:                 setting.ShouldCheckPromptSensitive(),
+func defaultSensitiveWordPolicy() SensitiveWordPolicy {
+	return SensitiveWordPolicy{
+		ID:                      1,
+		Enabled:                 true,
 		CheckPrompt:             true,
-		Mode:                    "block",
-		AuditEnabled:            true,
+		RetainFullPrompt:        true,
 		BlockMessage:            sensitiveWordBlockMessage,
 		BanThreshold:            SensitiveWordBanThreshold,
 		FullPromptRetentionDays: 180,
 		MaxPromptRunes:          SensitiveWordMaxPromptRunes,
+		Version:                 1,
 	}
 }
 
-func normalizeSensitiveWordConfig(cfg SensitiveWordConfig) SensitiveWordConfig {
-	if cfg.BanThreshold <= 0 {
-		cfg.BanThreshold = SensitiveWordBanThreshold
+func normalizeSensitiveWordPolicy(policy SensitiveWordPolicy) SensitiveWordPolicy {
+	policy.ID = 1
+	if policy.BanThreshold <= 0 || policy.BanThreshold > 1000 {
+		policy.BanThreshold = SensitiveWordBanThreshold
 	}
-	if cfg.Mode != "block" && cfg.Mode != "observe" && cfg.Mode != "off" {
-		cfg.Mode = "block"
+	if policy.FullPromptRetentionDays <= 0 || policy.FullPromptRetentionDays > 3650 {
+		policy.FullPromptRetentionDays = 180
 	}
-	if cfg.MaxPromptRunes <= 0 || cfg.MaxPromptRunes > SensitiveWordMaxPromptRunes {
-		cfg.MaxPromptRunes = SensitiveWordMaxPromptRunes
+	if policy.MaxPromptRunes <= 0 || policy.MaxPromptRunes > SensitiveWordMaxPromptRunes {
+		policy.MaxPromptRunes = SensitiveWordMaxPromptRunes
 	}
-	if cfg.BlockMessage == "" || cfg.BlockMessage == legacySensitiveWordBlockMessage || strings.Contains(cfg.BlockMessage, "清空余额") || strings.Contains(cfg.BlockMessage, "清零余额") {
-		cfg.BlockMessage = sensitiveWordBlockMessage
+	if strings.TrimSpace(policy.BlockMessage) == "" || strings.Contains(policy.BlockMessage, "清空余额") || strings.Contains(policy.BlockMessage, "清零余额") {
+		policy.BlockMessage = sensitiveWordBlockMessage
 	}
-	return cfg
+	if policy.Version <= 0 {
+		policy.Version = 1
+	}
+	return policy
 }
 
-func loadSensitiveWordConfig() SensitiveWordConfig {
-	cfg := defaultSensitiveWordConfig()
-	if DB != nil && DB.Migrator().HasTable(&Option{}) {
-		var option Option
-		if DB.Where(&Option{Key: "SensitiveWordConfig"}).First(&option).Error == nil {
-			_ = json.Unmarshal([]byte(option.Value), &cfg)
+func GetSensitiveWordPolicy() SensitiveWordPolicy {
+	policy := defaultSensitiveWordPolicy()
+	if DB == nil || !DB.Migrator().HasTable(&SensitiveWordPolicy{}) {
+		// The policy table is the only runtime source. A partially migrated node
+		// must fail open instead of continuing to execute the removed legacy
+		// option path.
+		policy.Enabled = false
+		return policy
+	}
+	var stored SensitiveWordPolicy
+	if err := DB.First(&stored, 1).Error; err != nil {
+		// A missing singleton row means the migration did not complete. Keep the
+		// optional policy fail-open until an administrator saves a valid policy.
+		policy.Enabled = false
+		return policy
+	}
+	return normalizeSensitiveWordPolicy(stored)
+}
+
+func SaveSensitiveWordPolicy(policy SensitiveWordPolicy, actor int) error {
+	policy = normalizeSensitiveWordPolicy(policy)
+	current := GetSensitiveWordPolicy()
+	if policy.Version <= current.Version {
+		policy.Version = current.Version + 1
+	}
+	policy.UpdatedBy = actor
+	if DB == nil || !DB.Migrator().HasTable(&SensitiveWordPolicy{}) {
+		return errors.New("敏感词策略表不可用，请先完成数据库迁移")
+	}
+	updates := map[string]interface{}{
+		"enabled":                    policy.Enabled,
+		"check_prompt":               policy.CheckPrompt,
+		"retain_full_prompt":         policy.RetainFullPrompt,
+		"block_message":              policy.BlockMessage,
+		"ban_threshold":              policy.BanThreshold,
+		"full_prompt_retention_days": policy.FullPromptRetentionDays,
+		"max_prompt_runes":           policy.MaxPromptRunes,
+		"version":                    policy.Version,
+		"updated_by":                 policy.UpdatedBy,
+		"updated_at":                 time.Now(),
+	}
+	result := DB.Model(&SensitiveWordPolicy{}).Where("id = ?", 1).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		updates["id"] = int64(1)
+		updates["created_at"] = time.Now()
+		if err := DB.Table("sensitive_word_policy").Create(updates).Error; err != nil {
+			return err
 		}
-	}
-	cfg = normalizeSensitiveWordConfig(cfg)
-	// Reuse the rule snapshot for the displayed version instead of adding a
-	// MAX(version) database query to every relay request.
-	if snapshot, err := getSensitiveRuntimeSnapshot(); err == nil && snapshot != nil && snapshot.version > cfg.RuleVersion {
-		cfg.RuleVersion = snapshot.version
-	}
-	if cfg.RuleVersion <= 0 {
-		cfg.RuleVersion = 1
-	}
-	return cfg
-}
-
-func loadLegacySensitiveWordsFromRuntime() []string {
-	legacySource := append([]string(nil), setting.SensitiveWords...)
-	if DB != nil && DB.Migrator().HasTable(&Option{}) {
-		var legacyOption Option
-		if DB.Where(&Option{Key: "SensitiveWords"}).First(&legacyOption).Error == nil {
-			legacySource = strings.Split(legacyOption.Value, "\n")
-		}
-	}
-	seen := make(map[string]struct{}, len(legacySource))
-	legacyWords := make([]string, 0, len(legacySource))
-	for _, word := range legacySource {
-		word = strings.TrimSpace(word)
-		if word == "" {
-			continue
-		}
-		key := strings.ToLower(word)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		legacyWords = append(legacyWords, word)
-	}
-	return legacyWords
-}
-
-func GetSensitiveWordConfig() SensitiveWordConfig {
-	now := time.Now()
-	sensitiveConfigRuntime.RLock()
-	if sensitiveConfigRuntime.loaded && now.Sub(sensitiveConfigRuntime.loadedAt) < sensitiveWordConfigCacheTTL {
-		cfg := sensitiveConfigRuntime.config
-		sensitiveConfigRuntime.RUnlock()
-		return cfg
-	}
-	sensitiveConfigRuntime.RUnlock()
-
-	sensitiveConfigRuntime.Lock()
-	defer sensitiveConfigRuntime.Unlock()
-	if sensitiveConfigRuntime.loaded && now.Sub(sensitiveConfigRuntime.loadedAt) < sensitiveWordConfigCacheTTL {
-		return sensitiveConfigRuntime.config
-	}
-	cfg := loadSensitiveWordConfig()
-	sensitiveConfigRuntime.config = cfg
-	sensitiveConfigRuntime.loadedAt = now
-	sensitiveConfigRuntime.loaded = true
-	return cfg
-}
-
-func GetSensitiveWordStats() (SensitiveWordStats, error) {
-	var stats SensitiveWordStats
-	if err := DB.Model(&SensitiveWordRule{}).Count(&stats.TotalRules).Error; err != nil {
-		return stats, err
-	}
-	if err := DB.Model(&SensitiveWordRule{}).Where("scope = ?", SensitiveWordScopeGlobal).Count(&stats.GlobalRules).Error; err != nil {
-		return stats, err
-	}
-	if err := DB.Model(&SensitiveWordRule{}).Where("scope = ?", SensitiveWordScopeGroup).Count(&stats.GroupRules).Error; err != nil {
-		return stats, err
-	}
-	if err := DB.Model(&User{}).Where("sensitive_word_whitelist = ?", true).Count(&stats.WhitelistUsers).Error; err != nil {
-		return stats, err
-	}
-	start := time.Now().Truncate(24 * time.Hour)
-	base := DB.Model(&SensitiveWordAuditEvent{}).Where("created_at >= ?", start)
-	if err := base.Count(&stats.TodayHits).Error; err != nil {
-		return stats, err
-	}
-	if err := base.Where("blocked = ?", true).Count(&stats.TodayBlocks).Error; err != nil {
-		return stats, err
-	}
-	if err := base.Where("whitelist_bypassed = ?", true).Count(&stats.TodayWhitelist).Error; err != nil {
-		return stats, err
-	}
-	if err := base.Where("auto_banned = ?", true).Count(&stats.TodayAutoBans).Error; err != nil {
-		return stats, err
-	}
-	return stats, nil
-}
-
-func SaveSensitiveWordConfig(cfg SensitiveWordConfig) error {
-	if cfg.BanThreshold <= 0 || cfg.BanThreshold > 1000 {
-		return errors.New("封禁阈值必须在 1 到 1000 之间")
-	}
-	if cfg.MaxPromptRunes <= 0 || cfg.MaxPromptRunes > SensitiveWordMaxPromptRunes {
-		return errors.New("提示词长度限制无效")
-	}
-	if cfg.Mode != "block" && cfg.Mode != "observe" && cfg.Mode != "off" {
-		return errors.New("敏感词处理模式无效")
-	}
-	cfg = normalizeSensitiveWordConfig(cfg)
-	current := GetSensitiveWordConfig()
-	if cfg.RuleVersion <= current.RuleVersion {
-		cfg.RuleVersion = current.RuleVersion + 1
-	}
-	raw, err := json.Marshal(cfg)
-	if err != nil {
-		return err
-	}
-	if err := DB.Save(&Option{Key: "SensitiveWordConfig", Value: string(raw)}).Error; err != nil {
-		return err
 	}
 	invalidateSensitiveWordRuntime()
 	return nil
@@ -484,20 +425,6 @@ func ruleWords(rule SensitiveWordRule) []string {
 		seen[key] = struct{}{}
 		words = append(words, strings.TrimSpace(item.Word))
 	}
-	if len(words) == 0 && strings.TrimSpace(rule.Word) != "" {
-		for _, item := range strings.Split(rule.Word, "\n") {
-			item = strings.TrimSpace(item)
-			if item == "" {
-				continue
-			}
-			key := strings.ToLower(item)
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			words = append(words, item)
-		}
-	}
 	return words
 }
 
@@ -507,7 +434,27 @@ func buildSensitiveWordRuleSummaryWithCount(rule SensitiveWordRule, wordCount in
 		groups = append(groups, item.GroupName)
 	}
 	sort.Strings(groups)
-	return SensitiveWordRuleSummary{ID: rule.ID, Name: rule.Name, Scope: rule.Scope, Groups: groups, WordCount: wordCount, Enabled: rule.Enabled, CreatedBy: rule.CreatedBy, Version: rule.Version, CreatedAt: rule.CreatedAt, UpdatedAt: rule.UpdatedAt}
+	mode := normalizeSensitiveWordRuleMode(rule.Mode)
+	return SensitiveWordRuleSummary{ID: rule.ID, Name: rule.Name, Scope: rule.Scope, Mode: mode, Groups: groups, WordCount: wordCount, CreatedBy: rule.CreatedBy, Version: rule.Version, CreatedAt: rule.CreatedAt, UpdatedAt: rule.UpdatedAt}
+}
+
+func normalizeSensitiveWordRuleMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case SensitiveWordModeBlock, SensitiveWordModeObserve, SensitiveWordModeOff:
+		return strings.ToLower(strings.TrimSpace(mode))
+	default:
+		return SensitiveWordModeOff
+	}
+}
+
+func migrateSensitiveWordRuleMode(mode string, enabled bool) string {
+	if strings.TrimSpace(mode) == "" {
+		if enabled {
+			return SensitiveWordModeBlock
+		}
+		return SensitiveWordModeOff
+	}
+	return normalizeSensitiveWordRuleMode(mode)
 }
 
 func buildSensitiveWordRuleSummary(rule SensitiveWordRule) SensitiveWordRuleSummary {
@@ -543,9 +490,6 @@ func ListSensitiveWordRules() ([]SensitiveWordRuleSummary, error) {
 	result := make([]SensitiveWordRuleSummary, 0, len(rules))
 	for _, rule := range rules {
 		wordCount := wordCounts[rule.ID]
-		if wordCount == 0 && strings.TrimSpace(rule.Word) != "" {
-			wordCount = len(ruleWords(rule))
-		}
 		result = append(result, buildSensitiveWordRuleSummaryWithCount(rule, wordCount))
 	}
 	return result, nil
@@ -560,7 +504,7 @@ func GetSensitiveWordRuleDetail(id int64) (*SensitiveWordRuleDetail, error) {
 	return &SensitiveWordRuleDetail{SensitiveWordRuleSummary: buildSensitiveWordRuleSummary(rule), Words: words}, nil
 }
 
-func UpsertSensitiveWordRule(id int64, name string, words []string, scope string, groups []string, actor int, enabled *bool) (*SensitiveWordRuleDetail, error) {
+func UpsertSensitiveWordRuleWithMode(id int64, name string, words []string, scope string, groups []string, actor int, mode string) (*SensitiveWordRuleDetail, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errors.New("规则名称不能为空")
@@ -587,6 +531,11 @@ func UpsertSensitiveWordRule(id int64, name string, words []string, scope string
 	} else if len(groups) == 0 {
 		return nil, errors.New("局部规则至少选择一个分组")
 	}
+	rawMode := strings.ToLower(strings.TrimSpace(mode))
+	if rawMode != SensitiveWordModeBlock && rawMode != SensitiveWordModeObserve && rawMode != SensitiveWordModeOff {
+		return nil, errors.New("规则处理模式无效")
+	}
+	mode = rawMode
 	var rule SensitiveWordRule
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		if id > 0 {
@@ -594,11 +543,10 @@ func UpsertSensitiveWordRule(id int64, name string, words []string, scope string
 				return err
 			}
 		} else {
-			rule = SensitiveWordRule{CreatedBy: actor, Enabled: true, Version: 1}
+			rule = SensitiveWordRule{CreatedBy: actor, Enabled: mode != SensitiveWordModeOff, Mode: mode, Version: 1}
 		}
-		if enabled != nil {
-			rule.Enabled = *enabled
-		}
+		rule.Mode = mode
+		rule.Enabled = mode != SensitiveWordModeOff
 		rule.Name, rule.Scope, rule.UpdatedAt = name, scope, time.Now()
 		// Keep the legacy column populated for old readers while the child table
 		// becomes the canonical source for new code.
@@ -634,9 +582,14 @@ func UpsertSensitiveWordRule(id int64, name string, words []string, scope string
 	return GetSensitiveWordRuleDetail(rule.ID)
 }
 
-func SetSensitiveWordRuleEnabled(id int64, enabled bool) error {
+func SetSensitiveWordRuleMode(id int64, mode string) error {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != SensitiveWordModeBlock && mode != SensitiveWordModeObserve && mode != SensitiveWordModeOff {
+		return errors.New("规则处理模式无效")
+	}
 	result := DB.Model(&SensitiveWordRule{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"enabled": enabled,
+		"mode":    mode,
+		"enabled": mode != SensitiveWordModeOff,
 		"version": gorm.Expr("version + ?", 1),
 	})
 	if result.Error != nil {
@@ -688,77 +641,6 @@ func ListSensitiveWordGroups() []string {
 	return result
 }
 
-func UpsertSensitiveWordWhitelist(userID, actor int, enabled bool, remark string) (*SensitiveWordWhitelist, error) {
-	if userID <= 0 {
-		return nil, errors.New("用户 ID 无效")
-	}
-	var item SensitiveWordWhitelist
-	if err := DB.Transaction(func(tx *gorm.DB) error {
-		var user User
-		if err := tx.Select("id").First(&user, userID).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&User{}).Where("id = ?", userID).Update("sensitive_word_whitelist", enabled).Error; err != nil {
-			return err
-		}
-		err := tx.Where("user_id = ?", userID).First(&item).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			item = SensitiveWordWhitelist{UserID: userID, CreatedBy: actor}
-		} else if err != nil {
-			return err
-		}
-		item.Enabled, item.Remark, item.UpdatedAt = enabled, strings.TrimSpace(remark), time.Now()
-		return tx.Save(&item).Error
-	}); err != nil {
-		return nil, err
-	}
-	return &item, nil
-}
-
-func IsSensitiveWordWhitelisted(userID int) bool {
-	var user User
-	// The User column is canonical. The legacy table is migrated at startup and
-	// retained only so existing admin integrations keep working. Falling back to
-	// it here would make a user-drawer switch-off silently ineffective.
-	return DB.Select("sensitive_word_whitelist").First(&user, userID).Error == nil && user.SensitiveWordWhitelist
-}
-
-func ListSensitiveWordWhitelist() ([]SensitiveWordWhitelist, error) {
-	var users []User
-	if err := DB.Select("id").Where("sensitive_word_whitelist = ?", true).Order("id desc").Find(&users).Error; err != nil {
-		return nil, err
-	}
-	var legacyItems []SensitiveWordWhitelist
-	if err := DB.Find(&legacyItems).Error; err != nil {
-		return nil, err
-	}
-	legacyByUserID := make(map[int]SensitiveWordWhitelist, len(legacyItems))
-	for _, item := range legacyItems {
-		legacyByUserID[item.UserID] = item
-	}
-	items := make([]SensitiveWordWhitelist, 0, len(users))
-	for index := range users {
-		user := users[index]
-		item, ok := legacyByUserID[user.Id]
-		if !ok {
-			item = SensitiveWordWhitelist{UserID: user.Id, Enabled: true}
-		}
-		item.Enabled = true
-		items = append(items, item)
-	}
-	return items, nil
-}
-func DeleteSensitiveWordWhitelist(userID int) error {
-	result := DB.Model(&User{}).Where("id = ?", userID).Update("sensitive_word_whitelist", false)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return DB.Where("user_id = ?", userID).Delete(&SensitiveWordWhitelist{}).Error
-}
-
 func redactedSensitivePreview(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -783,19 +665,13 @@ func normalizeSensitivePrompt(value string) string {
 }
 
 func buildSensitiveRuntimeSnapshot() (*sensitiveRuntimeSnapshot, error) {
-	legacyWords := loadLegacySensitiveWordsFromRuntime()
 	if DB == nil || !DB.Migrator().HasTable(&SensitiveWordRule{}) {
-		// A non-master node or an older test/standby database can reach the
-		// relay before the expand migration has created the rule tables. Keep
-		// the legacy option path active until the table-backed engine exists;
-		// this preserves the old protection contract without inventing a second
-		// rule store.
-		return &sensitiveRuntimeSnapshot{
-			version: 1, migrationComplete: false, legacyWords: legacyWords,
-		}, nil
+		// Sensitive-word protection is fail-open when its new schema is not
+		// available. The rest of the API must remain healthy during rollout.
+		return &sensitiveRuntimeSnapshot{version: 1}, nil
 	}
 	var rules []SensitiveWordRule
-	if err := DB.Preload("Groups").Preload("Words").Where("enabled = ?", true).Order("id asc").Find(&rules).Error; err != nil {
+	if err := DB.Preload("Groups").Preload("Words").Where("mode IN ?", []string{SensitiveWordModeBlock, SensitiveWordModeObserve}).Order("id asc").Find(&rules).Error; err != nil {
 		return nil, err
 	}
 	words := make([]string, 0)
@@ -816,19 +692,11 @@ func buildSensitiveRuntimeSnapshot() (*sensitiveRuntimeSnapshot, error) {
 				seenWords[normalized] = struct{}{}
 				words = append(words, normalized)
 			}
-			metadata[normalized] = append(metadata[normalized], sensitiveRuntimeRule{ID: rule.ID, Name: rule.Name, Scope: rule.Scope, Version: rule.Version, Groups: groups})
+			metadata[normalized] = append(metadata[normalized], sensitiveRuntimeRule{ID: rule.ID, Name: rule.Name, Scope: rule.Scope, Mode: normalizeSensitiveWordRuleMode(rule.Mode), Version: rule.Version, Groups: groups})
 		}
 	}
-	var migrationOption Option
-	migrationComplete := false
-	if DB.Migrator().HasTable(&Option{}) {
-		migrationComplete = DB.Where(&Option{Key: sensitiveWordMigrationKey, Value: sensitiveWordMigrationValue}).First(&migrationOption).Error == nil
-	}
-	if migrationComplete {
-		legacyWords = nil
-	}
 	if len(words) == 0 {
-		return &sensitiveRuntimeSnapshot{version: version, words: metadata, migrationComplete: migrationComplete, legacyWords: legacyWords}, nil
+		return &sensitiveRuntimeSnapshot{version: version, words: metadata}, nil
 	}
 	keywords := make([][]rune, 0, len(words))
 	for _, word := range words {
@@ -838,7 +706,7 @@ func buildSensitiveRuntimeSnapshot() (*sensitiveRuntimeSnapshot, error) {
 	if err := machine.Build(keywords); err != nil {
 		return nil, err
 	}
-	return &sensitiveRuntimeSnapshot{machine: machine, words: metadata, version: version, migrationComplete: migrationComplete, legacyWords: legacyWords}, nil
+	return &sensitiveRuntimeSnapshot{machine: machine, words: metadata, version: version}, nil
 }
 
 func getSensitiveRuntimeSnapshot() (*sensitiveRuntimeSnapshot, error) {
@@ -859,30 +727,6 @@ func getSensitiveRuntimeSnapshot() (*sensitiveRuntimeSnapshot, error) {
 	}
 	sensitiveRuntime.snapshot = built
 	return built, nil
-}
-
-func legacySensitiveWordMatches(prompt string) ([]string, error) {
-	snapshot, err := getSensitiveRuntimeSnapshot()
-	if err != nil {
-		return nil, err
-	}
-	if snapshot == nil || snapshot.migrationComplete {
-		return nil, nil
-	}
-	matched := make([]string, 0)
-	lowerPrompt := strings.ToLower(prompt)
-	for _, word := range snapshot.legacyWords {
-		if strings.Contains(lowerPrompt, strings.ToLower(word)) && !containsSensitiveWord(matched, word) {
-			matched = append(matched, word)
-		}
-	}
-	sort.Slice(matched, func(i, j int) bool { return strings.ToLower(matched[i]) < strings.ToLower(matched[j]) })
-	return matched, nil
-}
-
-func isSensitiveWordMigrationComplete() bool {
-	snapshot, err := getSensitiveRuntimeSnapshot()
-	return err == nil && snapshot != nil && snapshot.migrationComplete
 }
 
 func matchSensitiveRules(prompt, group string) ([]SensitiveWordRule, []string, error) {
@@ -909,7 +753,7 @@ func matchSensitiveRules(prompt, group string) ([]SensitiveWordRule, []string, e
 				continue
 			}
 			seen[key] = struct{}{}
-			hits = append(hits, SensitiveWordRule{ID: metadata.ID, Name: metadata.Name, Word: word, Scope: metadata.Scope, Version: metadata.Version})
+			hits = append(hits, SensitiveWordRule{ID: metadata.ID, Name: metadata.Name, Word: word, Scope: metadata.Scope, Mode: metadata.Mode, Version: metadata.Version})
 			if !containsSensitiveWord(words, word) {
 				words = append(words, word)
 			}
@@ -1036,6 +880,42 @@ func sensitiveMatchSnippets(prompt string, words []string) []string {
 	return result
 }
 
+func expandSensitiveWordMessage(message string, threshold int) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		message = sensitiveWordBlockMessage
+	}
+	return strings.ReplaceAll(message, "{{threshold}}", fmt.Sprintf("%d", threshold))
+}
+
+func sensitiveCheckResultFromAudit(event SensitiveWordAuditEvent) *SensitiveCheckResult {
+	var ids []int64
+	var names []string
+	var words []string
+	_ = json.Unmarshal([]byte(event.MatchedRuleIDs), &ids)
+	_ = json.Unmarshal([]byte(event.MatchedRuleNames), &names)
+	_ = json.Unmarshal([]byte(event.MatchedWords), &words)
+	result := &SensitiveCheckResult{
+		Matched:           true,
+		Blocked:           event.Blocked,
+		WhitelistBypassed: event.WhitelistBypassed,
+		AutoBanned:        event.AutoBanned,
+		ViolationCount:    event.ViolationCount,
+		MatchedWords:      words,
+		MatchedRuleIDs:    ids,
+		MatchedRuleNames:  names,
+		MatchedScope:      event.MatchedScope,
+		AuditID:           event.ID,
+		UserStatusBefore:  event.UserStatusBefore,
+		UserStatusAfter:   event.UserStatusAfter,
+		QuotaBefore:       event.QuotaBefore,
+		QuotaAfter:        event.QuotaAfter,
+		ObserveOnly:       event.ObserveOnly,
+	}
+	result.Message = expandSensitiveWordMessage(GetSensitiveWordPolicy().BlockMessage, GetSensitiveWordPolicy().BanThreshold)
+	return result
+}
+
 func CheckSensitiveRequest(input SensitiveCheckInput) (*SensitiveCheckResult, error) {
 	return CheckSensitiveRequestForGroups(input, []string{input.GroupName})
 }
@@ -1044,29 +924,17 @@ func CheckSensitiveRequest(input SensitiveCheckInput) (*SensitiveCheckResult, er
 // Auto routing supplies its ordered candidate groups so a later cross-group
 // retry cannot bypass a local rule after pre-consume has started.
 func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups []string) (*SensitiveCheckResult, error) {
-	cfg := GetSensitiveWordConfig()
+	if strings.TrimSpace(input.RequestID) == "" {
+		input.RequestID = common.NewRequestId()
+	}
+	policy := GetSensitiveWordPolicy()
 	input.Prompt = normalizeSensitivePrompt(input.Prompt)
-	if !cfg.Enabled || !cfg.CheckPrompt || cfg.Mode == "off" || input.Prompt == "" {
+	if !policy.Enabled || !policy.CheckPrompt || input.Prompt == "" {
 		return &SensitiveCheckResult{}, nil
 	}
-
 	rules, words, matchedGroup, err := matchSensitiveRulesForGroups(input.Prompt, candidateGroups, input.GroupName)
 	if err != nil {
 		return nil, err
-	}
-	if len(rules) == 0 {
-		// Only deployments that have not yet completed the one-time Option import
-		// use the legacy option snapshot. Once the migration marker exists, rules
-		// are controlled exclusively by the new table so deleting a rule takes
-		// effect immediately instead of silently falling back to old data.
-		legacyWords, legacyErr := legacySensitiveWordMatches(input.Prompt)
-		if legacyErr != nil {
-			return nil, legacyErr
-		}
-		if len(legacyWords) > 0 {
-			words = legacyWords
-			rules = []SensitiveWordRule{{ID: 0, Name: "旧配置导入", Word: legacyWords[0], Scope: SensitiveWordScopeGlobal, Version: 1}}
-		}
 	}
 	if len(rules) == 0 {
 		return &SensitiveCheckResult{}, nil
@@ -1078,7 +946,10 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 	ids := make([]int64, 0, len(rules))
 	names := make([]string, 0, len(rules))
 	seenIDs := make(map[int64]struct{}, len(rules))
+	seenModes := make(map[string]struct{})
+	modes := make([]string, 0, len(rules))
 	scopes := map[string]bool{}
+	blockingRule := false
 	ruleVersion := int64(1)
 	for _, rule := range rules {
 		if _, ok := seenIDs[rule.ID]; !ok {
@@ -1089,6 +960,14 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 			}
 		}
 		scopes[rule.Scope] = true
+		mode := normalizeSensitiveWordRuleMode(rule.Mode)
+		if mode == SensitiveWordModeBlock {
+			blockingRule = true
+		}
+		if _, ok := seenModes[mode]; !ok {
+			seenModes[mode] = struct{}{}
+			modes = append(modes, mode)
+		}
 		if rule.Version > ruleVersion {
 			ruleVersion = rule.Version
 		}
@@ -1100,7 +979,7 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 		scope = "global+group"
 	}
 	hash := sha256.Sum256([]byte(input.Prompt))
-	observeOnly := cfg.Mode == "observe"
+	observeOnly := !blockingRule
 	result := &SensitiveCheckResult{
 		Matched:          true,
 		ObserveOnly:      observeOnly,
@@ -1108,14 +987,28 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 		MatchedRuleIDs:   ids,
 		MatchedRuleNames: names,
 		MatchedScope:     scope,
-		Message:          cfg.BlockMessage,
+		Message:          expandSensitiveWordMessage(policy.BlockMessage, policy.BanThreshold),
+		MatchedRuleModes: modes,
 	}
 
 	var event SensitiveWordAuditEvent
+	var existingEvent *SensitiveWordAuditEvent
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		var user User
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, input.UserID).Error; err != nil {
 			return err
+		}
+		// The user row lock serializes concurrent relay/retry paths. Recheck the
+		// request identifier after acquiring it so one logical request can never
+		// increment the counter or emit a second audit log twice.
+		if input.RequestID != "" {
+			var prior SensitiveWordAuditEvent
+			if err := tx.Where("request_id = ? AND user_id = ?", input.RequestID, input.UserID).Order("id asc").First(&prior).Error; err == nil {
+				existingEvent = &prior
+				return nil
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 		}
 		result.UserStatusBefore, result.QuotaBefore = user.Status, user.Quota
 		result.UserStatusAfter, result.QuotaAfter = user.Status, user.Quota
@@ -1129,7 +1022,7 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 		if result.Blocked {
 			result.ViolationCount = user.SensitiveWordViolationCount + 1
 			updates := map[string]interface{}{"sensitive_word_violation_count": result.ViolationCount}
-			result.AutoBanned = result.ViolationCount >= cfg.BanThreshold && user.Role != common.RoleRootUser && user.Status != common.UserStatusDisabled
+			result.AutoBanned = result.ViolationCount >= policy.BanThreshold && user.Role != common.RoleRootUser && user.Status != common.UserStatusDisabled
 			if result.AutoBanned {
 				nextVersion, err := IncrementUserAuthVersionWithTx(tx, input.UserID)
 				if err != nil {
@@ -1148,9 +1041,9 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 
 		preview, fullPrompt := "", ""
 		snippets := make([]string, 0)
-		if cfg.AuditEnabled {
+		if policy.RetainFullPrompt {
 			preview = redactedSensitivePreview(input.Prompt)
-			fullPrompt = truncateSensitivePrompt(input.Prompt, cfg.MaxPromptRunes)
+			fullPrompt = truncateSensitivePrompt(input.Prompt, policy.MaxPromptRunes)
 			snippets = sensitiveMatchSnippets(input.Prompt, words)
 		}
 		idsRaw, _ := json.Marshal(ids)
@@ -1180,6 +1073,9 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 		result.AutoBanned = false
 		result.ViolationCount = 0
 		return result, err
+	}
+	if existingEvent != nil {
+		return sensitiveCheckResultFromAudit(*existingEvent), nil
 	}
 
 	result.AuditID = event.ID
@@ -1220,6 +1116,7 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 			"balance_changed":    false,
 			"prompt_hash":        event.PromptHash,
 			"rule_version":       ruleVersion,
+			"rule_modes":         modes,
 		},
 	}
 	log := &Log{
@@ -1235,11 +1132,11 @@ func CheckSensitiveRequestForGroups(input SensitiveCheckInput, candidateGroups [
 }
 
 func CleanupSensitiveWordAudits() error {
-	cfg := GetSensitiveWordConfig()
-	if cfg.FullPromptRetentionDays <= 0 {
+	policy := GetSensitiveWordPolicy()
+	if policy.FullPromptRetentionDays <= 0 {
 		return nil
 	}
-	cutoff := time.Now().AddDate(0, 0, -cfg.FullPromptRetentionDays)
+	cutoff := time.Now().AddDate(0, 0, -policy.FullPromptRetentionDays)
 	return DB.Model(&SensitiveWordAuditEvent{}).Where("created_at < ?", cutoff).Updates(map[string]any{"full_prompt": "", "redacted_preview": ""}).Error
 }
 
@@ -1288,17 +1185,6 @@ func trimSensitivePromptBytes(value string, maxBytes int) string {
 		value = value[:len(value)-size]
 	}
 	return value
-}
-
-func ClearSensitiveWordViolations(userID int) error {
-	result := DB.Model(&User{}).Where("id = ?", userID).Update("sensitive_word_violation_count", 0)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
-	}
-	return nil
 }
 
 // SensitiveWordEnableResetResult describes the state transition performed by
@@ -1400,10 +1286,9 @@ func EnableUserAndResetSensitiveWordViolations(userID int) (*SensitiveWordEnable
 	return result, nil
 }
 
-// normalizeLegacySensitiveWords preserves the old matcher as a fallback when
-// a historical option contains a value that the new editor intentionally
-// rejects (for example, a word longer than the new limit). A migration must
-// never make an already-enforced legacy word silently stop matching.
+// normalizeLegacySensitiveWords validates legacy data during the one-way
+// migration. Values outside the new rule limits are skipped and keep the
+// migration marker unset for operator review; they are never read at runtime.
 func normalizeLegacySensitiveWords(words []string) ([]string, bool) {
 	result := make([]string, 0, min(len(words), SensitiveWordMaxRules))
 	seen := make(map[string]struct{}, len(words))
@@ -1443,12 +1328,65 @@ func MigrateSensitiveWordData() error {
 	if DB == nil {
 		return nil
 	}
+	if !DB.Migrator().HasTable(&SensitiveWordPolicy{}) {
+		if err := DB.AutoMigrate(&SensitiveWordPolicy{}); err != nil {
+			return err
+		}
+	}
+	var migrationMarker Option
+	markerErr := DB.Where(&Option{Key: sensitiveWordMigrationKey}).First(&migrationMarker).Error
+	if markerErr == nil && migrationMarker.Value == sensitiveWordMigrationValue {
+		// The import is one-way. Once the marker is committed, deleting or
+		// editing migrated rules must never cause the legacy Option to be
+		// consulted again on a later startup.
+		return nil
+	}
+	if markerErr != nil && !errors.Is(markerErr, gorm.ErrRecordNotFound) {
+		return markerErr
+	}
+	// Materialize the singleton policy before importing rules. The old option is
+	// read once here only; relay code never reads it after this migration.
+	var policy SensitiveWordPolicy
+	policyErr := DB.First(&policy, 1).Error
+	if errors.Is(policyErr, gorm.ErrRecordNotFound) {
+		policy = defaultSensitiveWordPolicy()
+		var legacyConfig Option
+		if err := DB.Where(&Option{Key: "SensitiveWordConfig"}).First(&legacyConfig).Error; err == nil {
+			var cfg legacySensitiveWordConfig
+			if json.Unmarshal([]byte(legacyConfig.Value), &cfg) == nil {
+				policy.Enabled = cfg.Enabled
+				policy.CheckPrompt = cfg.CheckPrompt
+				policy.RetainFullPrompt = cfg.AuditEnabled
+				policy.BlockMessage = cfg.BlockMessage
+				policy.BanThreshold = cfg.BanThreshold
+				policy.FullPromptRetentionDays = cfg.FullPromptRetentionDays
+				policy.MaxPromptRunes = cfg.MaxPromptRunes
+				policy.Version = cfg.RuleVersion
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		policy = normalizeSensitiveWordPolicy(policy)
+		if err := DB.Create(&policy).Error; err != nil {
+			return err
+		}
+	} else if policyErr != nil {
+		return policyErr
+	}
 	migrationComplete := true
 	var rules []SensitiveWordRule
 	if err := DB.Find(&rules).Error; err != nil {
 		return err
 	}
 	for _, rule := range rules {
+		mode := migrateSensitiveWordRuleMode(rule.Mode, rule.Enabled)
+		if rule.Mode != mode || rule.Enabled != (mode != SensitiveWordModeOff) {
+			if err := DB.Model(&SensitiveWordRule{}).Where("id = ?", rule.ID).Updates(map[string]interface{}{
+				"mode": mode, "enabled": mode != SensitiveWordModeOff,
+			}).Error; err != nil {
+				return err
+			}
+		}
 		if strings.TrimSpace(rule.Name) == "" {
 			if err := DB.Model(&SensitiveWordRule{}).Where("id = ?", rule.ID).Update("name", fmt.Sprintf("迁移规则 #%d", rule.ID)).Error; err != nil {
 				return err
@@ -1463,8 +1401,8 @@ func MigrateSensitiveWordData() error {
 		}
 		words, complete := normalizeLegacySensitiveWords(strings.Split(rule.Word, "\n"))
 		if !complete {
-			// Keep the old Word column as the source for this rule. ruleWords
-			// intentionally falls back to it when no child rows exist.
+			// Do not expose invalid legacy values to the runtime matcher. The
+			// migration marker remains unset so an operator can review the source.
 			migrationComplete = false
 			continue
 		}
@@ -1487,7 +1425,7 @@ func MigrateSensitiveWordData() error {
 	if err := DB.Model(&SensitiveWordRule{}).Where("scope = ?", SensitiveWordScopeGlobal).Count(&globalCount).Error; err != nil {
 		return err
 	}
-	legacyWords := append([]string(nil), setting.SensitiveWords...)
+	legacyWords := []string{}
 	var legacyOption Option
 	optionErr := DB.Where(&Option{Key: "SensitiveWords"}).First(&legacyOption).Error
 	if optionErr == nil {
@@ -1500,18 +1438,23 @@ func MigrateSensitiveWordData() error {
 		migrationComplete = false
 	}
 	if globalCount == 0 && len(legacyWords) > 0 {
-		if _, err := UpsertSensitiveWordRule(0, "旧配置导入", legacyWords, SensitiveWordScopeGlobal, nil, 0, nil); err != nil {
+		if _, err := UpsertSensitiveWordRuleWithMode(0, "旧配置导入", legacyWords, SensitiveWordScopeGlobal, nil, 0, SensitiveWordModeBlock); err != nil {
 			return err
 		}
 	}
 
-	var whitelist []SensitiveWordWhitelist
-	if err := DB.Where("enabled = ?", true).Find(&whitelist).Error; err != nil {
-		return err
-	}
-	for _, item := range whitelist {
-		if err := DB.Model(&User{}).Where("id = ?", item.UserID).Update("sensitive_word_whitelist", true).Error; err != nil {
+	// The standalone whitelist table is migration-only. Fresh databases do not
+	// create it; existing installations are copied into the canonical User
+	// column once and the old table is never consulted by request handling.
+	if DB.Migrator().HasTable(&legacySensitiveWordWhitelist{}) {
+		var whitelist []legacySensitiveWordWhitelist
+		if err := DB.Where("enabled = ?", true).Find(&whitelist).Error; err != nil {
 			return err
+		}
+		for _, item := range whitelist {
+			if err := DB.Model(&User{}).Where("id = ?", item.UserID).Update("sensitive_word_whitelist", true).Error; err != nil {
+				return err
+			}
 		}
 	}
 	if migrationComplete {
@@ -1523,12 +1466,4 @@ func MigrateSensitiveWordData() error {
 	}
 	invalidateSensitiveWordRuntime()
 	return nil
-}
-
-// UnbanSensitiveWordUser is the compatibility wrapper for older callers. New
-// administrative paths should use EnableUserAndResetSensitiveWordViolations
-// when they need the transition details for an audit record.
-func UnbanSensitiveWordUser(userID int) error {
-	_, err := EnableUserAndResetSensitiveWordViolations(userID)
-	return err
 }

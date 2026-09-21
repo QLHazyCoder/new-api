@@ -487,20 +487,22 @@
 
 - 必须保留：策略支持全局规则和绑定定价分组的局部规则，规则以统一表格管理；局部
   分组只能来自 `ratio_setting.GetGroupRatioCopy()`，不得接受 `auto` 或不存在的分组。
-  规则词条支持批量文本/TXT 导入、去重、启停、编辑和确认删除，运行时快照更新无需
-  重启。
+  规则词条支持批量文本/TXT 导入、去重、编辑、`block/observe/off` 模式和确认删除，
+  运行时快照更新无需重启；动作由规则自身决定，不恢复全局处理模式。
 - 必须保留：Relay 在 token 估算、预扣费、计费、渠道选择、上游调用和重试之前检查
   规范化提示词；自动分组检查全部候选分组。同一请求无论命中多少词只计一次，命中
-  返回不可重试的 HTTP 403 `sensitive_words_detected`，并使用协议对应的错误封装。
+  返回不可重试的 HTTP 422 `sensitive_words_detected`；已封禁账号后续请求返回 HTTP
+  403 `user_banned`，并使用协议对应的错误封装。
 - 必须保留：使用日志类型 8 `关键词拦截` 通过 request ID 关联主库审计事件；列表和
   普通用户视图脱敏，管理员详情才可查看完整规范化提示词、命中规则、片段、规则版本
   和处理结果。审计证据不写入原始请求体、API Key 或普通日志字段。
 - 必须保留：用户字段保存敏感词违规次数和白名单开关。白名单命中仍记录审计和日志但
-  不拦截、不计数；观察模式只记录。普通用户按行锁事务原子递增，第 5 次有效命中禁用
+  不拦截、不计数；观察模式只记录。普通用户按行锁事务原子递增，达到可配置阈值（新环境
+  默认 50）时禁用
   账户、刷新认证版本并撤销会话；封禁、清零次数、解封和白名单操作均不得清空或修改
   `quota`、余额、历史账务或历史审计证据。
 - 必须保留：默认客户端警示文案明确说明“余额不退”和严重情形报警，但这是提示文本，
-  不是余额处理指令；管理员可在用户编辑右抽屉维护违规次数、清零次数和个人白名单，
+  不是余额处理指令；管理员可在用户编辑左抽屉维护违规次数、清零次数和个人白名单，
   敏感词页面不承载白名单名单或审计列表，审计复核入口统一在使用日志。
 - 必须保留：规则编辑弹窗在 TXT 导入按钮左侧提供实时查找。查找只针对当前未保存的
   `draft.wordsText` 做不区分大小写的普通包含匹配，首个命中自动选中并滚动，`Enter`/
@@ -514,11 +516,9 @@
 - 必须保留：审计完整提示词在 MySQL 使用 `MEDIUMTEXT`、在 PostgreSQL/SQLite 使用 `TEXT`，
   写入前执行合法 UTF-8 的字符/字节双重截断。`observe` 模式仅对明确的审计落库失败放行并记录
   降级；规则、用户或其他事务错误以及 `block` 模式仍失败关闭返回 503，不能借故绕过策略。
-- 必须保留：读取 `SensitiveWordConfig` 时对 SQL 保留字 `key` 使用方言兼容的引用；配置
-  读取失败不能静默改变规则启用、模式、分组或审计保留策略。
 - 当前位置：`model/sensitive_word.go`、`model/user.go`、`model/main.go`、
-  `service/sensitive.go`、`controller/relay.go`、`controller/sensitive_word.go`、
-  `controller/user.go`、`controller/log.go`、`model/log.go`、`router/api-router.go`、
+  `relay/request_billing.go`、`controller/relay.go`、`controller/sensitive_word.go`、
+  `controller/user.go`、`middleware/auth.go`、`model/log.go`、`router/api-router.go`、
   `web/src/features/system-settings/request-limits/sensitive-words-section.tsx`、
   `web/src/features/system-settings/request-limits/sensitive-word-search.ts`、
   `web/src/features/system-settings/request-limits/sensitive-word-search.test.ts`、
@@ -526,7 +526,7 @@
   `web/src/features/users/components/users-columns.tsx`、
   `web/src/features/users/components/users-mutate-drawer.tsx`、
   `web/src/features/usage-logs/**`。
-- 数据/配置：保留旧 `SensitiveWords` Option 的迁移和兼容回退；新增规则、词条、分组、
+- 数据/配置：保留旧 `SensitiveWords` Option 的一次性迁移，不保留运行时兼容回退；新增规则、词条、分组、
   审计表及用户字段必须同时兼容标准/快速迁移。审计事件写主库，日志库只保存结构化
   摘要；配置关闭证据留存时不得写入完整提示词或片段。
 - 验证入口：`model/sensitive_word_test.go`、`controller/sensitive_word_test.go`、

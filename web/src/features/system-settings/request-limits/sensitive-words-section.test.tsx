@@ -18,6 +18,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { SensitiveWordsSection } from './sensitive-words-section'
+
 const { apiMock } = vi.hoisted(() => ({
   apiMock: {
     get: vi.fn(),
@@ -30,31 +32,22 @@ const { apiMock } = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => ({ api: apiMock }))
 
-import { SensitiveWordsSection } from './sensitive-words-section'
-
-const defaultValues = {
-  CheckSensitiveEnabled: true,
-  CheckSensitiveOnPromptEnabled: true,
-  SensitiveWords: '',
-}
-
 const COMPONENT_TEST_TIMEOUT_MS = 30_000
 
 function configureApiMocks() {
   apiMock.get.mockImplementation((path: string) => {
-    if (path === '/api/sensitive-words/config') {
+    if (path === '/api/sensitive-words/policy') {
       return Promise.resolve({
         data: {
           data: {
             enabled: true,
             check_prompt: true,
-            mode: 'block',
-            audit_enabled: true,
+            retain_full_prompt: true,
             block_message: 'blocked',
-            ban_threshold: 5,
+            ban_threshold: 50,
             full_prompt_retention_days: 180,
             max_prompt_runes: 65536,
-            rule_version: 1,
+            version: 1,
           },
         },
       })
@@ -74,7 +67,7 @@ function configureApiMocks() {
 }
 
 async function openCreateDialog() {
-  render(<SensitiveWordsSection defaultValues={defaultValues} />)
+  render(<SensitiveWordsSection />)
   await waitFor(() =>
     expect(screen.getByText('尚未创建敏感词规则')).toBeInTheDocument()
   )
@@ -174,6 +167,7 @@ describe('SensitiveWordsSection word search', () => {
           expect.objectContaining({
             name: '保存测试',
             words: ['first', 'Alpha', 'second', 'third'],
+            mode: 'observe',
           })
         )
       })
