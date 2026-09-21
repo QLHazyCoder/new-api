@@ -37,8 +37,10 @@
   现行 P-30 契约，不能在合并时只保留最初的拦截逻辑。
 - P-13/P-16 的后续 Playground 提交包括 `889436b78`、`734b60163` 和 `4cd9c9460`；
   前者保护图片历史清理的查询边界，后两者把图片能力配置外置并统一 GPT 图片模型能力。
-- 清单上次更新后新增的独立自研功能提交为 `b2e905185`（CC Switch 多来源导入）、
-  `afab95b53`（钱包额度 int64 迁移）和 `66759ee72`（分层定价表达式编辑器保留）。
+- 清单上次更新后新增的独立自研功能提交为 `b2e905185`（CC Switch 多来源导入）和
+  `afab95b53`（钱包额度 int64 迁移）。
+- `66759ee72` 的分层定价表达式编辑器状态辅助实现已按用户明确决定退休；当前定价编辑器
+  使用上游 AST 表达式编辑器和官方测试，旧辅助文件及其专属测试已删除。
 - rc.39 合并前新增的独立自研修复为 `5e5c79c1b`（CC Switch 名称与作用域整理）和
   `f0a62f2c6`（按所选 API Key 查询模型）；二者共同归入 P-34。当前合并目标固定为
   上游正式标签 `v1.0.0-rc.39@9978ee1e25a647bfe004e96c8719a2cb62c24732`，具体决策
@@ -569,18 +571,17 @@
   `controller/topup_quota_limit_test.go`、相关前端额度格式化测试。
 - 来源提交：`afab95b53`。
 
-### P-33 分层定价表达式编辑器保留语义
+### P-33 分层定价编辑器旧自定义实现已批准退休
 
-- 必须保留：模型定价编辑器加载已有复杂 `tiered_expr` 时，不能自动替换成默认表达式；
-  无法解析为可视化配置时必须进入 raw 表达式模式并保留原文，提示用户切换编辑方式。
-- 必须保留：只有用户实际修改可视化配置后才重新生成表达式；在 visual/raw 模式切换、
-  模型切换和保存过程中保留原始计费表达式及 request rule expression，不能因 React 初始化
-  或模式切换丢失分层、倍率或条件规则。
-- 当前位置：`web/src/features/system-settings/models/model-pricing-sheet.tsx`、
+- `66759ee72` 引入的独立状态辅助文件和专属回归测试已删除，不再作为当前定价编辑器的
+  维护边界或验证入口。
+- 当前实现采用上游 AST 表达式编辑器及其官方测试；现行路径为
   `web/src/features/system-settings/models/tiered-pricing-editor.tsx`、
-  `web/src/features/system-settings/models/tiered-pricing-editor-state.ts`。
-- 验证入口：`web/src/features/system-settings/models/__tests__/tiered-pricing-editor.test.tsx`。
-- 来源提交：`66759ee72`。
+  `web/src/features/system-settings/models/visual-billing-document-editor.tsx`、
+  `web/src/features/pricing/lib/billing-expression/visual.ts`，验证入口为
+  `web/src/features/system-settings/models/__tests__/visual-billing-editor.test.tsx` 和
+  `web/src/features/pricing/lib/__tests__/billing-expression.test.ts`。
+- 状态：经用户明确批准退休；保留本项仅用于历史追溯，不要求恢复旧实现。
 
 ### P-34 CC Switch 所选密钥授权模型与可访问下拉框
 
@@ -640,7 +641,7 @@
 | P-30 | `21cc64f46`, `7f17b6307`, `ab37d8b51`, `384e4988c`, `416fabe52`, `b24c6ad95`, `52d68cb40` |
 | P-31 | `b2e905185` |
 | P-32 | `afab95b53` |
-| P-33 | `66759ee72` |
+| P-33 | `66759ee72`（已批准退休） |
 | P-34 | `5e5c79c1`, `f0a62f2c` |
 
 ## 6. 本次及以后维护记录模板
