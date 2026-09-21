@@ -110,6 +110,56 @@ func TestGetUserModelsWithEndpointTypesReturnsModelOptions(t *testing.T) {
 	require.Contains(t, payload.Data[0].SupportedEndpointTypes, "image-generation")
 }
 
+func TestGetUserImageModelsReturnsConfiguredImageGroups(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.User{
+		Id:       2004,
+		Username: "user-image-models",
+		Password: "password",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Channel{
+		Id:     1,
+		Type:   constant.ChannelTypeOpenAI,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group:     "default",
+		Model:     "gpt-image-1",
+		ChannelId: 1,
+		Enabled:   true,
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/user/image-models", nil)
+	ctx.Set("id", 2004)
+
+	GetUserImageModels(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload struct {
+		Success bool `json:"success"`
+		Data    []struct {
+			Value  string `json:"value"`
+			Models []struct {
+				Value        string `json:"value"`
+				Capabilities struct {
+					Provider string `json:"provider"`
+				} `json:"capabilities"`
+			} `json:"models"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.True(t, payload.Success)
+	require.Len(t, payload.Data, 1)
+	require.Equal(t, "default", payload.Data[0].Value)
+	require.Len(t, payload.Data[0].Models, 1)
+	require.Equal(t, "gpt-image-1", payload.Data[0].Models[0].Value)
+	require.Equal(t, "openai", payload.Data[0].Models[0].Capabilities.Provider)
+}
+
 func TestGetUserModelsWithEndpointTypesHonorsRequestedGroup(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.Create(&model.User{
