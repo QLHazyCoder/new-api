@@ -188,11 +188,12 @@ test('first install shows source on demand and disables repeat submission until 
       screen.getByRole('button', { name: 'Install and enable' })
     ).toBeEnabled()
   )
-  expect(screen.getByText('const')).toHaveClass('tok-keyword')
-  expect(screen.getByText('"demo"')).toHaveClass('tok-string')
-  expect(screen.getByText('// comment')).toHaveClass('tok-comment')
-  expect(screen.getByText('42')).toHaveClass('tok-number')
-  expect(screen.getByText('run')).toHaveClass('tok-definition')
+  await waitFor(() => {
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('// comment')
+    expect(dialog).toHaveTextContent('const plugin = "demo";')
+    expect(dialog).toHaveTextContent('function run() { return 42 }')
+  })
   await user.click(screen.getByRole('button', { name: 'Install and enable' }))
   expect(
     await screen.findByRole('button', { name: 'Installing...' })

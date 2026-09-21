@@ -16,16 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-
 import { Window } from 'happy-dom'
-
-const bunTestModule = 'bun:test'
-const { afterAll, describe, test } = (await import(bunTestModule)) as {
-  afterAll: typeof import('node:test').after
-  describe: typeof import('node:test').describe
-  test: typeof import('node:test').test
-}
+import { afterAll, assert, describe, test } from 'vitest'
 
 const domWindow = new Window()
 const domGlobals = [

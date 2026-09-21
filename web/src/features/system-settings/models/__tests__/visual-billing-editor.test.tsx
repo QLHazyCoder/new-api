@@ -330,13 +330,13 @@ test('builds weekday peak pricing with two time ranges from an empty visual form
   fireEvent.change(screen.getByRole('textbox', { name: 'Output price' }), {
     target: { value: '4.5' },
   })
-  await user.click(
+  fireEvent.click(
     screen.getByRole('checkbox', { name: 'Include Cache read price' })
   )
   fireEvent.change(screen.getByRole('textbox', { name: 'Cache read price' }), {
     target: { value: '0.05' },
   })
-  await user.click(screen.getByRole('button', { name: 'Add pricing branch' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Add pricing branch' }))
   fireEvent.change(screen.getAllByRole('textbox', { name: 'Tier name' })[0], {
     target: { value: '高峰' },
   })
@@ -355,8 +355,8 @@ test('builds weekday peak pricing with two time ranges from an empty visual form
   await user.click(screen.getByRole('option', { name: 'Weekday' }))
   await user.click(screen.getByRole('combobox', { name: 'Condition value' }))
   await user.click(screen.getByRole('option', { name: 'Monday' }))
-  await user.click(screen.getByRole('button', { name: 'Condition actions 1' }))
-  await user.click(screen.getByRole('menuitem', { name: 'Add condition' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Condition actions 1' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Add condition' }))
   await user.click(
     screen.getAllByRole('combobox', { name: 'Condition input' })[1]
   )
@@ -369,17 +369,15 @@ test('builds weekday peak pricing with two time ranges from an empty visual form
     screen.getAllByRole('combobox', { name: 'Comparison operator' })[1]
   )
   await user.click(screen.getByRole('option', { name: '<=' }))
-  await user.click(screen.getByRole('button', { name: 'Add to group 1' }))
-  await user.click(
-    screen.getByRole('menuitem', { name: 'Add condition group' })
-  )
+  fireEvent.click(screen.getByRole('button', { name: 'Add to group 1' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Add condition group' }))
 
   for (const [index, start, end] of [
     [1, 9, 12],
     [2, 14, 18],
   ]) {
-    await user.click(screen.getByRole('button', { name: 'Add to group 1.2' }))
-    await user.click(
+    fireEvent.click(screen.getByRole('button', { name: 'Add to group 1.2' }))
+    fireEvent.click(
       screen.getByRole('menuitem', { name: 'Add condition group' })
     )
     const period = within(
@@ -387,17 +385,17 @@ test('builds weekday peak pricing with two time ranges from an empty visual form
     )
     await user.click(period.getByRole('combobox', { name: 'Condition group' }))
     await user.click(screen.getByRole('option', { name: 'All conditions' }))
-    await user.click(
+    fireEvent.click(
       screen.getByRole('button', { name: `Add to group 1.2.${index}` })
     )
-    await user.click(screen.getByRole('menuitem', { name: 'Add condition' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add condition' }))
     fireEvent.change(period.getByRole('textbox', { name: 'Condition value' }), {
       target: { value: String(start) },
     })
-    await user.click(
+    fireEvent.click(
       screen.getByRole('button', { name: `Add to group 1.2.${index}` })
     )
-    await user.click(screen.getByRole('menuitem', { name: 'Add condition' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Add condition' }))
     fireEvent.change(
       period.getAllByRole('textbox', { name: 'Condition value' })[1],
       { target: { value: String(end) } }

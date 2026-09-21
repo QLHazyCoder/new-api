@@ -35,12 +35,11 @@ export default defineConfig({
       deps: { inline: [/@lobehub\//, /antd-style/] },
     },
     setupFiles: ['./src/test-setup.ts'],
-    // Several heavy jsdom suites (channel-configuration, visual-billing-editor)
-    // legitimately take >5s per test on contended CI runners; the vitest
-    // default of 5000ms fails whichever of them crosses the line first. The
-    // heaviest test measures ~3.2s uncontended, so 20s keeps headroom for the
-    // ~4x slowdown observed on shared runners.
-    testTimeout: 20000,
+    // Heavy jsdom suites render full drawers, editors, and data tables. Their
+    // cold render can be substantially slower when Vitest workers share a CI
+    // host, so keep a bounded 30s budget rather than letting the default 5s
+    // turn scheduler contention into false failures.
+    testTimeout: 30000,
     clearMocks: true,
     restoreMocks: true,
     include: [

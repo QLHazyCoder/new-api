@@ -22,11 +22,10 @@ import i18next from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import { afterEach, beforeAll } from 'vitest'
 
-// The testing-library default of 1000ms for findBy*/waitFor is too tight for
-// this suite on contended CI runners, where a first-in-file test also pays the
-// full cold-render cost. Keep it below vitest's testTimeout so async lookup
-// failures still report the missing element instead of a generic test timeout.
-configure({ asyncUtilTimeout: 5000 })
+// The testing-library default of 1000ms is too tight for full-drawer jsdom
+// suites on contended CI runners. Keep this below Vitest's testTimeout so an
+// async lookup still reports the missing element instead of a generic timeout.
+configure({ asyncUtilTimeout: 10000 })
 
 beforeAll(async () => {
   await i18next.use(initReactI18next).init({

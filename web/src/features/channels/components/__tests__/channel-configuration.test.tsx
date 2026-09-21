@@ -237,7 +237,7 @@ test('changing built-in providers updates server-provided URL placeholders witho
     )
   )
   expect(address).toHaveValue('')
-  await user.type(address, 'https://custom.example')
+  fireEvent.change(address, { target: { value: 'https://custom.example' } })
 
   await user.click(screen.getByRole('button', { name: 'Change provider' }))
   await user.click(screen.getByRole('option', { name: /^Gemini / }))
@@ -247,7 +247,7 @@ test('changing built-in providers updates server-provided URL placeholders witho
     'https://gemini.server.example'
   )
   expect(geminiAddress).toHaveValue('https://custom.example')
-  await user.clear(geminiAddress)
+  fireEvent.change(geminiAddress, { target: { value: '' } })
   expect(geminiAddress).toHaveValue('')
 
   await user.click(screen.getByRole('button', { name: 'Change provider' }))
@@ -308,9 +308,9 @@ test.each([
     const address = screen.getByRole('textbox', { name: label })
     await waitFor(() => expect(address).toHaveAttribute('placeholder', url))
     expect(address).toHaveValue('https://saved.example')
-    await user.clear(address)
+    fireEvent.change(address, { target: { value: '' } })
     expect(address).toHaveValue('')
-    if (savedUrl) await user.type(address, savedUrl)
+    if (savedUrl) fireEvent.change(address, { target: { value: savedUrl } })
     await user.click(screen.getByRole('button', { name: 'Update Channel' }))
     await waitFor(() => expect(put).toHaveBeenCalled())
     expect(put.mock.calls[0]?.[1]).toMatchObject({ id: 42, base_url: savedUrl })
@@ -338,8 +338,8 @@ test('an unavailable default URL endpoint keeps the fallback placeholder and all
   const address = screen.getByRole('textbox', { name: 'Base URL' })
   expect(address).toHaveAttribute('placeholder', 'Leave empty to use default')
   expect(address).toHaveValue('https://saved.example')
-  await user.clear(address)
-  await user.type(address, 'https://custom.example')
+  fireEvent.change(address, { target: { value: '' } })
+  fireEvent.change(address, { target: { value: 'https://custom.example' } })
   await user.click(screen.getByRole('button', { name: 'Update Channel' }))
   await waitFor(() => expect(put).toHaveBeenCalled())
   expect(put.mock.calls[0]?.[1]).toMatchObject({
