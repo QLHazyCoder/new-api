@@ -121,7 +121,6 @@ export interface SystemStatus {
     self_use_mode_enabled?: boolean
     display_in_currency?: boolean
     display_token_stat_enabled?: boolean
-    perf_metrics_enabled?: boolean
     quota_per_unit?: number
     quota_remind_threshold?: number
     quota_display_type?: string
@@ -170,7 +169,6 @@ export interface SystemStatus {
   self_use_mode_enabled?: boolean
   display_in_currency?: boolean
   display_token_stat_enabled?: boolean
-  perf_metrics_enabled?: boolean
   quota_per_unit?: number
   quota_remind_threshold?: number
   quota_display_type?: string
