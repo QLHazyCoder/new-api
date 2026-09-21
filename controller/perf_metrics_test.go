@@ -149,6 +149,30 @@ func TestGetPerfMetricsFiltersGroupsByVisibility(t *testing.T) {
 	require.ElementsMatch(t, []string{"default", "vip"}, perfMetricGroupNames(admin.Data.Groups))
 }
 
+func TestPerfMetricsAllowedGroupsAlwaysIncludeAuto(t *testing.T) {
+	setupPerfMetricsControllerTest(t)
+
+	tests := []struct {
+		name   string
+		userID int
+		want   []string
+	}{
+		{name: "anonymous", want: []string{"auto", "default"}},
+		{name: "common user", userID: 41001, want: []string{"auto", "default"}},
+		{name: "admin", userID: 41002, want: []string{"auto", "default", "vip"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			if tt.userID > 0 {
+				ctx.Set("id", tt.userID)
+			}
+			require.ElementsMatch(t, tt.want, perfMetricsAllowedGroups(ctx))
+		})
+	}
+}
+
 func TestGetPerfMetricsRejectsInvisibleRequestedGroup(t *testing.T) {
 	modelName := setupPerfMetricsControllerTest(t)
 

@@ -37,13 +37,15 @@ func perfMetricsAllowedGroups(c *gin.Context) []string {
 	}
 	groups := make([]string, 0, len(allowed))
 	for group := range allGroups {
+		// auto is a virtual request group and is visible to every user.
+		if group == "auto" {
+			continue
+		}
 		if _, ok := allowed[group]; ok {
 			groups = append(groups, group)
 		}
 	}
-	if _, ok := allowed["auto"]; ok {
-		groups = append(groups, "auto")
-	}
+	groups = append(groups, "auto")
 	return groups
 }
 
