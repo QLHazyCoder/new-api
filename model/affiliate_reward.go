@@ -35,6 +35,7 @@ type AffiliateRewardEvent struct {
 	IdempotencyKey *string `json:"idempotency_key,omitempty" gorm:"type:varchar(255);uniqueIndex:idx_affiliate_reward_idempotency"`
 	BaseQuota      int64   `json:"base_quota" gorm:"type:bigint;not null"`
 	RewardPercent  string  `json:"reward_percent" gorm:"type:varchar(32);not null"`
+	RewardRateBps  int64   `json:"reward_rate_bps" gorm:"type:bigint;not null;default:0"`
 	RewardQuota    int64   `json:"reward_quota" gorm:"type:bigint;not null"`
 	AffQuotaDelta  int64   `json:"aff_quota_delta" gorm:"type:bigint;not null"`
 	UserQuotaDelta int64   `json:"user_quota_delta" gorm:"type:bigint;not null"`

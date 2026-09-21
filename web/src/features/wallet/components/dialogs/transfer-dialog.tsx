@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
-  displayAmountToQuota,
+  displayAmountToQuotaExact,
   getCurrencyDisplay,
   getCurrencyLabel,
   quotaToDisplayAmount,
@@ -57,14 +57,11 @@ export function TransferDialog({
   const minQuota = Math.ceil(config.quotaPerUnit)
   const minDisplayAmount = quotaToDisplayAmount(minQuota)
   const availableRaw = quotaToBigInt(availableQuota)
-  const availableDisplayAmount = quotaToDisplayAmount(Number(availableRaw))
-  const inputAmount = Number(amount)
-  const transferQuota = displayAmountToQuota(inputAmount)
   const canTransfer = availableRaw >= BigInt(minQuota)
-  const transferQuotaRaw = quotaToBigInt(transferQuota)
+  const transferQuotaRaw = displayAmountToQuotaExact(amount)
   const hasValidAmount =
     amount.trim() !== '' &&
-    Number.isFinite(inputAmount) &&
+    transferQuotaRaw !== null &&
     transferQuotaRaw >= BigInt(minQuota) &&
     transferQuotaRaw <= availableRaw
   const step = meta.kind === 'tokens' ? 1 : 0.000001
@@ -81,7 +78,7 @@ export function TransferDialog({
       toast.error(t('Insufficient rewards to meet the minimum transfer amount'))
       return
     }
-    if (!Number.isFinite(inputAmount) || transferQuotaRaw < BigInt(minQuota)) {
+    if (transferQuotaRaw === null || transferQuotaRaw < BigInt(minQuota)) {
       toast.error(
         t('Transfer amount must be at least {{amount}}', {
           amount: formatQuota(minQuota),
@@ -149,11 +146,11 @@ export function TransferDialog({
           </Label>
           <Input
             id='transfer-amount'
-            type='number'
+            type='text'
+            inputMode='decimal'
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             min={minDisplayAmount}
-            max={availableDisplayAmount}
             step={step}
             className='font-mono text-lg'
             disabled={!canTransfer || transferring}

@@ -63,7 +63,7 @@ export function useAffiliate() {
   }, [affiliateLink, copyToClipboard])
 
   // Transfer affiliate quota to balance
-  const transferQuota = useCallback(async (quota: number): Promise<boolean> => {
+  const transferQuota = useCallback(async (quota: string): Promise<boolean> => {
     try {
       setTransferring(true)
       const response = await transferAffiliateQuota({ quota })

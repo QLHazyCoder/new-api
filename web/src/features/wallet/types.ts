@@ -185,7 +185,7 @@ export interface RedemptionRequest {
  */
 export interface PaymentRequest {
   /** Topup amount */
-  amount: number
+  amount: number | string
   /** Payment method identifier */
   payment_method: string
 }
@@ -213,7 +213,7 @@ export interface WaffoPancakePaymentRequest {
  */
 export interface AmountRequest {
   /** Topup amount to calculate */
-  amount: number
+  amount: number | string
 }
 
 /**
@@ -273,6 +273,10 @@ export interface TopupPricingSnapshot {
   amount_discount_applied: boolean
   amount_discount_rate: number
   pay_money: number
+  credited_quota?: number | string
+  quoted_money_minor?: number | string
+  reward_rate_bps?: number | string
+  invite_reward_eligible?: boolean
 }
 
 /**

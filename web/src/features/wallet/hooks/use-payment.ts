@@ -46,6 +46,7 @@ import type { AmountRequest, AmountResponse } from '../types'
 // ============================================================================
 
 type AmountCalculator = (request: AmountRequest) => Promise<AmountResponse>
+type PaymentAmount = number | string
 
 export interface PaymentAmountCalculators {
   regular: AmountCalculator
@@ -62,7 +63,7 @@ const defaultPaymentAmountCalculators: PaymentAmountCalculators = {
 }
 
 export async function requestPaymentAmount(
-  topupAmount: number,
+  topupAmount: PaymentAmount,
   paymentType: string,
   calculators: PaymentAmountCalculators = defaultPaymentAmountCalculators
 ): Promise<number> {
@@ -90,7 +91,7 @@ export function usePayment() {
 
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (topupAmount: PaymentAmount, paymentType: string) => {
       try {
         setCalculating(true)
         const calculatedAmount = await requestPaymentAmount(
@@ -111,20 +112,21 @@ export function usePayment() {
 
   // Process payment
   const processPayment = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (topupAmount: PaymentAmount, paymentType: string) => {
       try {
         setProcessing(true)
 
         const isStripe = isStripePayment(paymentType)
-        const amount = Math.floor(topupAmount)
-
         const response = isStripe
           ? await requestStripePayment({
-              amount,
+              amount:
+                typeof topupAmount === 'string'
+                  ? Math.floor(Number(topupAmount))
+                  : Math.floor(topupAmount),
               payment_method: 'stripe',
             })
           : await requestPayment({
-              amount,
+              amount: topupAmount,
               payment_method: paymentType,
             })
 

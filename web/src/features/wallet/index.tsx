@@ -366,9 +366,9 @@ export function Wallet(props: WalletProps) {
 
   // Handle transfer
   const handleTransfer = async (amount: number | string) => {
-    const success = await transferQuota(
-      typeof amount === 'string' ? Number(amount) : amount
-    )
+    const rawAmount =
+      typeof amount === 'string' ? amount : Math.trunc(amount).toString()
+    const success = await transferQuota(rawAmount)
     if (success) {
       await fetchUser()
     }

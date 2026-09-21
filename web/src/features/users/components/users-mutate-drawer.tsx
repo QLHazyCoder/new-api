@@ -62,8 +62,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -501,7 +501,9 @@ export function UsersMutateDrawer({
                         <span>
                           <FormLabel>{t('Sensitive-word whitelist')}</FormLabel>
                           <FormDescription>
-                            {t('Keep recording matches without blocking or counting violations.')}
+                            {t(
+                              'Keep recording matches without blocking or counting violations.'
+                            )}
                           </FormDescription>
                         </span>
                         <FormControl>

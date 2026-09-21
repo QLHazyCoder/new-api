@@ -17,7 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
-import { useEffect, useState } from 'react'
 import {
   Copy,
   Check,
@@ -33,6 +32,7 @@ import {
   Info,
   LogIn,
 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
@@ -45,10 +45,10 @@ import { BILLING_PRICING_VARS } from '@/features/pricing/lib/billing-expr'
 import { pluginUsageSchema } from '@/features/pricing/lib/plugin-pricing'
 import { PolicyDecisionRecord } from '@/features/system-settings/request-policies/decision-record'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { api } from '@/lib/api'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { api } from '@/lib/api'
 
 import { AuditDetailFields } from '../../audit/components/audit-detail-fields'
 import type { UsageLog } from '../../data/schema'
@@ -543,15 +543,9 @@ function SensitiveWordAuditSection(props: {
             <DetailRow label={t('Matched')} value={matchedWords.join(', ')} />
           )}
           {matchedRules.length > 0 && (
-            <DetailRow
-              label={t('Rules')}
-              value={matchedRules.join(', ')}
-            />
+            <DetailRow label={t('Rules')} value={matchedRules.join(', ')} />
           )}
-          <DetailRow
-            label={t('Result')}
-            value={resultLabel}
-          />
+          <DetailRow label={t('Result')} value={resultLabel} />
           <DetailRow
             label={t('Violation Count')}
             value={String(event.violation_count ?? 0)}
@@ -562,7 +556,9 @@ function SensitiveWordAuditSection(props: {
           />
           {event.redacted_preview && (
             <div className='space-y-1'>
-              <Label className='text-xs font-semibold'>{t('Redacted preview')}</Label>
+              <Label className='text-xs font-semibold'>
+                {t('Redacted preview')}
+              </Label>
               <pre className='bg-background/60 max-h-32 overflow-y-auto rounded border p-2 text-xs leading-relaxed whitespace-pre-wrap'>
                 {event.redacted_preview}
               </pre>
@@ -570,7 +566,9 @@ function SensitiveWordAuditSection(props: {
           )}
           {matchedSnippets.length > 0 && (
             <div className='space-y-1'>
-              <Label className='text-xs font-semibold'>{t('Matched snippets')}</Label>
+              <Label className='text-xs font-semibold'>
+                {t('Matched snippets')}
+              </Label>
               <pre className='bg-background/60 max-h-32 overflow-y-auto rounded border p-2 text-xs leading-relaxed whitespace-pre-wrap'>
                 {matchedSnippets.join('\n')}
               </pre>
@@ -578,7 +576,9 @@ function SensitiveWordAuditSection(props: {
           )}
           {event.full_prompt && (
             <div className='space-y-1'>
-              <Label className='text-xs font-semibold'>{t('Full prompt')}</Label>
+              <Label className='text-xs font-semibold'>
+                {t('Full prompt')}
+              </Label>
               <pre className='bg-background/60 max-h-72 overflow-y-auto rounded border p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap'>
                 {event.full_prompt}
               </pre>

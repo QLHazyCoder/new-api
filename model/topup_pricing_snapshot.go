@@ -2,11 +2,15 @@ package model
 
 import (
 	"errors"
+	"math"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/shopspring/decimal"
 )
 
-const TopUpPricingSnapshotVersion = 1
+// Version 2 adds the exact Epay settlement fields. Version 1 snapshots are
+// still readable because Waffo and historical orders may contain them.
+const TopUpPricingSnapshotVersion = 2
 
 type TopUpPricingSnapshot struct {
 	Version                int     `json:"version"`
@@ -23,6 +27,32 @@ type TopUpPricingSnapshot struct {
 	AmountDiscountApplied  bool    `json:"amount_discount_applied"`
 	AmountDiscountRate     float64 `json:"amount_discount_rate"`
 	PayMoney               float64 `json:"pay_money"`
+	// The following fields are authoritative for Epay settlement. They are
+	// optional so the same snapshot type remains compatible with other
+	// providers and version-1 historical records.
+	CreditedQuota        int64 `json:"credited_quota,omitempty,string"`
+	QuotedMoneyMinor     int64 `json:"quoted_money_minor,omitempty,string"`
+	RewardRateBps        int64 `json:"reward_rate_bps,omitempty,string"`
+	InviteRewardEligible bool  `json:"invite_reward_eligible,omitempty"`
+}
+
+// RewardRateBpsFromPercent converts the administrator-facing percentage into
+// an integer basis-point value. Keeping this conversion explicit prevents a
+// float64 percentage from becoming an accounting input at settlement time.
+func RewardRateBpsFromPercent(percent float64) (int64, error) {
+	if math.IsNaN(percent) || math.IsInf(percent, 0) || percent < 0 || percent > 100 {
+		return 0, errors.New("invite reward percentage must be between 0 and 100")
+	}
+	bps := decimal.NewFromFloat(percent).Mul(decimal.NewFromInt(100)).Round(0)
+	value, err := common.WalletQuotaFromDecimal(bps)
+	if err != nil || value < 0 || value > 10000 {
+		return 0, errors.New("invite reward percentage is outside basis-point range")
+	}
+	return value, nil
+}
+
+func RewardPercentFromBps(bps int64) string {
+	return decimal.NewFromInt(bps).Div(decimal.NewFromInt(100)).String()
 }
 
 func (snapshot *TopUpPricingSnapshot) Marshal() (string, error) {

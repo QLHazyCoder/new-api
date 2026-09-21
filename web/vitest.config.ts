@@ -40,6 +40,9 @@ export default defineConfig({
     // host, so keep a bounded 30s budget rather than letting the default 5s
     // turn scheduler contention into false failures.
     testTimeout: 30000,
+    // Keep heavy jsdom files from saturating the runner. A percentage scales
+    // down on small CI runners while capping this host at four workers.
+    maxWorkers: '40%',
     clearMocks: true,
     restoreMocks: true,
     include: [

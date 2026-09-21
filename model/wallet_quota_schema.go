@@ -23,7 +23,7 @@ var walletQuotaSchemaSpecs = []walletQuotaSchemaSpec{
 	{table: "redemptions", model: &Redemption{}, columns: []string{"quota"}},
 	{table: "checkins", model: &Checkin{}, columns: []string{"quota_awarded"}},
 	{table: "quota_data", model: &QuotaData{}, columns: []string{"quota"}},
-	{table: "affiliate_reward_events", model: &AffiliateRewardEvent{}, columns: []string{"base_quota", "reward_quota", "aff_quota_delta", "user_quota_delta"}},
+	{table: "affiliate_reward_events", model: &AffiliateRewardEvent{}, columns: []string{"base_quota", "reward_rate_bps", "reward_quota", "aff_quota_delta", "user_quota_delta"}},
 	{table: "sensitive_word_audit_events", model: &SensitiveWordAuditEvent{}, columns: []string{"quota_before", "quota_after"}},
 }
 

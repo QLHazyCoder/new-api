@@ -13,12 +13,14 @@ import (
 func TestCalculateTopUpPricingUsesEligibleExactAmountAndPersistsAuditInputs(t *testing.T) {
 	originalPrice := operation_setting.Price
 	originalDisplayType := operation_setting.GetGeneralSetting().QuotaDisplayType
+	originalQuotaPerUnit := common.QuotaPerUnit
 	originalDiscounts := operation_setting.GetAmountDiscountPolicy().Discounts
 	originalGroups := operation_setting.GetAmountDiscountPolicy().EligibleGroups
 	originalGroupRatio := common.TopupGroupRatio2JSONString()
 	t.Cleanup(func() {
 		operation_setting.Price = originalPrice
 		operation_setting.GetGeneralSetting().QuotaDisplayType = originalDisplayType
+		common.QuotaPerUnit = originalQuotaPerUnit
 		operation_setting.GetPaymentSetting().AmountDiscount = originalDiscounts
 		operation_setting.GetPaymentSetting().AmountDiscountEligibleGroups = originalGroups
 		require.NoError(t, operation_setting.RefreshAmountDiscountPolicy())
@@ -100,4 +102,41 @@ func TestCalculateTopUpPricingPreservesCNYAmountAndGatewayUnitPrice(t *testing.T
 	assert.InDelta(t, 500, pricing.Snapshot.NormalizedAmount, 0.000001)
 	assert.Equal(t, 0.14, pricing.Snapshot.UnitPrice)
 	assert.Equal(t, model.PaymentProviderWaffoPancake, pricing.Snapshot.PaymentProvider)
+}
+
+func TestBuildEpayTopUpPricingPersistsExactSettlementFields(t *testing.T) {
+	originalPrice := operation_setting.Price
+	originalDisplayType := operation_setting.GetGeneralSetting().QuotaDisplayType
+	originalQuotaPerUnit := common.QuotaPerUnit
+	originalConfirmed := operation_setting.GetPaymentSetting().ComplianceConfirmed
+	originalTermsVersion := operation_setting.GetPaymentSetting().ComplianceTermsVersion
+	originalRewardPercent := common.TopUpInviteRewardPercent
+	originalGroupRatio := common.TopupGroupRatio2JSONString()
+	t.Cleanup(func() {
+		operation_setting.Price = originalPrice
+		operation_setting.GetGeneralSetting().QuotaDisplayType = originalDisplayType
+		common.QuotaPerUnit = originalQuotaPerUnit
+		operation_setting.GetPaymentSetting().ComplianceConfirmed = originalConfirmed
+		operation_setting.GetPaymentSetting().ComplianceTermsVersion = originalTermsVersion
+		common.TopUpInviteRewardPercent = originalRewardPercent
+		require.NoError(t, common.UpdateTopupGroupRatioByJSONString(originalGroupRatio))
+	})
+
+	common.QuotaPerUnit = 500000
+	operation_setting.Price = 1.005
+	operation_setting.GetGeneralSetting().QuotaDisplayType = operation_setting.QuotaDisplayTypeUSD
+	operation_setting.GetPaymentSetting().ComplianceConfirmed = true
+	operation_setting.GetPaymentSetting().ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
+	common.TopUpInviteRewardPercent = 2
+	require.NoError(t, common.UpdateTopupGroupRatioByJSONString(`{"default":1}`))
+
+	pricing, creditedQuota, storedAmount, err := buildEpayTopUpPricing(2, "default")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1_000_000, creditedQuota)
+	assert.EqualValues(t, 2, storedAmount)
+	assert.EqualValues(t, 1_000_000, pricing.Snapshot.CreditedQuota)
+	assert.EqualValues(t, 201, pricing.Snapshot.QuotedMoneyMinor)
+	assert.EqualValues(t, 200, pricing.Snapshot.RewardRateBps)
+	assert.True(t, pricing.Snapshot.InviteRewardEligible)
+	assert.Equal(t, "2.01", pricing.PayMoneyDecimal.StringFixed(2))
 }

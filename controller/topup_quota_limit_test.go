@@ -58,6 +58,12 @@ func TestTopUpQuotaValidation(t *testing.T) {
 			amount:      4_294_500_000,
 			wantQuota:   4_294_500_000,
 		},
+		{
+			name:        "token amount that is not a full quota unit",
+			displayType: operation_setting.QuotaDisplayTypeTokens,
+			amount:      2_147_500_001,
+			wantErr:     true,
+		},
 	}
 
 	for _, tc := range testCases {

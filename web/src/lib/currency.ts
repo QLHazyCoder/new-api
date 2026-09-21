@@ -558,6 +558,69 @@ export function displayAmountToQuota(
   return Math.round((amount / meta.exchangeRate) * config.quotaPerUnit)
 }
 
+type DecimalFraction = { numerator: bigint; denominator: bigint }
+
+function decimalToFraction(value: number | string): DecimalFraction | null {
+  const text = String(value).trim().toLowerCase()
+  if (!text || text === 'nan' || text === 'infinity' || text === '+infinity') {
+    return null
+  }
+  const match = text.match(/^([+-]?)(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/)
+  if (!match) return null
+
+  const sign = match[1] === '-' ? -1n : 1n
+  const fractionDigits = match[3] ?? ''
+  const exponent = Number.parseInt(match[4] ?? '0', 10)
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 1000) return null
+
+  let numerator = BigInt(`${match[2]}${fractionDigits}`) * sign
+  let denominator = 10n ** BigInt(fractionDigits.length)
+  if (exponent > 0) numerator *= 10n ** BigInt(exponent)
+  if (exponent < 0) denominator *= 10n ** BigInt(-exponent)
+  return { numerator, denominator }
+}
+
+function roundFraction(numerator: bigint, denominator: bigint): bigint {
+  if (denominator <= 0n) return 0n
+  const sign = numerator < 0n ? -1n : 1n
+  const absolute = numerator < 0n ? -numerator : numerator
+  const rounded = (absolute * 2n + denominator) / (denominator * 2n)
+  return rounded * sign
+}
+
+/**
+ * Converts an editable display string into raw quota without passing through
+ * Number. This is the write-side counterpart to RawQuotaValue and preserves
+ * values above JavaScript's safe integer limit.
+ */
+export function displayAmountToQuotaExact(amount: string): bigint | null {
+  const input = decimalToFraction(amount)
+  if (!input) return null
+
+  const { config, meta } = getCurrencyDisplay()
+  if (meta.kind === 'tokens') {
+    if (input.denominator !== 1n) return null
+    return input.numerator
+  }
+
+  const exchangeRate = meta.exchangeRate
+  const quotaPerUnit = config.quotaPerUnit
+  const exchange = decimalToFraction(exchangeRate)
+  const quota = decimalToFraction(quotaPerUnit)
+  if (
+    !exchange ||
+    !quota ||
+    exchange.numerator <= 0n ||
+    quota.numerator <= 0n
+  ) {
+    return null
+  }
+
+  const numerator = input.numerator * quota.numerator * exchange.denominator
+  const denominator = input.denominator * quota.denominator * exchange.numerator
+  return roundFraction(numerator, denominator)
+}
+
 /**
  * Get the current currency label for UI display.
  *

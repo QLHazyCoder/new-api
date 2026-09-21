@@ -141,8 +141,8 @@
 | 语义收敛 | 完成 | 后端、CC Switch、Task Plugin、Playground、钱包、敏感词、安全、定价已按本节决策收敛；`main.go` 运行时 wiring 已恢复；上游更优的旧任务适配器、简单 RequestChecks、GPT 动态加价和 completion 预扣猜测均未保留 |
 | 数据库克隆验证 | 未完成/阻断 | 尚未执行生产 MySQL 克隆与旧版 `f0a62f2c` 兼容矩阵；仅完成代码级 SQLite migration/schema、钱包和任务测试 |
 | 本地 Go 验证 | 完成 | `go test ./...`、`go build ./...`、`go test ./controller -short`、model/service/perf/relay 专项及 RelayKit `GOWORK=off go test ./...` 全部通过；最后一次修复提交 `daf01437e` |
-| 本地 Web 验证 | 部分完成 | typecheck、lint（仅 warning）、format check、build 通过；CC Switch/敏感词专项 3 个文件、20/20 测试通过；全量测试 2074 通过、5 个 timeout，另有 8 个内置 `node:test`/`bun:test` runner 不兼容套件 |
-| CI 与主线交付 | 代码交付完成 / CI 未执行 | 已将集成分支 fast-forward 合入并推送 `origin/main`；本地与远端均为 `fbf0c13fc675285a5d209f46a8556a904c906005`；候选镜像 CI、GHCR 签名、manifest 与 OCI revision 仍未执行 |
+| 本地 Web 验证 | 完成 | `npm test -- --run --reporter=dot`：178 个文件、2099 个测试全部通过；`typecheck`、`lint`（仅既有 warning）、`format:check`、`build:check` 通过。`copyright:check` 仍会列出仓库基线中 1348 个缺少头部的文件，本轮不批量改写无关文件 |
+| CI 与主线交付 | 待推送 | 两个指定开发会话已提交到本地 `main`；最终代码和本次精度/测试修复待最终审查后推送，之后必须等待精确 SHA 的 Actions、镜像签名、manifest 与 OCI revision |
 | 生产发布 | 未授权 | 需单独执行蓝绿流程 |
 
 ## 9. 当前阻断项与风险
@@ -150,9 +150,7 @@
 1. 未进行真实 MySQL/Redis 克隆迁移和旧版读兼容验证，不能据此批准蓝绿切流。
 2. 未执行候选镜像 CI、GHCR 签名、manifest 和 OCI revision 校验；本次只推送代码到 `main`，
    不自动触发生产发布。
-3. 前端全量测试存在 runner 无法 bundle 内置 `node:test`/`bun:test` 的基础设施问题，以及
-   5 个实际超时（models metadata、channel configuration 三项、visual billing editor）；
-   需要单独修复或隔离后才能宣称全量 Web 门禁通过。
+3. `copyright:check` 是仓库既有基线问题，当前会要求给 1348 个现有文件补头部；本轮保持范围收敛，未将其扩散为全仓库格式重写。
 4. 尚未在生产 MySQL/Redis 克隆库执行候选版本迁移并用旧版 `f0a62f2c` 回读；代码级 SQLite
    migration/schema 和全量 Go 测试通过，不替代真实数据库兼容证据。
 

@@ -187,13 +187,15 @@ describe('request policy settings', () => {
   it.each([
     ['retry', 'Save Changes'],
     ['health', 'Save Changes'],
-    ['filtering', 'Save sensitive words'],
+    ['filtering', '保存敏感词策略'],
     ['affinity', 'Save Changes'],
   ])(
     'opening %s and saving unchanged values does not write options',
     async (section, saveLabel) => {
       await renderPolicies(`/system-settings/request-policies/${section}`)
-      const save = await screen.findByRole('button', { name: saveLabel })
+      const save = await screen.findByRole('button', {
+        name: saveLabel,
+      })
       expect(api.put).not.toHaveBeenCalled()
       await userEvent.click(save)
       await waitFor(() => expect(save).toBeEnabled())

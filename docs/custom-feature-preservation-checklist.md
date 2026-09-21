@@ -311,6 +311,11 @@
 - 必须保留：邀请额度与普通额度转换使用正确的 quota 单位；邀请人数从
   `users.inviter_id` 为事实来源，硬删除会原子维护 `aff_count`，周期核对可以收敛冗余
   计数但不能改写历史奖励。
+- 必须保留：Epay 充值奖励使用订单创建时保存的 `credited_quota`、奖励基点和资格快照，
+  回调不能按当前 QPU 或当前奖励比例重新计算；奖励、普通额度和追加式账本必须在同一
+  事务中完成，`affiliate_reward_events.reward_rate_bps` 记录实际采用的比例。
+- 必须保留：钱包及邀请额度的原始值通过 `*_raw` 十进制字符串传输；转移接口接受数字
+  或字符串形式的 `int64`，前端不得将原始额度转换为 JavaScript `Number` 后再提交。
 - 当前位置：`model/affiliate_reward.go`、`model/topup.go`、`model/user.go`、
   `controller/topup.go`、`web/src/features/wallet/components/affiliate-rewards-card.tsx`。
 - 数据/迁移：`affiliate_reward_events` 是生产账本表，禁止删除、重建或用非事务 SQL
@@ -464,9 +469,9 @@
   新增选择必须在保存时有用户，历史已选分组即使后来无人仍可保留并移除；空分组数组
   表示不向任何分组发放折扣，并且 API/运行时序列化为 `[]` 而不是 `null`。
 - 必须保留：定价时服务端读取数据库中的当前用户分组，客户端不能提交用于计价的分组；
-  Epay、Waffo、Waffo Pancake 使用统一金额/分组倍率/折扣公式和充值定价快照。Stripe、
-  Creem、订阅和兑换码不纳入该折扣策略；已有待支付订单使用创建时保存的金额和快照，
-  不因策略变更重新计价。
+  Epay 使用金额/分组倍率/折扣公式和版本化充值定价快照，Epay 待支付订单使用创建时
+  保存的金额和快照，不因策略变更重新计价。Waffo、Waffo Pancake、Stripe、Creem、
+  订阅和兑换码不纳入本次 Epay 固定结算扩展，继续使用各自现有流程。
 - 当前位置：`setting/operation_setting/payment_setting.go`、`model/payment_group.go`、
   `model/topup_pricing_snapshot.go`、`controller/payment_discount_policy.go`、
   `controller/topup_pricing.go`、`controller/topup*.go`、
@@ -474,7 +479,8 @@
   `web/src/features/wallet/components/dialogs/billing-history-dialog.tsx`。
 - 数据/配置：保留 `payment_setting.amount_discount`、
   `payment_setting.amount_discount_eligible_groups`、既有 `top_up` 订单金额/状态和
-  定价快照字段；不回写或重算历史订单，不直接修改生产 MySQL 数据。
+  定价快照字段；Epay 新增 `credited_quota`、`quoted_money_minor`、奖励基点和结算版本，
+  只做扩展式迁移，不回写或重算历史订单，不直接修改生产 MySQL 数据。
 - 验证入口：`setting/operation_setting/payment_setting_test.go`、
   `model/payment_group_test.go`、`model/topup_pricing_snapshot_test.go`、
   `controller/payment_discount_policy_test.go`、`controller/topup_pricing_test.go`、

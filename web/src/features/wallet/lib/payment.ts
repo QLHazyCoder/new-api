@@ -30,6 +30,7 @@ import type { PaymentMethod, PresetAmount, TopupInfo } from '../types'
 // ============================================================================
 
 export type PaymentFormSource = 'new_tab' | 'same_tab'
+export type PaymentAmount = number | string
 
 export function getPaymentFormSource(
   userAgent = typeof navigator === 'undefined' ? '' : navigator.userAgent
@@ -97,14 +98,14 @@ export function isWaffoPancakePayment(paymentType: string): boolean {
 }
 
 export interface PaymentProcessors {
-  regular: (topupAmount: number, paymentType: string) => Promise<boolean>
+  regular: (topupAmount: PaymentAmount, paymentType: string) => Promise<boolean>
   waffo: (topupAmount: number, payMethodIndex: number) => Promise<boolean>
   waffoPancake: (topupAmount: number) => Promise<boolean>
 }
 
 export async function dispatchSelectedPayment(
   paymentMethod: PaymentMethod,
-  topupAmount: number,
+  topupAmount: PaymentAmount,
   waffoMethodIndex: number | null,
   processors: PaymentProcessors
 ): Promise<boolean> {
@@ -112,11 +113,11 @@ export async function dispatchSelectedPayment(
     if (waffoMethodIndex === null) {
       return false
     }
-    return processors.waffo(topupAmount, waffoMethodIndex)
+    return processors.waffo(Number(topupAmount), waffoMethodIndex)
   }
 
   if (isWaffoPancakePayment(paymentMethod.type)) {
-    return processors.waffoPancake(topupAmount)
+    return processors.waffoPancake(Number(topupAmount))
   }
 
   return processors.regular(topupAmount, paymentMethod.type)

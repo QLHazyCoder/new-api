@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -21,6 +22,12 @@ type TopUp struct {
 	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
 	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
 	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	// These fields are the authoritative V2 settlement values for Epay. The
+	// legacy Amount/Money fields remain for API and historical compatibility.
+	CreditedQuota       int64 `json:"-" gorm:"type:bigint;default:0"`
+	QuotedMoneyMinor    int64 `json:"-" gorm:"type:bigint;default:0"`
+	InviteRewardRateBps int64 `json:"-" gorm:"type:bigint;default:0"`
+	SettlementVersion   int   `json:"-" gorm:"type:int;default:0"`
 	// PricingSnapshot is an immutable audit record created with a pending
 	// order. It deliberately remains outside the public TopUp JSON payload;
 	// history handlers parse and expose a safe view of it when appropriate.
@@ -53,6 +60,9 @@ var (
 	ErrTopUpStatusInvalid       = errors.New("topup status invalid")
 	ErrInvalidTopUpQuota        = errors.New("invalid top-up quota")
 	ErrTopUpQuotaLimitExceeded  = errors.New("top-up quota limit exceeded")
+	ErrTopUpPricingRequired     = errors.New("top-up pricing snapshot required")
+	ErrTopUpPricingMismatch     = errors.New("top-up pricing snapshot mismatch")
+	ErrTopUpPaymentMismatch     = errors.New("top-up callback payment amount mismatch")
 	ErrWalletQuotaLimitExceeded = errors.New("wallet quota limit exceeded")
 )
 
@@ -77,6 +87,9 @@ type CompleteTopUpOptions struct {
 	ExpectedPaymentProvider string
 	CallerIp                string
 	CallbackPaymentMethod   string
+	CallbackPaymentMoney    string
+	ValidateCallbackPayment bool
+	AllowLegacyPricing      bool
 	StripeCustomer          string
 	CustomerEmail           string
 }
@@ -184,11 +197,30 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 }
 
 // getTopUpQuotaToAdd is the one place where a persisted order is converted to
-// wallet quota.  A pending order carries its price (and, for supported
-// providers, its pricing snapshot), so a later policy change cannot alter its
-// settlement amount.  WalletQuotaFromDecimalStrict keeps this conversion in
-// the signed int64 domain instead of passing through a float64/JS-safe integer.
-func getTopUpQuotaToAdd(topUp *TopUp) (int64, error) {
+// wallet quota. New Epay orders carry an exact credited quota and cannot be
+// recalculated from current pricing. Legacy orders are only allowed through an
+// explicit compatibility path used by manual completion or old internal
+// callers; webhook settlement must never guess a historical quote.
+func getTopUpQuotaToAdd(topUp *TopUp, allowLegacyPricing bool) (int64, error) {
+	if topUp.PaymentProvider == PaymentProviderEpay {
+		if topUp.CreditedQuota > 0 {
+			return topUp.CreditedQuota, nil
+		}
+		if snapshot, err := ParseTopUpPricingSnapshot(topUp.PricingSnapshot); err == nil && snapshot != nil {
+			if snapshot.CreditedQuota > 0 {
+				return snapshot.CreditedQuota, nil
+			}
+			if topUp.SettlementVersion >= TopUpPricingSnapshotVersion && !allowLegacyPricing {
+				return 0, ErrTopUpPricingRequired
+			}
+		} else if err != nil && !allowLegacyPricing {
+			return 0, fmt.Errorf("parse top-up pricing snapshot: %w", err)
+		}
+		if !allowLegacyPricing {
+			return 0, ErrTopUpPricingRequired
+		}
+	}
+
 	switch topUp.PaymentProvider {
 	case PaymentProviderStripe:
 		return common.WalletQuotaFromDecimalStrict(
@@ -203,21 +235,105 @@ func getTopUpQuotaToAdd(topUp *TopUp) (int64, error) {
 	}
 }
 
-func calculateTopUpInviteReward(quotaToAdd int64) (int64, string) {
-	if quotaToAdd <= 0 || !operation_setting.IsPaymentComplianceConfirmed() {
-		return 0, ""
+func validateEpayCallbackPayment(topUp *TopUp, callbackMoney string) error {
+	if err := validateEpayPricingIntegrity(topUp); err != nil {
+		return err
 	}
-	if common.TopUpInviteRewardPercent <= 0 {
-		return 0, ""
+	expectedMinor := topUp.QuotedMoneyMinor
+	if expectedMinor <= 0 {
+		if snapshot, err := ParseTopUpPricingSnapshot(topUp.PricingSnapshot); err == nil && snapshot != nil {
+			expectedMinor = snapshot.QuotedMoneyMinor
+		} else if err != nil {
+			return fmt.Errorf("parse top-up pricing snapshot: %w", err)
+		}
 	}
-	percent := decimal.NewFromFloat(common.TopUpInviteRewardPercent)
+	if expectedMinor <= 0 || strings.TrimSpace(callbackMoney) == "" {
+		return ErrTopUpPricingRequired
+	}
+	actual, err := decimal.NewFromString(strings.TrimSpace(callbackMoney))
+	if err != nil {
+		return fmt.Errorf("%w: invalid callback money", ErrTopUpPaymentMismatch)
+	}
+	actualMinorDecimal := actual.Mul(decimal.NewFromInt(100))
+	if !actualMinorDecimal.Equal(actualMinorDecimal.Round(0)) {
+		return fmt.Errorf("%w: callback money has more than two decimal places", ErrTopUpPaymentMismatch)
+	}
+	actualMinor, err := common.WalletQuotaFromDecimal(actualMinorDecimal)
+	if err != nil || actualMinor != expectedMinor {
+		return fmt.Errorf("%w: expected_minor=%d actual_minor=%d", ErrTopUpPaymentMismatch, expectedMinor, actualMinor)
+	}
+	return nil
+}
+
+func validateEpayPricingIntegrity(topUp *TopUp) error {
+	if topUp == nil || topUp.SettlementVersion < TopUpPricingSnapshotVersion {
+		return nil
+	}
+	if topUp.CreditedQuota <= 0 || topUp.QuotedMoneyMinor <= 0 {
+		return ErrTopUpPricingRequired
+	}
+	snapshot, err := ParseTopUpPricingSnapshot(topUp.PricingSnapshot)
+	if err != nil {
+		return fmt.Errorf("parse top-up pricing snapshot: %w", err)
+	}
+	if snapshot == nil || snapshot.CreditedQuota <= 0 || snapshot.QuotedMoneyMinor <= 0 {
+		return ErrTopUpPricingRequired
+	}
+	if snapshot.CreditedQuota != topUp.CreditedQuota || snapshot.QuotedMoneyMinor != topUp.QuotedMoneyMinor || snapshot.RewardRateBps != topUp.InviteRewardRateBps {
+		return ErrTopUpPricingMismatch
+	}
+	return nil
+}
+
+func calculateTopUpInviteRewardAtRate(quotaToAdd int64, rateBps int64) (int64, string, error) {
+	if quotaToAdd <= 0 || rateBps <= 0 {
+		return 0, modelRewardPercent(rateBps), nil
+	}
+	if rateBps > 10000 {
+		return 0, "", errors.New("invite reward rate is outside basis-point range")
+	}
 	reward, err := common.WalletQuotaFromDecimalStrict(
-		decimal.NewFromInt(quotaToAdd).Mul(percent).Div(decimal.NewFromInt(100)),
+		decimal.NewFromInt(quotaToAdd).Mul(decimal.NewFromInt(rateBps)).Div(decimal.NewFromInt(10000)),
 	)
 	if err != nil {
-		return 0, percent.String()
+		return 0, modelRewardPercent(rateBps), err
 	}
-	return reward, percent.String()
+	return reward, modelRewardPercent(rateBps), nil
+}
+
+func modelRewardPercent(rateBps int64) string {
+	if rateBps <= 0 {
+		return ""
+	}
+	return RewardPercentFromBps(rateBps)
+}
+
+func currentTopUpInviteRewardRate() (int64, error) {
+	if !operation_setting.IsPaymentComplianceConfirmed() {
+		return 0, nil
+	}
+	return RewardRateBpsFromPercent(common.TopUpInviteRewardPercent)
+}
+
+func topUpInviteRewardTerms(topUp *TopUp) (rateBps int64, eligible bool, err error) {
+	if !operation_setting.IsPaymentComplianceConfirmed() {
+		return 0, false, nil
+	}
+	if topUp.PaymentProvider == PaymentProviderEpay && topUp.SettlementVersion >= TopUpPricingSnapshotVersion {
+		snapshot, parseErr := ParseTopUpPricingSnapshot(topUp.PricingSnapshot)
+		if parseErr != nil {
+			return 0, false, parseErr
+		}
+		if snapshot == nil {
+			return 0, false, ErrTopUpPricingRequired
+		}
+		if !snapshot.InviteRewardEligible || snapshot.RewardRateBps <= 0 {
+			return 0, false, nil
+		}
+		return snapshot.RewardRateBps, true, nil
+	}
+	rateBps, err = currentTopUpInviteRewardRate()
+	return rateBps, err == nil && rateBps > 0, err
 }
 
 // grantTopUpInviteRewardTx updates the aggregate fields and immutable ledger
@@ -227,7 +343,17 @@ func grantTopUpInviteRewardTx(tx *gorm.DB, inviterId int, topUp *TopUp, quotaToA
 	if inviterId <= 0 || inviterId == topUp.UserId {
 		return 0, 0, nil
 	}
-	reward, rewardPercent := calculateTopUpInviteReward(quotaToAdd)
+	rateBps, eligible, err := topUpInviteRewardTerms(topUp)
+	if err != nil {
+		return 0, 0, err
+	}
+	if !eligible {
+		return 0, 0, nil
+	}
+	reward, rewardPercent, err := calculateTopUpInviteRewardAtRate(quotaToAdd, rateBps)
+	if err != nil {
+		return 0, 0, err
+	}
 	if reward <= 0 {
 		return 0, 0, nil
 	}
@@ -250,6 +376,7 @@ func grantTopUpInviteRewardTx(tx *gorm.DB, inviterId int, topUp *TopUp, quotaToA
 		IdempotencyKey: &idempotencyKey,
 		BaseQuota:      quotaToAdd,
 		RewardPercent:  rewardPercent,
+		RewardRateBps:  rateBps,
 		RewardQuota:    reward,
 		AffQuotaDelta:  reward,
 	}); err != nil {
@@ -296,8 +423,21 @@ func CompleteTopUp(opts CompleteTopUpOptions) (*TopUpCompletionResult, error) {
 			return ErrTopUpStatusInvalid
 		}
 
-		quotaToAdd, quotaErr := getTopUpQuotaToAdd(topUp)
+		if opts.ValidateCallbackPayment && topUp.PaymentProvider == PaymentProviderEpay {
+			if err := validateEpayCallbackPayment(topUp, opts.CallbackPaymentMoney); err != nil {
+				return err
+			}
+		} else if topUp.PaymentProvider == PaymentProviderEpay {
+			if err := validateEpayPricingIntegrity(topUp); err != nil {
+				return err
+			}
+		}
+
+		quotaToAdd, quotaErr := getTopUpQuotaToAdd(topUp, opts.AllowLegacyPricing || !opts.ValidateCallbackPayment)
 		if quotaErr != nil || quotaToAdd <= 0 {
+			if quotaErr != nil {
+				return quotaErr
+			}
 			return ErrInvalidTopUpQuota
 		}
 
@@ -366,11 +506,23 @@ func CompleteTopUp(opts CompleteTopUpOptions) (*TopUpCompletionResult, error) {
 // the shared transaction.  alreadyDone is intentionally returned for Epay's
 // retry protocol.
 func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (bool, error) {
+	return rechargeEpay(tradeNo, actualPaymentMethod, "", false, callerIp)
+}
+
+// RechargeEpayWithMoney is used by the signed webhook path. It validates the
+// provider-reported amount against the immutable quote before settlement.
+func RechargeEpayWithMoney(tradeNo string, actualPaymentMethod string, callbackMoney string, callerIp string) (bool, error) {
+	return rechargeEpay(tradeNo, actualPaymentMethod, callbackMoney, true, callerIp)
+}
+
+func rechargeEpay(tradeNo string, actualPaymentMethod string, callbackMoney string, validatePayment bool, callerIp string) (bool, error) {
 	result, err := CompleteTopUp(CompleteTopUpOptions{
 		TradeNo:                 tradeNo,
 		ExpectedPaymentProvider: PaymentProviderEpay,
 		CallerIp:                callerIp,
 		CallbackPaymentMethod:   actualPaymentMethod,
+		CallbackPaymentMoney:    callbackMoney,
+		ValidateCallbackPayment: validatePayment,
 	})
 	if err != nil {
 		if !errors.Is(err, ErrTopUpNotFound) && !errors.Is(err, ErrPaymentMethodMismatch) && !errors.Is(err, ErrTopUpStatusInvalid) {
@@ -565,8 +717,9 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 // ManualCompleteTopUp 管理员手动完成订单并给用户充值
 func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	result, err := CompleteTopUp(CompleteTopUpOptions{
-		TradeNo:  tradeNo,
-		CallerIp: callerIp,
+		TradeNo:            tradeNo,
+		CallerIp:           callerIp,
+		AllowLegacyPricing: true,
 	})
 	if err != nil {
 		return err

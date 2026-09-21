@@ -202,7 +202,9 @@ export function SensitiveWordsSection() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSavingConfig, setIsSavingConfig] = useState(false)
   const [isSavingRule, setIsSavingRule] = useState(false)
-  const [changingModeRuleID, setChangingModeRuleID] = useState<number | null>(null)
+  const [changingModeRuleID, setChangingModeRuleID] = useState<number | null>(
+    null
+  )
   const [ruleDialogOpen, setRuleDialogOpen] = useState(false)
   const [draft, setDraft] = useState<RuleDraft>(emptyDraft)
   const [deleteTarget, setDeleteTarget] = useState<RuleSummary | null>(null)
@@ -335,7 +337,10 @@ export function SensitiveWordsSection() {
   }, [activeMatchIndex, locateWordMatch, ruleDialogOpen, wordSearch])
 
   const saveConfig = async () => {
-    const banThreshold = Math.max(1, Math.min(1000, Number(config.ban_threshold) || 50))
+    const banThreshold = Math.max(
+      1,
+      Math.min(1000, Number(config.ban_threshold) || 50)
+    )
     const retentionDays = Math.max(
       1,
       Math.min(3650, Number(config.full_prompt_retention_days) || 180)
@@ -445,7 +450,10 @@ export function SensitiveWordsSection() {
     }
   }
 
-  const changeRuleMode = async (rule: RuleSummary, mode: RuleSummary['mode']) => {
+  const changeRuleMode = async (
+    rule: RuleSummary,
+    mode: RuleSummary['mode']
+  ) => {
     setChangingModeRuleID(rule.id)
     try {
       await api.patch(`/api/sensitive-words/rules/${rule.id}/mode`, { mode })
@@ -642,10 +650,12 @@ export function SensitiveWordsSection() {
                           Number(event.target.value) || 1,
                       }))
                     }
-                    />
+                  />
                 </div>
                 <div className='space-y-2'>
-                  <Label htmlFor='sensitive-max-prompt-runes'>最大提示词长度</Label>
+                  <Label htmlFor='sensitive-max-prompt-runes'>
+                    最大提示词长度
+                  </Label>
                   <Input
                     id='sensitive-max-prompt-runes'
                     type='number'
@@ -678,7 +688,6 @@ export function SensitiveWordsSection() {
               }
             />
           </div>
-
         </section>
 
         <section className='space-y-3'>
