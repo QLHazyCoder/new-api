@@ -177,7 +177,7 @@ describe('log cost display', () => {
     }
   )
 
-  test('keeps the regular cost visible and adds an accessible surcharge marker', () => {
+  test('keeps the regular cost visible while the surcharge marker stays hidden', () => {
     renderCost({
       quota: 12500,
       other: {
@@ -186,14 +186,12 @@ describe('log cost display', () => {
     })
 
     expect(screen.getByText('$0.025')).toBeVisible()
-    const marker = screen.getByRole('img', {
-      name: 'Includes tool-call surcharge',
-    })
-    expect(marker).toHaveAttribute('data-tool-surcharge-indicator', 'true')
-    expect(marker).toHaveAttribute('tabindex', '0')
+    expect(
+      screen.queryByRole('img', { name: 'Includes tool-call surcharge' })
+    ).not.toBeInTheDocument()
   })
 
-  test('shows subscription cost and source alongside the legacy surcharge marker', () => {
+  test('shows subscription cost and source without the legacy surcharge marker', () => {
     renderCost({
       quota: 5000,
       other: {
@@ -208,7 +206,7 @@ describe('log cost display', () => {
     expect(screen.getByText('$0.01')).toBeVisible()
     expect(screen.getByRole('img', { name: 'Subscription' })).toBeVisible()
     expect(
-      screen.getByRole('img', { name: 'Includes tool-call surcharge' })
-    ).toHaveAttribute('data-tool-surcharge-indicator', 'true')
+      screen.queryByRole('img', { name: 'Includes tool-call surcharge' })
+    ).not.toBeInTheDocument()
   })
 })
