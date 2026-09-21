@@ -27,7 +27,7 @@ import {
   Trash2Icon,
   XIcon,
 } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -60,7 +60,10 @@ import type { ImageReferencePreview, ImageResult, ImageTask } from '../types'
 
 interface PlaygroundImageTaskGridProps {
   deletingTaskIds: ReadonlySet<string>
+  hasMoreTasks: boolean
+  isLoadingMoreTasks: boolean
   tasks: ImageTask[]
+  onLoadMoreTasks: () => void
   onReusePrompt: (prompt: string) => void
   onRetryTask: (task: ImageTask) => void
   onDeleteTask: (task: ImageTask) => void
@@ -368,7 +371,10 @@ function TaskCard({
 
 export function PlaygroundImageTaskGrid({
   deletingTaskIds,
+  hasMoreTasks,
+  isLoadingMoreTasks,
   tasks,
+  onLoadMoreTasks,
   onReusePrompt,
   onRetryTask,
   onDeleteTask,
@@ -384,6 +390,23 @@ export function PlaygroundImageTaskGrid({
     doNotShowDeleteConfirmationAgain,
     setDoNotShowDeleteConfirmationAgain,
   ] = useState(false)
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current
+    if (!sentinel || !hasMoreTasks || isLoadingMoreTasks) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          onLoadMoreTasks()
+        }
+      },
+      { rootMargin: '400px' }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMoreTasks, isLoadingMoreTasks, onLoadMoreTasks])
 
   const requestDeleteTask = (task: ImageTask) => {
     if (deletingTaskIds.has(task.id)) return
@@ -434,6 +457,17 @@ export function PlaygroundImageTaskGrid({
             />
           ))}
         </div>
+        {hasMoreTasks ? (
+          <div
+            ref={loadMoreSentinelRef}
+            aria-label={t('Loading...')}
+            className='flex h-10 items-center justify-center'
+          >
+            {isLoadingMoreTasks ? (
+              <LoaderCircleIcon className='text-muted-foreground size-4 animate-spin' />
+            ) : null}
+          </div>
+        ) : null}
 
         <Dialog
           open={Boolean(preview)}

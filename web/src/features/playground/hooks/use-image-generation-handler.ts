@@ -25,7 +25,7 @@ import {
   createImageEditBatch,
   createImageGenerationBatch,
   deleteImageTask as deleteServerImageTask,
-  getAllImageTasks,
+  getImageTaskPage,
   retryImageTask as retryServerImageTask,
 } from '../api'
 import { ERROR_MESSAGES } from '../constants'
@@ -148,6 +148,8 @@ function isActiveImageTask(task: ImageTask): boolean {
   return ['queued', 'running', 'saving'].includes(task.status)
 }
 
+const IMAGE_TASK_PAGE_SIZE = 50
+
 export function useImageGenerationHandler({
   config,
   enabled,
@@ -157,14 +159,24 @@ export function useImageGenerationHandler({
 }: UseImageGenerationHandlerOptions) {
   const { t } = useTranslation()
   const refreshRequestRef = useRef<Promise<void> | null>(null)
+  const loadMoreRequestRef = useRef<Promise<void> | null>(null)
   const hasActiveTasksRef = useRef(tasks.some(isActiveImageTask))
   const hasLoadedTasksRef = useRef(false)
+  const tasksRef = useRef(tasks)
+  const loadedTaskPageRef = useRef(0)
+  const hasMoreTasksRef = useRef(false)
   const deletingTaskIdsRef = useRef(new Set<string>())
   // Successful deletes stay hidden from older polling responses still in flight.
   const deletedTaskIdsRef = useRef(new Set<string>())
   const [deletingTaskIds, setDeletingTaskIds] = useState<ReadonlySet<string>>(
     () => new Set()
   )
+  const [hasMoreTasks, setHasMoreTasks] = useState(false)
+  const [isLoadingMoreTasks, setIsLoadingMoreTasks] = useState(false)
+
+  useEffect(() => {
+    tasksRef.current = tasks
+  }, [tasks])
 
   useEffect(() => {
     hasActiveTasksRef.current = tasks.some(isActiveImageTask)
@@ -178,14 +190,35 @@ export function useImageGenerationHandler({
       }
 
       const request = (async () => {
-        const serverTasks = (await getAllImageTasks())
+        const firstPage = await getImageTaskPage(1, IMAGE_TASK_PAGE_SIZE)
+        const firstPageTasks = firstPage.items
           .map(mapServerImageTask)
           .filter((task) => !deletedTaskIdsRef.current.has(task.id))
+        const firstPageTaskIds = new Set(firstPageTasks.map((task) => task.id))
+        const pageSize = firstPage.page_size || IMAGE_TASK_PAGE_SIZE
+        const olderTasks =
+          firstPage.total > pageSize
+            ? tasksRef.current.filter(
+                (task) =>
+                  !firstPageTaskIds.has(task.id) &&
+                  !deletedTaskIdsRef.current.has(task.id)
+              )
+            : []
+        const serverTasks = [...firstPageTasks, ...olderTasks].sort(
+          (left, right) => right.createdAt - left.createdAt
+        )
         hasLoadedTasksRef.current = true
         hasActiveTasksRef.current = serverTasks.some(isActiveImageTask)
-        onTasksUpdate(
-          serverTasks.sort((left, right) => right.createdAt - left.createdAt)
+        tasksRef.current = serverTasks
+        loadedTaskPageRef.current = Math.max(
+          loadedTaskPageRef.current,
+          firstPage.page || 1
         )
+        const nextHasMoreTasks =
+          (firstPage.page || 1) * pageSize < firstPage.total
+        hasMoreTasksRef.current = nextHasMoreTasks
+        setHasMoreTasks(nextHasMoreTasks)
+        onTasksUpdate(serverTasks)
       })()
       refreshRequestRef.current = request
       try {
@@ -228,6 +261,54 @@ export function useImageGenerationHandler({
       window.removeEventListener('focus', refreshWhenVisible)
     }
   }, [enabled, refreshTasks])
+
+  const loadMoreTasks = useCallback(async () => {
+    if (!hasMoreTasksRef.current) return
+    if (loadMoreRequestRef.current) return loadMoreRequestRef.current
+
+    const request = (async () => {
+      setIsLoadingMoreTasks(true)
+      try {
+        const nextPageNumber = loadedTaskPageRef.current + 1
+        const nextPage = await getImageTaskPage(
+          nextPageNumber,
+          IMAGE_TASK_PAGE_SIZE
+        )
+        const taskMap = new Map(
+          tasksRef.current.map((task) => [task.id, task] as const)
+        )
+        for (const task of nextPage.items.map(mapServerImageTask)) {
+          if (!deletedTaskIdsRef.current.has(task.id)) {
+            taskMap.set(task.id, task)
+          }
+        }
+        const mergedTasks = [...taskMap.values()].sort(
+          (left, right) => right.createdAt - left.createdAt
+        )
+        tasksRef.current = mergedTasks
+        loadedTaskPageRef.current = nextPageNumber
+        const pageSize = nextPage.page_size || IMAGE_TASK_PAGE_SIZE
+        const nextHasMoreTasks =
+          nextPageNumber * pageSize < nextPage.total &&
+          nextPage.items.length > 0
+        hasMoreTasksRef.current = nextHasMoreTasks
+        setHasMoreTasks(nextHasMoreTasks)
+        onTasksUpdate(mergedTasks)
+      } catch (error: unknown) {
+        toast.error(getImageGenerationError(error, t('Request failed')).message)
+      } finally {
+        setIsLoadingMoreTasks(false)
+      }
+    })()
+    loadMoreRequestRef.current = request
+    try {
+      await request
+    } finally {
+      if (loadMoreRequestRef.current === request) {
+        loadMoreRequestRef.current = null
+      }
+    }
+  }, [onTasksUpdate, t])
 
   const generateImage = useCallback(
     async (
@@ -338,9 +419,11 @@ export function useImageGenerationHandler({
       try {
         await deleteServerImageTask(task.id)
         deletedTaskIdsRef.current.add(task.id)
-        onTasksUpdate((previous) =>
-          previous.filter((item) => item.id !== task.id)
+        const remainingTasks = tasksRef.current.filter(
+          (item) => item.id !== task.id
         )
+        tasksRef.current = remainingTasks
+        onTasksUpdate(remainingTasks)
         await refreshTasks(true).catch(() => undefined)
       } catch (error: unknown) {
         toast.error(getImageGenerationError(error, t('Request failed')).message)
@@ -356,6 +439,9 @@ export function useImageGenerationHandler({
     deleteTask,
     deletingTaskIds,
     generateImage,
+    hasMoreTasks,
+    isLoadingMoreTasks,
+    loadMoreTasks,
     refreshTasks,
     retryTask,
   }

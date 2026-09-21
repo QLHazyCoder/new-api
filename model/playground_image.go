@@ -360,12 +360,19 @@ func ListHiddenTerminalPlaygroundImageTasks(limit int) ([]PlaygroundImageTask, e
 		limit = 500
 	}
 	var tasks []PlaygroundImageTask
-	err := DB.Where("hidden = ? AND status IN ?", true, []PlaygroundImageTaskStatus{
-		PlaygroundImageTaskSucceeded,
-		PlaygroundImageTaskFailed,
-		PlaygroundImageTaskInterrupted,
-		PlaygroundImageTaskCancelled,
-	}).Order("updated_at ASC").Limit(limit).Find(&tasks).Error
+	err := DB.Where(
+		"hidden = ? AND (status IN ? OR (status = ? AND lease_owner = ? AND lease_until = ?))",
+		true,
+		[]PlaygroundImageTaskStatus{
+			PlaygroundImageTaskSucceeded,
+			PlaygroundImageTaskFailed,
+			PlaygroundImageTaskInterrupted,
+			PlaygroundImageTaskCancelled,
+		},
+		PlaygroundImageTaskQueued,
+		"",
+		0,
+	).Order("updated_at ASC").Limit(limit).Find(&tasks).Error
 	return tasks, err
 }
 
@@ -434,8 +441,24 @@ func recoverExpiredPlaygroundImageLeases(tx *gorm.DB, now int64) error {
 		Updates(interruptedUpdates).Error; err != nil {
 		return err
 	}
+	// A deleted task may still be leased before the worker records that the
+	// upstream request started. Do not requeue a hidden task that no worker can claim.
+	if err := tx.Model(&PlaygroundImageTask{}).
+		Where("status IN ? AND lease_until > 0 AND lease_until < ? AND upstream_started_at = 0 AND (hidden = ? OR discard_result = ?)", active, now, true, true).
+		Updates(map[string]any{
+			"status":        PlaygroundImageTaskCancelled,
+			"error_message": "Generation was cancelled before the upstream request started",
+			"error_code":    "cancelled_before_upstream",
+			"lease_owner":   "",
+			"lease_until":   0,
+			"finished_at":   now,
+			"updated_at":    now,
+			"expires_at":    now + int64((7 * 24 * time.Hour).Seconds()),
+		}).Error; err != nil {
+		return err
+	}
 	return tx.Model(&PlaygroundImageTask{}).
-		Where("status IN ? AND lease_until > 0 AND lease_until < ? AND upstream_started_at = 0", active, now).
+		Where("status IN ? AND lease_until > 0 AND lease_until < ? AND upstream_started_at = 0 AND hidden = ? AND discard_result = ?", active, now, false, false).
 		Updates(map[string]any{
 			"status":      PlaygroundImageTaskQueued,
 			"lease_owner": "",
@@ -722,7 +745,7 @@ func DeleteHiddenPlaygroundImageTask(taskID, resultPath string) (int64, error) {
 			}
 			return err
 		}
-		if !task.Status.IsTerminal() {
+		if !task.Status.IsTerminal() && !(task.Status == PlaygroundImageTaskQueued && task.LeaseOwner == "" && task.LeaseUntil == 0) {
 			return errors.New("playground image task is still active")
 		}
 		batchRecordID = task.BatchRecordID

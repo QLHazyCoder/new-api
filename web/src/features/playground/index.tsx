@@ -116,14 +116,21 @@ export function Playground() {
     imageSelection?.model.capabilities ?? EMPTY_IMAGE_MODEL_CAPABILITIES
   const [imagePrompt, setImagePrompt] = useState('')
 
-  const { deleteTask, deletingTaskIds, generateImage, retryTask } =
-    useImageGenerationHandler({
-      config: effectiveImageConfig,
-      enabled: mode === 'image',
-      groups: imageGroups,
-      tasks: imageTasks,
-      onTasksUpdate: updateImageTasks,
-    })
+  const {
+    deleteTask,
+    deletingTaskIds,
+    generateImage,
+    hasMoreTasks,
+    isLoadingMoreTasks,
+    loadMoreTasks,
+    retryTask,
+  } = useImageGenerationHandler({
+    config: effectiveImageConfig,
+    enabled: mode === 'image',
+    groups: imageGroups,
+    tasks: imageTasks,
+    onTasksUpdate: updateImageTasks,
+  })
 
   useEffect(() => {
     if (!imageSelection) return
@@ -203,7 +210,10 @@ export function Playground() {
           <div className='min-h-0 flex-1 overflow-y-auto'>
             <PlaygroundImageTaskGrid
               deletingTaskIds={deletingTaskIds}
+              hasMoreTasks={hasMoreTasks}
+              isLoadingMoreTasks={isLoadingMoreTasks}
               tasks={imageTasks}
+              onLoadMoreTasks={loadMoreTasks}
               onReusePrompt={handleReusePrompt}
               onRetryTask={handleRetryTask}
               onDeleteTask={handleDeleteImageTask}

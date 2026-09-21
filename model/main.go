@@ -400,6 +400,9 @@ func migrateDB() error {
 	if err := seedRequiredOptions(DB); err != nil {
 		return err
 	}
+	if err := validateRequiredOptions(DB); err != nil {
+		return err
+	}
 	if err := MigrateSensitiveWordData(); err != nil {
 		return err
 	}

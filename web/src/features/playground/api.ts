@@ -30,7 +30,6 @@ import type {
   ImageModelOption,
   ModelOption,
   GroupOption,
-  ServerImageTask,
   ServerImageTaskPage,
 } from './types'
 
@@ -82,7 +81,7 @@ export async function createImageEditBatch(
   return unwrapImageAPIData<ImageBatchSummary>(res.data)
 }
 
-async function getImageTaskPage(
+export async function getImageTaskPage(
   page: number,
   pageSize: number
 ): Promise<ServerImageTaskPage> {
@@ -92,23 +91,6 @@ async function getImageTaskPage(
     skipErrorHandler: true,
   })
   return unwrapImageAPIData<ServerImageTaskPage>(res.data)
-}
-
-export async function getAllImageTasks(): Promise<ServerImageTask[]> {
-  const pageSize = 200
-  const firstPage = await getImageTaskPage(1, pageSize)
-  const taskMap = new Map(
-    firstPage.items.map((task) => [task.id, task] as const)
-  )
-  const pageCount = Math.ceil(firstPage.total / pageSize)
-  for (let page = 2; page <= pageCount; page += 1) {
-    const nextPage = await getImageTaskPage(page, pageSize)
-    nextPage.items.forEach((task) => taskMap.set(task.id, task))
-    if (nextPage.items.length === 0) break
-  }
-  return [...taskMap.values()].sort(
-    (left, right) => right.created_at - left.created_at
-  )
 }
 
 export async function retryImageTask(taskId: string): Promise<void> {
