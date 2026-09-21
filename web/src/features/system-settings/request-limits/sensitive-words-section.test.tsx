@@ -34,7 +34,7 @@ vi.mock('@/lib/api', () => ({ api: apiMock }))
 
 const COMPONENT_TEST_TIMEOUT_MS = 30_000
 
-function configureApiMocks() {
+function configureApiMocks(rules: Array<Record<string, unknown>> = []) {
   apiMock.get.mockImplementation((path: string) => {
     if (path === '/api/sensitive-words/policy') {
       return Promise.resolve({
@@ -53,7 +53,24 @@ function configureApiMocks() {
       })
     }
     if (path === '/api/sensitive-words/rules') {
-      return Promise.resolve({ data: { data: [] } })
+      return Promise.resolve({ data: { data: rules } })
+    }
+    const ruleDetailMatch = path.match(/^\/api\/sensitive-words\/rules\/(\d+)$/)
+    if (ruleDetailMatch) {
+      const rule = rules.find(
+        (item) => Number(item.id) === Number(ruleDetailMatch[1])
+      )
+      return Promise.resolve({
+        data: {
+          data: rule
+            ? {
+                ...rule,
+                words: ['测试词'],
+                groups: rule.groups ?? [],
+              }
+            : undefined,
+        },
+      })
     }
     if (path === '/api/sensitive-words/groups') {
       return Promise.resolve({ data: { data: [] } })
@@ -85,6 +102,47 @@ describe('SensitiveWordsSection word search', () => {
     vi.clearAllMocks()
     configureApiMocks()
   })
+
+  test(
+    'renders localized labels for selected rule modes and scope',
+    async () => {
+      configureApiMocks([
+        {
+          id: 1,
+          name: '规则测试',
+          scope: 'group',
+          groups: ['default'],
+          word_count: 1,
+          mode: 'block',
+          created_by: 1,
+          version: 1,
+          created_at: '',
+          updated_at: '',
+        },
+      ])
+      render(<SensitiveWordsSection />)
+
+      await waitFor(() =>
+        expect(screen.getByText('规则测试')).toBeInTheDocument()
+      )
+      expect(
+        screen.getByRole('combobox', { name: '规则测试处理模式' })
+      ).toHaveTextContent('拦截')
+
+      await userEvent.click(screen.getByRole('button', { name: '编辑规则' }))
+      await waitFor(() => {
+        expect(screen.getByRole('dialog')).toBeInTheDocument()
+        expect(screen.getByLabelText('规则名称')).toHaveValue('规则测试')
+      })
+      expect(
+        screen.getByRole('combobox', { name: '规则范围' })
+      ).toHaveTextContent('指定分组')
+      expect(
+        screen.getByRole('combobox', { name: '规则处理模式' })
+      ).toHaveTextContent('拦截')
+    },
+    COMPONENT_TEST_TIMEOUT_MS
+  )
 
   test(
     'selects the first match and cycles with Enter and Shift+Enter',

@@ -112,6 +112,28 @@ type RuleDetail = RuleSummary & {
   words: string[]
 }
 
+const SENSITIVE_WORD_MODE_LABEL_KEYS = {
+  block: 'block',
+  observe: 'observe',
+  off: 'off',
+} as const
+
+const SENSITIVE_WORD_MODE_LABEL_FALLBACKS = {
+  block: '拦截',
+  observe: '观察',
+  off: '关闭',
+} as const
+
+const SENSITIVE_WORD_SCOPE_LABEL_KEYS = {
+  global: 'global',
+  group: 'group',
+} as const
+
+const SENSITIVE_WORD_SCOPE_LABEL_FALLBACKS = {
+  global: '全局',
+  group: '指定分组',
+} as const
+
 type RuleDraft = {
   id?: number
   name: string
@@ -191,6 +213,14 @@ function createDefaultSensitiveWordConfig(): SensitiveWordPolicy {
 
 export function SensitiveWordsSection() {
   const { t } = useTranslation()
+  const modeLabel = (mode: RuleSummary['mode']) =>
+    t(SENSITIVE_WORD_MODE_LABEL_KEYS[mode], {
+      defaultValue: SENSITIVE_WORD_MODE_LABEL_FALLBACKS[mode],
+    })
+  const scopeLabel = (scope: RuleDraft['scope']) =>
+    t(SENSITIVE_WORD_SCOPE_LABEL_KEYS[scope], {
+      defaultValue: SENSITIVE_WORD_SCOPE_LABEL_FALLBACKS[scope],
+    })
   const defaultConfigRef = useRef<SensitiveWordPolicy>(
     createDefaultSensitiveWordConfig()
   )
@@ -789,13 +819,22 @@ export function SensitiveWordsSection() {
                             }
                           }}
                         >
-                          <SelectTrigger className='w-24'>
-                            <SelectValue />
+                          <SelectTrigger
+                            className='w-24'
+                            aria-label={`${rule.name}处理模式`}
+                          >
+                            <SelectValue>
+                              {modeLabel(rule.mode)}
+                            </SelectValue>
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value='block'>拦截</SelectItem>
-                            <SelectItem value='observe'>观察</SelectItem>
-                            <SelectItem value='off'>关闭</SelectItem>
+                            <SelectItem value='block'>
+                              {modeLabel('block')}
+                            </SelectItem>
+                            <SelectItem value='observe'>
+                              {modeLabel('observe')}
+                            </SelectItem>
+                            <SelectItem value='off'>{modeLabel('off')}</SelectItem>
                           </SelectContent>
                         </Select>
                       </td>
@@ -925,12 +964,14 @@ export function SensitiveWordsSection() {
                 }))
               }
             >
-              <SelectTrigger>
-                <SelectValue />
+              <SelectTrigger aria-label='规则范围'>
+                <SelectValue>
+                  {scopeLabel(draft.scope)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='global'>全局</SelectItem>
-                <SelectItem value='group'>指定分组</SelectItem>
+                <SelectItem value='global'>{scopeLabel('global')}</SelectItem>
+                <SelectItem value='group'>{scopeLabel('group')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1090,13 +1131,15 @@ export function SensitiveWordsSection() {
                 }
               }}
             >
-              <SelectTrigger>
-                <SelectValue />
+              <SelectTrigger aria-label='规则处理模式'>
+                <SelectValue>
+                  {modeLabel(draft.mode)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='block'>拦截</SelectItem>
-                <SelectItem value='observe'>观察</SelectItem>
-                <SelectItem value='off'>关闭</SelectItem>
+                <SelectItem value='block'>{modeLabel('block')}</SelectItem>
+                <SelectItem value='observe'>{modeLabel('observe')}</SelectItem>
+                <SelectItem value='off'>{modeLabel('off')}</SelectItem>
               </SelectContent>
             </Select>
             <p className='text-muted-foreground text-xs'>
