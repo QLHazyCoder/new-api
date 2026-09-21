@@ -81,6 +81,9 @@ func AdjustUserQuota(userID, operatorRole int, mode string, value int64) (*UserQ
 	} else if delta != 0 {
 		if err := cacheIncrUserQuota(userID, delta); err != nil {
 			common.SysError(fmt.Sprintf("failed to sync manual quota adjustment for user %d: %s", userID, err))
+			if invalidateErr := invalidateUserCache(userID); invalidateErr != nil {
+				common.SysError(fmt.Sprintf("failed to invalidate user cache after manual quota adjustment for user %d: %s", userID, invalidateErr))
+			}
 		}
 	}
 	return &adjustment, nil

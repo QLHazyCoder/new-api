@@ -67,6 +67,25 @@ func TestAdministrativeQuotaMutationsKeepDatabaseAndCacheConsistent(t *testing.T
 	assert.EqualValues(t, common.MaxWalletQuota, mustUserQuota(t, user.Id))
 }
 
+func TestManualQuotaAdjustmentInvalidatesCacheWhenDeltaSyncFails(t *testing.T) {
+	truncateTables(t)
+	server := useUserCacheMiniRedis(t)
+	user := User{
+		Username: "quota-cache-sync-failure", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", Quota: 100, AuthVersion: 1,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+	require.NoError(t, populateUserCache(user))
+
+	// Make the Lua HINCRBY fail while keeping Redis available for DEL.
+	server.HSet(getUserCacheKey(user.Id), "Quota", "not-an-integer")
+	adjustment, err := AdjustUserQuota(user.Id, common.RoleRootUser, "add", 25)
+	require.NoError(t, err)
+	assert.EqualValues(t, 125, adjustment.After)
+	assert.False(t, server.Exists(getUserCacheKey(user.Id)))
+	assert.EqualValues(t, 125, mustUserQuota(t, user.Id))
+}
+
 func mustUserQuota(t *testing.T, userID int) int64 {
 	t.Helper()
 	var quota int64

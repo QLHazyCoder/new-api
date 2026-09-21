@@ -963,7 +963,7 @@ func DeleteUser(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	originUser, err := model.GetUserById(id, false)
+	originUser, err := model.GetUserByIdUnscoped(id, false)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -1113,9 +1113,7 @@ func ManageUser(c *gin.Context) {
 	user := model.User{
 		Id: req.Id,
 	}
-	// Fill attributes
-	model.DB.Unscoped().Where(&user).First(&user)
-	if user.Id == 0 {
+	if err := model.DB.Where(&user).First(&user).Error; err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserNotExists)
 		return
 	}

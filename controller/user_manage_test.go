@@ -192,6 +192,52 @@ func TestManageUserDeleteReturnsImmediatelyAndUnknownActionFails(t *testing.T) {
 	assert.Equal(t, common.UserStatusEnabled, unchanged.Status)
 }
 
+func TestManageUserRejectsSoftDeletedUserForNonQuotaActions(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	user := model.User{
+		Username: "managed-soft-deleted-user", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1,
+	}
+	require.NoError(t, db.Create(&user).Error)
+	require.NoError(t, db.Delete(&user).Error)
+
+	recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"disable"}`, user.Id))
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+
+	var stored model.User
+	require.NoError(t, db.Unscoped().First(&stored, user.Id).Error)
+	assert.True(t, stored.DeletedAt.Valid)
+	assert.Equal(t, common.UserStatusEnabled, stored.Status)
+}
+
+func TestDeleteUserHardDeletesSoftDeletedUser(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, db.AutoMigrate(
+		&model.ExternalIdentityClaim{}, &model.TwoFABackupCode{}, &model.TwoFA{},
+		&model.AuthFlow{}, &model.PasskeyCredential{}, &model.Token{}, &model.UserOAuthBinding{},
+	))
+	user := model.User{
+		Username: "hard-delete-soft-deleted-user", Password: "password", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1,
+	}
+	require.NoError(t, db.Create(&user).Error)
+	require.NoError(t, db.Delete(&user).Error)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/user/"+strconv.Itoa(user.Id), nil)
+	c.Params = gin.Params{{Key: "id", Value: strconv.Itoa(user.Id)}}
+	c.Set("role", common.RoleRootUser)
+	DeleteUser(c)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	var count int64
+	require.NoError(t, db.Unscoped().Model(&model.User{}).Where("id = ?", user.Id).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
 func createQuotaTestOperator(t *testing.T, db *gorm.DB, role int) model.User {
 	t.Helper()
 	if role == 0 {
@@ -575,12 +621,15 @@ func TestManageUserQuotaCacheUsesCommittedIntegerDifference(t *testing.T) {
 				}
 			}
 			require.NotEmpty(t, quotaKey)
-			server.HSet(quotaKey, "Quota", strconv.FormatInt(tc.cached, 10))
+			if tc.failCache {
+				// A malformed cached number makes the Lua HINCRBY fail while DEL
+				// remains available to verify the recovery path.
+				server.HSet(quotaKey, "Quota", "not-an-integer")
+			} else {
+				server.HSet(quotaKey, "Quota", strconv.FormatInt(tc.cached, 10))
+			}
 			if tc.missingCache {
 				server.Del(quotaKey)
-			}
-			if tc.failCache {
-				server.SetError("ERR quota cache unavailable")
 			}
 			if tc.failUpdate {
 				require.NoError(t, db.Callback().Update().After("gorm:update").Register("test:cache_quota_rollback", func(tx *gorm.DB) {
