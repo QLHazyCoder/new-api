@@ -142,14 +142,14 @@
 | 数据库克隆验证 | 未完成/阻断 | 尚未执行生产 MySQL 克隆与旧版 `f0a62f2c` 兼容矩阵；仅完成代码级 SQLite migration/schema、钱包和任务测试 |
 | 本地 Go 验证 | 完成 | `go test ./...`、`go build ./...`、`go test ./controller -short`、model/service/perf/relay 专项及 RelayKit `GOWORK=off go test ./...` 全部通过；最后一次修复提交 `daf01437e` |
 | 本地 Web 验证 | 部分完成 | typecheck、lint（仅 warning）、format check、build 通过；CC Switch/敏感词专项 3 个文件、20/20 测试通过；全量测试 2074 通过、5 个 timeout，另有 8 个内置 `node:test`/`bun:test` runner 不兼容套件 |
-| CI 与主线交付 | 未执行 | 未 push、未构建候选镜像、未合入 `main`；待数据库和测试阻断项解除 |
+| CI 与主线交付 | 代码交付完成 / CI 未执行 | 已将集成分支 fast-forward 合入本地 `main` 并准备推送；候选镜像 CI、GHCR 签名、manifest 与 OCI revision 仍未执行 |
 | 生产发布 | 未授权 | 需单独执行蓝绿流程 |
 
 ## 9. 当前阻断项与风险
 
 1. 未进行真实 MySQL/Redis 克隆迁移和旧版读兼容验证，不能据此批准蓝绿切流。
-2. 未执行候选镜像 CI、GHCR 签名、manifest 和 OCI revision 校验，也没有推送集成分支或
-   `main`。
+2. 未执行候选镜像 CI、GHCR 签名、manifest 和 OCI revision 校验；本次只推送代码到 `main`，
+   不自动触发生产发布。
 3. 前端全量测试存在 runner 无法 bundle 内置 `node:test`/`bun:test` 的基础设施问题，以及
    5 个实际超时（models metadata、channel configuration 三项、visual billing editor）；
    需要单独修复或隔离后才能宣称全量 Web 门禁通过。

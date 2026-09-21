@@ -688,7 +688,8 @@ GitHub Actions 的 amd64、arm64 与 manifest 均成功。
   外壳并保留本地高级引擎，P-32 采用上游 billing session 并保留 signed BIGINT 精度。
   旧任务适配器、简单 RequestChecksSection、GPT 图片动态加价等重复实现已退休；保留项
   均收敛为窄适配或本地唯一契约。专项 Go/前端测试、构建和格式检查已执行；真实 MySQL
-  克隆迁移、旧版兼容、候选镜像 CI 和主线/生产发布仍未执行，不得视为发布完成。
+  克隆迁移、旧版兼容、候选镜像 CI 和生产发布仍未执行；本次仅完成代码合并并推送 `main`，
+  不得视为生产发布完成。
 - 2026-09-20：完成 `daf01437e` 兼容收尾。修复 token quota 的 number/decimal-string
   JSON 边界、int64 上下文读取、性能指标可见分组、价格分组裁剪、2FA/Passkey expand
   migration 前登录兼容、敏感词旧表回退及 BIGINT 测试断言；遵循 rc.39 删除未知
