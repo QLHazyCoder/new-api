@@ -112,6 +112,39 @@ func TestApplyPlaygroundGroupOverrideSupportsImageEditMultipart(t *testing.T) {
 	}
 }
 
+func TestGetModelRequestReadsImageEditMultipartModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, path := range []string{"/v1/images/edits", "/pg/images/edits"} {
+		t.Run(path, func(t *testing.T) {
+			var body bytes.Buffer
+			writer := multipart.NewWriter(&body)
+			if err := writer.WriteField("model", "gemini-3.1-flash-image-1K"); err != nil {
+				t.Fatalf("WriteField model returned error: %v", err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatalf("writer.Close returned error: %v", err)
+			}
+
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, path, &body)
+			c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+
+			request, shouldSelectChannel, err := getModelRequest(c)
+			if err != nil {
+				t.Fatalf("getModelRequest returned error: %v", err)
+			}
+			if !shouldSelectChannel {
+				t.Fatal("shouldSelectChannel = false, want true")
+			}
+			if request.Model != "gemini-3.1-flash-image-1K" {
+				t.Fatalf("model = %q, want exact multipart model name", request.Model)
+			}
+		})
+	}
+}
+
 func TestApplyPlaygroundGroupOverrideRejectsUnavailableGroup(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
