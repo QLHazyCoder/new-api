@@ -58,6 +58,9 @@ func SetApiRouter(router *gin.Engine) {
 		// Standard OAuth providers (GitHub, Discord, OIDC, LinuxDO, Telegram) - unified route
 		apiRouter.GET("/oauth/:provider", middleware.CriticalRateLimit(), middleware.DisableCache(), middleware.TryUserAuth(), controller.HandleOAuth)
 		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), controller.GetRatioConfig)
+		// The signed content endpoint authenticates the task through its own
+		// short-lived signature, so it intentionally does not require a session.
+		apiRouter.GET("/playground/image-tasks/:id/content", controller.GetPlaygroundImageTaskContent)
 
 		apiRouter.POST("/stripe/webhook", anonymousRequestBodyLimit, controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", anonymousRequestBodyLimit, controller.CreemWebhook)
@@ -356,6 +359,17 @@ func SetApiRouter(router *gin.Engine) {
 			systemInfoRoute.GET("/instances", controller.ListSystemInstances)
 			systemInfoRoute.DELETE("/stale-instances", controller.DeleteStaleSystemInstances)
 			systemInfoRoute.DELETE("/instances/:node_name", controller.DeleteStaleSystemInstance)
+		}
+
+		playgroundImageRoute := apiRouter.Group("/playground")
+		playgroundImageRoute.Use(middleware.UserAuth())
+		{
+			playgroundImageRoute.POST("/image-batches/generations", controller.CreatePlaygroundImageGenerationBatch)
+			playgroundImageRoute.POST("/image-batches/edits", controller.CreatePlaygroundImageEditBatch)
+			playgroundImageRoute.GET("/image-batches/:id", controller.GetPlaygroundImageBatch)
+			playgroundImageRoute.GET("/image-tasks", controller.ListPlaygroundImageTasks)
+			playgroundImageRoute.POST("/image-tasks/:id/retry", controller.RetryPlaygroundImageTask)
+			playgroundImageRoute.DELETE("/image-tasks/:id", controller.DeletePlaygroundImageTask)
 		}
 
 		dataRoute := apiRouter.Group("/data")
