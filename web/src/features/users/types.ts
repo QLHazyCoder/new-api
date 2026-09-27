@@ -60,6 +60,8 @@ export const userSchema = z.object({
   sensitive_word_violation_count: z.number().default(0),
   sensitive_word_whitelist: z.boolean().default(false),
   role: userRoleSchema,
+  sensitive_word_violation_count: z.number().optional(),
+  sensitive_word_whitelist: z.boolean().optional(),
   created_at: z.number().optional(),
   updated_at: z.number().optional(),
   last_login_at: z.number().optional(),

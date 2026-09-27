@@ -404,11 +404,10 @@ func migrateDB() error {
 		return err
 	}
 	if err := MigrateSensitiveWordData(); err != nil {
-		// Sensitive-word migration is deliberately isolated from the primary
-		// service startup. A node with an incomplete schema fails open for this
-		// optional policy while the administrator can repair the migration and
-		// rerun it without taking the API offline.
-		common.SysLog("sensitive-word migration skipped: " + err.Error())
+		// Legacy data can be malformed. Keep the service available, but leave
+		// the request filter disabled until a later startup completes the
+		// one-way import successfully.
+		common.SysError(fmt.Sprintf("migrate sensitive-word data failed; sensitive-word protection is disabled: %v", err))
 	}
 	if err := ReconcileAffiliateCounts(); err != nil {
 		return err

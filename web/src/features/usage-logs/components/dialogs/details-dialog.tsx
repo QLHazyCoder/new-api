@@ -80,6 +80,7 @@ import {
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
 import { DetailRow, DetailSection } from './log-detail-layout'
+import { SensitiveWordAuditSection } from './sensitive-word-audit-section'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
 // to its i18n label key for display in the audit details.
@@ -683,6 +684,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const isConsume = props.log.type === 2
   const isTopup = props.log.type === 1
   const isManage = props.log.type === 3
+  const sensitiveAuditId =
+    props.log.type === 8
+      ? (other?.admin_info?.keyword_filter?.audit_id ??
+        other?.keyword_filter?.audit_id ??
+        other?.audit_id)
+      : undefined
   const isSubscription = other?.billing_source === 'subscription'
   const sensitiveAuditId =
     props.log.type === 8
@@ -1043,6 +1050,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
           >
             <p className='text-xs wrap-break-word'>{adminInfo.reject_reason}</p>
           </DetailSection>
+        )}
+
+        {props.log.type === 8 && (
+          <SensitiveWordAuditSection
+            auditId={sensitiveAuditId}
+            log={props.log}
+            other={other}
+            isAdmin={props.isAdmin}
+            open={props.open}
+            copiedText={copiedText}
+            onCopy={copyToClipboard}
+          />
         )}
 
         {/* Violation fee info */}

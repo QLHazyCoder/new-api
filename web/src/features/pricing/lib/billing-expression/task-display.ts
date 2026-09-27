@@ -78,13 +78,13 @@ function taskDisplayCondition(
       const key = probe.args[0].value
       if (!Object.hasOwn(context.facts, key)) return null
       const definition = context.schema[key]
-      if (
-        definition.type === 'boolean'
-          ? typeof literal.value !== 'boolean'
-          : typeof literal.value !== 'string' ||
-            !definition.enum?.includes(literal.value)
-      ) {
+      if (definition.type === 'boolean') {
+        if (typeof literal.value !== 'boolean') return null
+      } else if (typeof literal.value !== 'string') {
         return null
+      } else if (!definition.enum?.includes(literal.value)) {
+        // An enum value the schema no longer declares never matches a request.
+        return node.operator === '!='
       }
       const equal = context.facts[key] === literal.value
       return node.operator === '==' ? equal : !equal
