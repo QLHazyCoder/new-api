@@ -174,7 +174,7 @@ func SetApiRouter(router *gin.Engine) {
 		sensitiveWordRoute.Use(middleware.AdminAuth())
 		{
 			sensitiveWordRoute.GET("/policy", controller.GetSensitiveWordPolicy)
-			sensitiveWordRoute.PUT("/policy", controller.UpdateSensitiveWordPolicy)
+			sensitiveWordRoute.PUT("/policy", middleware.RootAuth(), controller.UpdateSensitiveWordPolicy)
 			sensitiveWordRoute.GET("/groups", controller.GetSensitiveWordGroups)
 			sensitiveWordRoute.GET("/rules", controller.GetSensitiveWordRules)
 			sensitiveWordRoute.POST("/rules", controller.CreateSensitiveWordRule)
@@ -336,7 +336,7 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)
 		// Type 8 log rows keep only redacted metadata. Administrators can fetch
 		// the linked evidence from the primary database when opening details.
-		logRoute.GET("/sensitive-word-audit/:id", middleware.AdminAuth(), controller.GetSensitiveWordAudit)
+		logRoute.GET("/sensitive-word-audit/:id", middleware.DisableCache(), middleware.AdminAuth(), middleware.RequirePermission(authz.AuditRead), controller.GetSensitiveWordAudit)
 		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)
 		logRoute.GET("/channel_affinity_usage_cache", middleware.AdminAuth(), controller.GetChannelAffinityUsageCacheStats)

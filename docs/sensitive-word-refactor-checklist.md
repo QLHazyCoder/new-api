@@ -1,134 +1,101 @@
-# 敏感词与内容审计重构开发清单
+# 敏感词重构清单
 
-本文档是自研功能清单和阶段审查记录，必须与 sensitive-word-content-audit-redesign.md 同步。当前工作分支为 main；用户编辑面板固定为左抽屉。
+## 基线与隔离
 
-## 0. 项目整体分析
+| 项目 | 值 |
+| --- | --- |
+| 官方实施基线 | `d04c118c8803f49e0c9bab74dcf5b5efeab9464a` |
+| 实施分支 | `codex/sensitive-word-p30-d04c118c` |
+| 工作目录 | `/opt/qlh-main/.worktrees/new-api-sensitive-word-d04c118c` |
+| 原始工作树 | 未修改；其两份用户文档保持未暂存 |
 
-- [x] 梳理 Relay 请求解析、实际分组、token 估算、预扣费、渠道重试和上游调用顺序。
-- [x] 确认局部规则分组只能来自 ratio_setting.GetGroupRatioCopy()，auto 只作为候选路由输入，不作为可绑定分组。
-- [x] 确认审计详情在主库，使用日志可独立写入 ClickHouse，列表不返回完整提示词。
-- [x] 确认余额、钱包、used_quota、历史账务不是敏感词处罚对象。
-- [x] 对照 sub2api 的结构化动作、脱敏摘要、规则快照和管理员详情思路，但不引入外部审核供应商。
+提交 PR 前必须重新 `fetch upstream/main`。若官方基线推进，先重新变基、复查受影响调用链并重跑本清单中的完整验证。
 
-## 1. 数据模型和迁移
+## 文件职责
 
-- [x] 新增策略表、规则表、规则词条表、规则分组表和主库审计事件表。
-- [x] User 增加 sensitive_word_violation_count 和 sensitive_word_whitelist。
-- [x] 正常迁移和快速迁移均纳入新表和用户字段。
-- [x] 旧 SensitiveWords/SensitiveWordConfig Option 只做一次性导入，运行时不再读取旧 Option。
-- [x] 旧独立白名单表只在迁移时同步用户字段，运行时唯一来源为 User 字段。
-- [x] 迁移异常只停用敏感词功能并记录日志，不阻断主服务启动。
-- [x] MySQL full_prompt 使用 MEDIUMTEXT，PostgreSQL/SQLite 使用 TEXT，并执行 UTF-8 字节安全截断。
-- [x] 迁移使用版本标记，重复执行不会重复导入规则。
+| 路径 | 职责 |
+| --- | --- |
+| `model/sensitive_word_types.go` | 表模型、DTO、常量、跨数据库完整提示词类型和旧结构 DTO |
+| `model/sensitive_word_rules.go` | 策略/规则校验、CRUD、实际定价分组约束 |
+| `model/sensitive_word_runtime.go` | 文本规范化、Aho-Corasick 快照、候选分组单次扫描 |
+| `model/sensitive_word_audit.go` | 审计事务、幂等计数、阈值禁用、启用清零、留存和类型 8 日志 |
+| `model/sensitive_word_migration.go` | 新表初始化后的单向旧数据导入和迁移标记；兼容本地主线历史独立白名单表，但不创建或运行时读取该表 |
+| `model/sensitive_word_database_matrix_test.go` | SQLite/MySQL/PostgreSQL 迁移矩阵与 ClickHouse 日志投影矩阵 |
+| `middleware/sensitive_word.go` | 有效分组解析后、渠道选择前的协议 DTO 预检和 422/503 响应封装 |
+| `relay/request_billing.go` | 复用预检决定；未经过分发中间件时的计费前兜底和 422/503 错误边界 |
+| `relaykit/dto/openai_request.go` | Responses `function_call_output.output` 的文本提取 |
+| `controller/responses_websocket_test.go` | 非主节点 WebSocket 夹具的敏感词已迁移 schema，以及渠道选择前阻断回归测试 |
+| `controller/sensitive_word.go`、`router/api-router.go` | AdminAuth 管理接口和审计详情接口 |
+| `web/src/features/system-settings/request-policies/sensitive-words/` | 策略表单、规则表、弹窗、TXT 导入、草稿搜索和独立 API |
+| `web/src/features/users/` | 违规次数/白名单维护与启用确认 |
+| `web/src/features/usage-logs/` | 管理员审计详情和历史日志兼容 |
+| `docs/sensitive-word-content-audit-redesign.md` | 架构、数据流、迁移和排障说明 |
 
-阶段自检结果：新建表、用户字段、旧数据导入、失败开放和审计主库边界已覆盖模型测试；不再保留旧敏感词运行时 fallback。
+## 阶段记录
 
-## 2. 规则和运行时快照
+| 阶段 | 状态 | 自检与结果 |
+| --- | --- | --- |
+| 1. 模型、迁移和运行时 | 完成 | 模型拆分完成；规则去重、范围、模式优先级、热更新、白名单、幂等计数、并发、阈值、启用清零、审计失败、UTF-8 截断均有定向测试。 |
+| 2. Relay 与认证安全 | 完成 | HTTP 分发和 Responses WebSocket 都在渠道选择、估算和预扣费前检查；预检决定由计费阶段复用；阻断为 422、审计失败为 503、禁用令牌为 403 `user_banned`；状态变更后执行认证缓存、会话和令牌失效。 |
+| 3. 前端与多语言 | 完成 | 新页面、规则弹窗、左侧用户抽屉、管理员详情和七种 locale 已接入；旧安全页路由重定向保留。 |
+| 4. 数据库和文档 | 完成 | 四类实际数据库矩阵、全量 Go/web 验证、定向质量检查和桌面/移动视口检查完成；全局质量脚本的既有失败已与官方基线逐项对照。 |
+| 5. PR 复核与发布 | 等待官方审批 | 官方 `main` 已在发布前重新拉取并固定在 `d04c118c`；反向差异审查确认无旧入口和无超出本功能范围的差异；功能分支已推送并创建官方 Draft PR，workflow 等待维护者批准。 |
 
-- [x] 规则动作收敛为 block、observe、off，移除全局处理模式。
-- [x] 全局与局部规则使用同一张规则表展示和管理。
-- [x] 局部规则校验真实定价分组，拒绝 auto、空分组和未知分组。
-- [x] Aho-Corasick 快照按规则版本构建，保存、编辑、模式切换和删除后立即失效。
-- [x] 同一请求命中多规则/多词条只计一次。
-- [x] 同一请求同时命中 block 和 observe 时 block 优先。
-- [x] auto 候选分组在计费前一次性检查，重试不能绕过局部规则。
-- [x] 规则弹窗保留批量文本/TXT 导入、去重、空行和超长统计。
-- [x] 规则弹窗搜索仅定位当前未保存草稿，不改写保存 payload。
+## 已修正的问题
 
-阶段自检结果：全局、局部、模式优先、候选分组、运行时刷新、搜索定位均有定向测试或代码路径验证。
+| 发现 | 修复 |
+| --- | --- |
+| 旧实现按自动候选分组重复扫描长提示词 | 单个 Aho-Corasick 快照只扫描一次，再按候选分组解析元数据。 |
+| Responses `function_call_output.output` 未被检查 | 支持字符串、内容数组和 JSON 对象，并保持请求序列化不变。 |
+| 观察模式的审计写入失败可能放行 | 所有审计持久化失败均为不可重试 `503`。 |
+| 停用/启用认证失效某一步失败会跳过后续步骤 | 提交后依次尝试三种失效操作并记录单项失败。 |
+| 预检和计费兜底可能对同一请求重复审计 | 在请求上下文缓存预检决定，计费只复用；新增回归测试确认违规和审计均只写一次。 |
+| 多节点规则修改只能使本机快照失效 | 规则修改与策略版本递增置于同一事务；所有节点以持久化版本重新构建快照。 |
+| 已完成迁移后的策略读取错误可能被当作停用 | 区分迁移未完成的 fail-open 与数据库读取错误；Relay 对后者返回不可重试 `503`。 |
+| MySQL 矩阵断言使用保留字 `key` 的原始条件 | 新测试使用结构化 `Option` 条件，跨方言通过。 |
+| 旧请求策略测试错误模拟了新规则接口 | 独立 mock `/api/sensitive-words/*`，并在前端 API 层校验对象/数组响应。 |
+| 审计详情 API 的 `success:false` 会被当作空数据 | 复用统一业务响应校验，详情改为明确的加载失败状态。 |
+| Responses WebSocket 未经过 `Distribute`，可能在选择渠道后才被计费兜底检查 | 解析 `response.create` 后调用与 HTTP 共用的 DTO 预检；新增测试确认 `function_call_output.output` 命中时没有渠道握手、预扣费或额度变化。 |
+| 非主节点 WebSocket 测试夹具没有迁移表和标记 | 夹具显式建立敏感词 schema 并运行单向迁移，保留生产运行时对“已迁移后策略读取失败”返回 503 的安全边界。 |
 
-## 3. 用户违规、白名单和封禁
+## 已执行验证
 
-- [x] 白名单用户写类型 8 日志和审计，不拦截、不计数、不封禁。
-- [x] observe 命中只记录，不拦截、不计数、不封禁。
-- [x] block 命中在用户行锁事务内原子增加次数。
-- [x] 阈值默认 50，达到 count >= threshold 时自动禁用普通用户。
-- [x] 第一次达到阈值的请求仍返回配置提示；后续请求才返回 user_banned 403。
-- [x] 封禁只修改状态、auth_version、缓存和会话，不修改 quota、used_quota、钱包、订阅余额或历史消费。
-- [x] 用户编辑支持直接修改/清零违规次数和切换个人白名单。
-- [x] 管理员启用账号在同一事务内清零当前次数，历史证据、余额和白名单不变。
-- [x] 禁用转启用才刷新 auth_version/缓存/会话；重复启用保持幂等。
-- [x] 启用操作记录 sensitive_word.enable_reset 和 balance_changed=false。
-- [x] 用户列表启用前在次数大于 0 时显示确认框。
+| 命令或场景 | 结果 |
+| --- | --- |
+| `go test ./model -run 'TestSensitiveWord\|TestLogOther' -count=1` | 通过 |
+| `go test ./relay -run TestPrepareRequestBilling -count=1` | 通过 |
+| `(cd relaykit && go test ./dto -run sensitive -count=1)` | 通过 |
+| `(cd relaykit && go vet ./dto)` | 通过 |
+| `go test ./...` | 通过；包含完整 `controller` 套件 55 秒回归。 |
+| `go test -race ./model -run '^TestSensitiveWordConcurrentSameRequestCountsOnce$' -count=1 -v` | 通过。 |
+| `go vet ./...`、`go build ./...`、`make test` | 全部通过。 |
+| `(cd relaykit && go test ./... && go vet ./... && go build ./...)` | 全部通过。 |
+| `bun run i18n:sync`、`bun run typecheck`、`bun run build:check` | 全部通过。 |
+| 定向 Vitest（策略、草稿搜索、用户安全、日志详情） | 5 个文件、72 项通过。 |
+| `bun run test -- --maxWorkers=2` | 167 个文件、2113 项通过。 |
+| 变更文件 `oxlint`、`oxfmt --check` | 全部通过；新增 8 个策略页源码文件均有版权头。 |
+| 全局 `lint`、`format:check`、`copyright:check` | 失败项与 `d04c118c` 基线一致，且未包含本功能变更文件；保留为上游既有质量债务。 |
+| 桌面与移动视口手工检查 | 策略页、规则弹窗/搜索、左侧用户抽屉与审计详情均无横向溢出、遮挡或缺失翻译。 |
+| `bun run test -- src/features/system-settings/request-policies/__tests__/settings.test.tsx src/features/system-settings/request-policies/sensitive-words/draft-search.test.ts` | 通过，19 项 |
+| SQLite 新库、RC40 升级、旧版敏感词结构升级，各连续迁移两次 | 通过 |
+| 本地主线历史 `sensitive_word_whitelists` 表单向导入，删除兼容表后不重建 | 待本次集成分支复验 |
+| MySQL `8.2` 同三类迁移矩阵 | 通过，隔离临时数据库 |
+| PostgreSQL `15` 同三类迁移矩阵 | 通过，隔离临时数据库 |
+| ClickHouse `24.8.14.39` 类型 8 写入、管理员投影、普通用户脱敏 | 通过，隔离临时数据库 |
+| 官方 Draft PR workflow | 等待维护者批准 fork PR 的 workflow；尚未执行。功能分支在 fork CI 中已通过后端 vet/build/test 与前端 typecheck/test。 |
 
-阶段自检结果：第 1、4、5、6 次、阈值后启用、并发启用/命中、余额不变、白名单保持和重复启用测试已覆盖。
+实际数据库命令：
 
-## 4. 审计和使用日志
+```bash
+TEST_SENSITIVE_WORD_MYSQL_DSN='root:***@tcp(127.0.0.1:13306)/mysql?parseTime=true' \
+TEST_SENSITIVE_WORD_POSTGRES_DSN='postgres://postgres:***@127.0.0.1:15432/postgres?sslmode=disable' \
+TEST_SENSITIVE_WORD_CLICKHOUSE_DSN='clickhouse://default:***@127.0.0.1:19000/default' \
+go test ./model -run 'TestSensitiveWord(DatabaseMigrationMatrix|ClickHouseLogMatrix)' -count=1 -v
+```
 
-- [x] 固定日志类型 8：关键词拦截。
-- [x] action 区分 blocked、observe、whitelist_bypass。
-- [x] 日志摘要通过 request_id 和 audit_id 关联主库审计。
-- [x] 管理员详情可读取完整规范化提示词、命中规则、词条、片段、哈希、状态变化和证据保留状态。
-- [x] 列表和普通用户视图移除 audit_id、规则、命中词、哈希和完整提示词。
-- [x] retain_full_prompt 关闭时不保存正文、预览和片段。
-- [x] 保留期清理只清空正文/预览，不删除事件元数据。
-- [x] observe 审计落库失败只记录降级并放行；block 或其他数据库故障返回不可重试 503。
-- [x] 审计详情路由统一为 /api/log/sensitive-word-audit/:id，不新增独立敏感词审计列表页。
+## 最终复核结果
 
-阶段自检结果：管理员详情脱敏、类型 8、审计失败语义和跨数据库字段测试已覆盖。
-
-## 5. 请求和错误边界
-
-- [x] 敏感词检查位于 token 估算、预扣费、计费、渠道、上游和重试之前。
-- [x] 拦截返回 HTTP 422、错误码 sensitive_words_detected、不可重试且不写普通错误日志。
-- [x] 后续已封禁账号返回 HTTP 403、错误码 user_banned。
-- [x] OpenAI、Responses、Claude、Gemini、图片文本请求共用提示词快照入口。
-- [x] Relay 错误包装不覆盖管理员配置的敏感词文案。
-- [x] 请求级审计幂等检查避免 WebSocket/重试重复计数和重复日志。
-- [x] 拦截请求不产生预扣费、正常消费日志或上游访问。
-
-阶段自检结果：relay、controller、relaykit 错误契约和计费前检查已通过定向测试；通用 TokenAuth 封禁响应补充 user_banned。
-
-## 6. 管理页面
-
-- [x] 敏感词页只保留策略设置、统一规则表和规则弹窗。
-- [x] 规则表右侧操作列支持编辑、删除和 block/observe/off 模式切换。
-- [x] 规则弹窗固定四个区域：名称/范围、分组、词条、处理模式。
-- [x] 词条搜索框位于 TXT 导入按钮左侧，支持实时普通包含匹配、首个定位、Enter/Shift+Enter 循环和清空。
-- [x] 敏感词页不显示审计列表、白名单列表或命中统计。
-- [x] 用户列表显示违规次数和白名单状态。
-- [x] 用户编辑面板使用左抽屉 side="left"，内容安全区包含次数输入、清零和白名单开关。
-- [x] 使用日志提供关键词拦截类型和管理员详情延迟加载。
-- [x] 新增中简、繁中、英文文案，检查无乱码和 replacement character。
-
-阶段自检结果：敏感词定向 Vitest、前端类型检查、lint 和构建均需在本轮最终门禁再次执行。
-
-## 7. 接口和旧逻辑收缩
-
-- [x] 注册 policy、groups、rules、rule detail、rule mode 接口并加 AdminAuth。
-- [x] 注册日志审计详情接口并加 AdminAuth。
-- [x] 删除旧 config、stats、whitelist、audits、clear-violations、unban 运行接口。
-- [x] 删除旧 service/sensitive.go 和 setting.SensitiveWords 运行时读取。
-- [x] 删除前端旧全局敏感词字段和旧 Request Policies 入口。
-- [x] 规则 mode 成为唯一规则动作来源，保留旧数据库列只用于迁移窗口。
-
-阶段自检结果：代码检索不应再出现旧接口调用、旧全局 matcher、旧抽屉位置说明或旧敏感词页面数据区。
-
-## 8. 文档和发布记录
-
-- [x] 更新架构、接口、数据迁移、排障和文件职责文档。
-- [x] 更新本清单，记录左抽屉、阈值 50、422/403 分离、余额不变和规则级 mode。
-- [x] 更新 maintenance-and-update-guide.md 的运行时排障和发布门禁。
-- [x] 更新 custom-feature-preservation-checklist.md 的 P-30，避免上游合并恢复旧逻辑。
-- [x] 本轮最终测试结果写入本节并提交到 main。
-- [x] 提交前确认只暂存本次敏感词重构相关文件，不覆盖用户已有无关修改。
-
-## 9. 最终门禁
-
-- [x] gofmt 和 git diff --check。
-- [x] go test ./model -run 'SensitiveWord' -count=1。
-- [x] go test ./controller -run 'SensitiveWord|RelaySensitive' -count=1。
-- [x] go test ./router -count=1。
-- [x] go test ./... 和 go build ./...。
-- [x] relaykit 独立测试和构建。
-- [x] web typecheck、定向 Vitest、lint、生产构建。
-- [x] 检查新增文案、字段、接口、文件和文档无乱码、无旧接口引用。
-- [x] 提交到 main 并核对远端 main 指向。
-
-## 10. 阶段审查记录
-
-- 2026-09-21：按合并后的最新代码核对敏感词路由、旧 fallback、规则 mode、观察模式 503、422/403 边界和日志详情入口。
-- 2026-09-21：确认用户编辑面板为左抽屉；补充通用 TokenAuth 的 user_banned 错误码；修正用户字段白名单测试。
-- 2026-09-21：重写架构说明和本清单，删除阈值 5、旧 config/audits/unban、全局 mode、独立白名单列表和旧抽屉方向等过期描述。
-- 2026-09-21：补充一次性迁移标记短路，防止删除已导入规则后旧 Option 在后续启动重新复活；空请求 ID 统一生成后再写审计和使用日志，保证两者可关联。
-- 2026-09-21：完成 Go 全量测试/构建、relaykit 测试/构建、前端类型检查、11 项敏感词定向测试、lint 和生产构建；lint 仅有仓库既有 warning。
+- [x] 执行最终 `git diff --check` 与逐项反向审查，确认无旧入口和无超出本功能范围的差异。
+- [x] 重新拉取官方 `main`；发布时仍为 `d04c118c`，无需变基。
+- [x] 按“模型与迁移、Relay/安全集成、前端与文档”提交，推送功能分支并创建官方 Draft PR；官方 workflow 等待维护者批准。
+- [ ] 2026-09-27 本地主线集成：保留全部自开发契约，完成全量 Go/Web 回归和保护清单逆向审查后再提交。

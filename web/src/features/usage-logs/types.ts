@@ -208,6 +208,7 @@ export interface LogOtherAdminInfo {
   }
   // Reject / intercept reason (admin only)
   reject_reason?: string
+  keyword_filter?: KeywordFilterLogData
   task_plugin?: TaskPluginInfo
   is_model_mapped?: boolean
   upstream_model_name?: string

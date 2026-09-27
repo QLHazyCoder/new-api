@@ -140,6 +140,17 @@ describe('conditional task price display', () => {
     ).toBe(true)
   })
 
+  test('treats a nested condition on an undeclared enum value as never matching', () => {
+    const tiers = getTaskPricingDisplayTiers(expression, {
+      ...schema,
+      resolution: { enum: ['768P', '1080P'] },
+    })
+    expect(tiers).toHaveLength(4)
+    expect(tiers.map((tier) => tier.unitPrices.seconds)).toEqual([
+      0.072, 0.09, 0.096, 0.12,
+    ])
+  })
+
   test('falls back completely when categorical expansion exceeds the display limit', () => {
     expect(
       getTaskPricingDisplayTiers(

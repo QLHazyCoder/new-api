@@ -24,6 +24,7 @@ var legacySensitiveLogOtherKeys = []string{
 	// Sensitive-word evidence belongs to the dedicated audit table and must
 	// not leak through a user's generic log history.
 	"audit_id",
+	"keyword_filter",
 }
 
 // modelDiagnosticLogOtherKeys are upstream model observations intended for

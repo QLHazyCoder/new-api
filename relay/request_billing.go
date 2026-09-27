@@ -22,7 +22,15 @@ import (
 // provide the current request body through BodyStorage or BillingRequestInput;
 // channel retries retain the resulting billing session and pricing snapshot.
 func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
-	policy := model.GetSensitiveWordPolicy()
+	policy, policyErr := model.GetSensitiveWordPolicyWithError()
+	if policyErr != nil {
+		logger.LogWarn(c, "sensitive-word policy unavailable: "+policyErr.Error())
+		return types.NewErrorWithStatusCode(
+			errors.New("敏感词审计暂时不可用，请稍后重试"),
+			types.ErrorCodeQueryDataError, http.StatusServiceUnavailable,
+			types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog(),
+		)
+	}
 	needSensitiveCheck := policy.Enabled && policy.CheckPrompt
 	meta := &types.TokenCountMeta{TokenType: types.TokenTypeTokenizer}
 	if info.Request != nil && (needSensitiveCheck || constant.CountToken) {
@@ -42,27 +50,37 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 	}
 
 	if needSensitiveCheck && meta != nil {
-		candidateGroups := []string{info.UsingGroup}
-		if info.TokenGroup == "auto" {
-			candidateGroups = service.GetRequestAutoGroups(c, info.UserGroup)
-		}
-		result, checkErr := model.CheckSensitiveRequestForGroups(model.SensitiveCheckInput{
-			RequestID: c.GetString(common.RequestIdKey), UserID: info.UserId, Username: c.GetString("username"),
-			TokenID: info.TokenId, TokenName: c.GetString("token_name"), GroupName: info.UsingGroup,
-			ModelName: info.OriginModelName, Endpoint: c.Request.URL.Path, Protocol: string(info.RelayFormat),
-			Prompt: meta.CombineText,
-		}, candidateGroups)
-		if checkErr != nil {
-			logger.LogWarn(c, "sensitive word audit failed: "+checkErr.Error())
-			if result == nil || !result.Matched || !result.ObserveOnly || !errors.Is(checkErr, model.ErrSensitiveWordAuditPersistence) {
-				return types.NewErrorWithStatusCode(errors.New("敏感词审计暂时不可用，请稍后重试"), types.ErrorCodeQueryDataError, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+		result, checkedBeforeSelection := common.GetContextKeyType[*model.SensitiveCheckResult](c, constant.ContextKeySensitiveWordCheckResult)
+		if !checkedBeforeSelection {
+			candidateGroups := []string{info.UsingGroup}
+			if info.TokenGroup == "auto" {
+				candidateGroups = service.GetRequestAutoGroups(c, info.UserGroup)
 			}
-			logger.LogWarn(c, "sensitive word audit unavailable in observe mode; continuing request")
+			var checkErr error
+			result, checkErr = model.CheckSensitiveRequestForGroups(model.SensitiveCheckInput{
+				RequestID: c.GetString(common.RequestIdKey), UserID: info.UserId,
+				Username: c.GetString("username"), TokenID: info.TokenId,
+				TokenName: c.GetString("token_name"), GroupName: info.UsingGroup,
+				ModelName: info.OriginModelName, Endpoint: c.Request.URL.Path,
+				Protocol: string(info.RelayFormat), Prompt: meta.CombineText,
+			}, candidateGroups)
+			if checkErr != nil {
+				logger.LogWarn(c, "sensitive-word audit failed: "+checkErr.Error())
+				return types.NewErrorWithStatusCode(
+					errors.New("敏感词审计暂时不可用，请稍后重试"),
+					types.ErrorCodeQueryDataError, http.StatusServiceUnavailable,
+					types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog(),
+				)
+			}
 		}
 		if result != nil && result.Matched && result.Blocked {
 			service.RequestPolicy(c).AddEvent(service.PolicyEvent{ErrorCode: string(types.ErrorCodeSensitiveWordsDetected), ErrorSource: "local", Decision: service.PolicyDecision{Action: "stop", Reason: "local_rejection", Source: "global"}, Health: "unchanged"})
-			logger.LogWarn(c, "sensitive word policy matched")
-			return types.NewOpenAIError(errors.New(result.Message), types.ErrorCodeSensitiveWordsDetected, http.StatusUnprocessableEntity, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+			logger.LogWarn(c, "sensitive-word policy matched")
+			return types.NewOpenAIError(
+				errors.New(result.Message), types.ErrorCodeSensitiveWordsDetected,
+				http.StatusUnprocessableEntity,
+				types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog(),
+			)
 		}
 	}
 

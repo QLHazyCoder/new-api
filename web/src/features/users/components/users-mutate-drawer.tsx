@@ -183,6 +183,20 @@ export function UsersMutateDrawer({
         currentRow?.id,
         permissionCatalog
       )
+      // Safety fields are intentionally patch-like. Sending their form defaults
+      // during an unrelated profile edit could overwrite violations recorded
+      // after this drawer loaded.
+      if (
+        isUpdate &&
+        form.formState.dirtyFields.sensitive_word_violation_count
+      ) {
+        payload.sensitive_word_violation_count =
+          data.sensitive_word_violation_count ?? 0
+      }
+      if (isUpdate && form.formState.dirtyFields.sensitive_word_whitelist) {
+        payload.sensitive_word_whitelist =
+          data.sensitive_word_whitelist === true
+      }
       const result = isUpdate
         ? await updateUser(payload as typeof payload & { id: number })
         : await createUser(payload)

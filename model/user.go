@@ -85,7 +85,7 @@ type User struct {
 	DisplayName                 string                     `json:"display_name" gorm:"index" validate:"max=20"`
 	Role                        int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
 	Status                      int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	SensitiveWordViolationCount int                        `json:"sensitive_word_violation_count" gorm:"type:int;default:0;column:sensitive_word_violation_count"`
+	SensitiveWordViolationCount int                        `json:"sensitive_word_violation_count" gorm:"type:int;not null;default:0;column:sensitive_word_violation_count"`
 	SensitiveWordWhitelist      bool                       `json:"sensitive_word_whitelist" gorm:"not null;default:false;column:sensitive_word_whitelist"`
 	Email                       string                     `json:"email" gorm:"index" validate:"max=50"`
 	GitHubId                    string                     `json:"github_id" gorm:"column:github_id;index"`
@@ -976,7 +976,7 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 	}
 	newUser := *user
 	current := User{}
-	if err = tx.First(&current, user.Id).Error; err != nil {
+	if err = lockForUpdate(tx).First(&current, user.Id).Error; err != nil {
 		return err
 	}
 	// Updates(struct) ignores zero values. Match that behavior when deciding
@@ -1001,6 +1001,8 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 		"aff_quota",
 		"aff_history",
 		"auth_version",
+		"sensitive_word_violation_count",
+		"sensitive_word_whitelist",
 	).Updates(newUser).Error; err != nil {
 		return err
 	}
@@ -1053,7 +1055,7 @@ func (user *User) EditWithTx(tx *gorm.DB, updatePassword bool) error {
 	}
 
 	current := User{}
-	if err = tx.First(&current, user.Id).Error; err != nil {
+	if err = lockForUpdate(tx).First(&current, user.Id).Error; err != nil {
 		return err
 	}
 	authChanged := (updatePassword && current.Password != newUser.Password) || current.Group != newUser.Group
