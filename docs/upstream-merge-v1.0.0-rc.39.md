@@ -301,7 +301,7 @@
 
 ## 11. 本地 177 个提交映射
 
-以下表格由 `git log --reverse f116414284162ad15d8925f7bca494c109b83e93..f0a62f2c6fe50fd4caf64560c075157880b6342d` 生成，共 177 条。P-01 至 P-34 直接引用保护清单；合并/审计提交标为维护项，不产生新的产品语义。未被历史清单单独标注的产品提交标为“待按文件反查”，其代码已在本轮冲突路径账和专项测试中复核，不能据此跳过后续审计。
+以下表格由 `git log --reverse f116414284162ad15d8925f7bca494c109b83e93..f0a62f2c6fe50fd4caf64560c075157880b6342d` 生成，共 177 条。P-01 至 P-34 引用保护清单；合并/审计、保留执行、已撤销功能均分别注明。原“待按文件反查”条目已在 2026-09-23 对照本地当前代码逐条复核并改为明确归属/处置；没有待归类项。
 
 <details>
 <summary>展开 177 条提交</summary>
@@ -372,7 +372,7 @@
 | ae0dc6bee77a | Fix playground image interruption persistence | P-15 |
 | 2d08cd1f0ca2 | Default cross-group retry for auto keys | P-09 |
 | a4a43c99d348 | fix: rely on notify limiter for quota warnings | P-18 |
-| fc0101ca035f | merge: sync upstream main through 79396745 | 待按文件反查 |
+| fc0101ca035f | merge: sync upstream main through 79396745 | 上游主线同步合并；不是独立自研功能提交，行为按后续 P 编号逐项审计 |
 | 7cf40dbaaf64 | fix perf metrics success rate aggregation | P-06 |
 | 93aaa3c24520 | add playground image auto size option | P-14 |
 | 8ce14f790db8 | persist playground image task updates | P-15 |
@@ -424,9 +424,9 @@
 | 5c6cfd8512c0 | feat(playground): retain fifty image results per user | P-16 |
 | 6a978443ec3a | feat(playground): cap and hard-delete image history | P-16 |
 | 4b1276d7dbb3 | docs: establish rc22 merge preservation audit | 合并/审计维护 |
-| 0256310dcab2 | merge: sync upstream v1.0.0-rc.22 | 待按文件反查 |
-| f8c06ddc5edc | fix: preserve backend customizations after rc22 merge | 待按文件反查 |
-| ec15c8e23873 | fix: preserve frontend customizations after rc22 merge | 待按文件反查 |
+| 0256310dcab2 | merge: sync upstream v1.0.0-rc.22 | 作者正式 RC-22 上游合并；不是独立自研功能提交 |
+| f8c06ddc5edc | fix: preserve backend customizations after rc22 merge | RC-22 后端保留执行：P-15/P-17/P-22 迁移与回归保障；GPT 图片质量/尺寸动态加价子功能已在 RC-39 明确退休 |
+| ec15c8e23873 | fix: preserve frontend customizations after rc22 merge | RC-22 前端保留执行及 200 路径合并适配；对应既有 P 项，没有新增独立产品契约，细节见 RC-22 第 3 阶段记录 |
 | 45d39a658297 | docs: record rc22 merge validation | 合并/审计维护 |
 | 441ea707b82b | fix: require persisted playground image concurrency | P-15 |
 | 9773de9e3c39 | fix(user): keep admin mutations cache-consistent | P-21 |
@@ -436,24 +436,24 @@
 | 504e193f2ace | fix(usage-logs): hide tool surcharge marker | P-12 |
 | dd95ab67762a | docs: add custom feature preservation checklist | 合并/审计维护 |
 | 88ff1c7cd976 | fix(users): restore upstream group assignment options | P-21 |
-| 7d8eeb44d9e8 | merge: sync upstream v1.0.0-rc.23 | 待按文件反查 |
+| 7d8eeb44d9e8 | merge: sync upstream v1.0.0-rc.23 | 作者正式 RC-23 上游合并；不是独立自研功能提交 |
 | 571b38f0370a | fix: allow 31-day user dashboard ranges | P-27 |
 | 3707af0c4740 | fix(user): isolate self updates from billing fields | P-21 |
 | b44e6971e06e | fix(logs): align text request success rate | P-28 |
 | 9f0ad7c08837 | docs: complete custom feature preservation map | 合并/审计维护 |
 | d67f133be31d | docs: establish rc24 merge preservation audit | 合并/审计维护 |
-| 4372401890f4 | merge: sync upstream v1.0.0-rc.24 | 待按文件反查 |
-| 34de1e75aef0 | fix: preserve backend customizations after rc24 merge | 待按文件反查 |
-| 754a7de43b74 | fix: preserve frontend customizations after rc24 merge | 待按文件反查 |
+| 4372401890f4 | merge: sync upstream v1.0.0-rc.24 | 作者正式 RC-24 上游合并；不是独立自研功能提交 |
+| 34de1e75aef0 | fix: preserve backend customizations after rc24 merge | P-07 协议边界收敛：删除 Claude handler 的自动 Chat-to-Responses 路径；当前仍由 `ShouldChatCompletionsUseResponsesGlobal` 恒 false 保证不升级 |
+| 754a7de43b74 | fix: preserve frontend customizations after rc24 merge | RC-24 前端语义复核和审计记录；本提交不含运行时代码变更 |
 | 6d5b3e5543ed | docs: record rc24 merge validation | 合并/审计维护 |
 | cc70f2c3c726 | fix(perf): exclude upstream image 400 rejections | P-06 |
 | e1765fd8e3ce | feat(payment): scope amount discounts by user group | P-29 |
 | 4173af597a33 | fix(payment): preserve empty discount group arrays | P-29 |
 | eb9c43244520 | docs: update custom feature preservation checklist | 合并/审计维护 |
 | 7770d42f83e6 | docs: establish rc25 merge preservation audit | 合并/审计维护 |
-| 4ef332374dea | merge: sync upstream v1.0.0-rc.25 | 待按文件反查 |
-| fc10fde916e3 | fix: preserve backend customizations after rc25 merge | 待按文件反查 |
-| cb565a84b179 | fix: preserve frontend customizations after rc25 merge | 待按文件反查 |
+| 4ef332374dea | merge: sync upstream v1.0.0-rc.25 | 作者正式 RC-25 上游合并；不是独立自研功能提交 |
+| fc10fde916e3 | fix: preserve backend customizations after rc25 merge | 恢复 Epay 支付通知成功后的 `success` 响应，归入支付完成回调契约；并更新 RC-25 审计记录 |
+| cb565a84b179 | fix: preserve frontend customizations after rc25 merge | RC-25 前端保留复核记录；没有新增独立运行时产品契约 |
 | aec217f1a27f | docs: record rc25 merge validation | 合并/审计维护 |
 | 432b4ee68a76 | docs: record rc25 actions success | 合并/审计维护 |
 | 21cc64f46737 | feat: rebuild sensitive word auditing | P-30 |
@@ -470,12 +470,12 @@
 | 416fabe52ad1 | feat: add sensitive word draft search | P-30 |
 | 5073dfa33586 | docs: record sensitive word search delivery | 合并/审计维护 |
 | 52d68cb40b4d | fix: make sensitive audit storage resilient | P-30 |
-| 22eeed17108a | fix: preserve sensitive word message after auto-ban | 待按文件反查 |
+| 22eeed17108a | fix: preserve sensitive word message after auto-ban | 后续被 `4c9c5209fd05` 明确撤销；当前无对应重试文案行为，不计入 P-30 |
 | 78ae121811cb | docs: record sensitive auto-ban retry fix | 合并/审计维护 |
-| 3dda71a37f0e | Revert "docs: record sensitive auto-ban retry fix" | 待按文件反查 |
-| 4c9c5209fd05 | Revert "fix: preserve sensitive word message after auto-ban" | 待按文件反查 |
-| 955243896ae4 | feat(auth): add spam folder hint after verification email | 待按文件反查 |
-| d1529b6ebf52 | Revert "feat(auth): add spam folder hint after verification email" | 待按文件反查 |
+| 3dda71a37f0e | Revert "docs: record sensitive auto-ban retry fix" | 回滚上述短暂实现的文档提交；无现行产品契约 |
+| 4c9c5209fd05 | Revert "fix: preserve sensitive word message after auto-ban" | 撤销上述短暂实现；当前无自动封禁后额外重试文案契约 |
+| 955243896ae4 | feat(auth): add spam folder hint after verification email | 后续由 `d1529b6ebf52` 撤销；当前无注册邮件垃圾箱提示契约 |
+| d1529b6ebf52 | Revert "feat(auth): add spam folder hint after verification email" | 撤销注册邮件提示功能；不归入当前保护项 |
 | 889436b7821f | fix(playground): bound retention cleanup query | P-16 |
 | 734b6016342a | feat(playground): externalize image capabilities | P-13 |
 | 4cd9c9460876 | fix(playground): unify GPT image capabilities | P-13 |
@@ -483,7 +483,7 @@
 | afab95b533e1 | feat(quota): migrate wallet balances to int64 | P-32 |
 | 66759ee721f7 | fix(web): preserve tiered pricing expressions | P-33 |
 | 5e5c79c1b97d | fix(web): use coder name and scoped CC Switch models | P-34 |
-| 21fa3084e0a8 | fix(docs): 更新维护与更新指南，修正发布脚本信息和发布顺序描述 | 待按文件反查 |
+| 21fa3084e0a8 | fix(docs): 更新维护与更新指南，修正发布脚本信息和发布顺序描述 | 更新运维指南/审计文档；不新增运行时产品功能 |
 | f0a62f2c6fe5 | fix(web): load CC Switch models from selected API key | P-34 |
 
 </details>
