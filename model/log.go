@@ -157,7 +157,8 @@ func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		order = clickHouseLogOrder("")
 	}
-	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
+	err = LOG_DB.Model(&Log{}).Where("token_id = ? AND type <> ?", tokenId, LogTypeSensitiveWordBlock).
+		Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
 	formatUserLogs(logs, 0)
 	return logs, err
 }
@@ -584,6 +585,9 @@ func GetUserLogsForRole(userId int, viewerRole int, logType int, startTimestamp 
 		tx = LOG_DB.Where("logs.user_id = ?", userId)
 	} else {
 		tx = LOG_DB.Where("logs.user_id = ? and logs.type = ?", userId, logType)
+	}
+	if viewerRole < common.RoleAdminUser {
+		tx = tx.Where("logs.type <> ?", LogTypeSensitiveWordBlock)
 	}
 
 	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {

@@ -24,7 +24,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, test, vi } from 'vitest'
 
@@ -193,4 +193,60 @@ test('uses personal subscriptions when an admin switches to only-self view', asy
 
   await user.click(screen.getByRole('button', { name: 'Switch scope' }))
   expect(await screen.findByRole('img', { name: 'Wallet' })).toBeVisible()
+})
+
+test('never retains administrator audit rows after a self-view role downgrade', async () => {
+  const user = userEvent.setup()
+  const client = await renderLogs({
+    role: ROLE.ADMIN,
+    enabledPlans: [],
+    activeSubscription: false,
+  })
+  const audit = usageLogSchema.parse({
+    id: 91,
+    user_id: 1,
+    created_at: 1788840000,
+    type: 8,
+    content: '',
+    quota: 0,
+    other: JSON.stringify({
+      admin_info: { keyword_filter: { action: 'blocked', audit_id: 91 } },
+    }),
+  })
+  let finishCommonRequest!: () => void
+  const commonRequest = new Promise<void>((resolve) => {
+    finishCommonRequest = resolve
+  })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    let data: unknown = { quota: 0, rpm: 0, tpm: 0 }
+    if (url.startsWith('/api/log/self?')) {
+      if (useAuthStore.getState().auth.user?.role === ROLE.ADMIN) {
+        data = { items: [audit], total: 1 }
+      } else {
+        await commonRequest
+        data = { items: [], total: 0 }
+      }
+    } else if (url === '/api/group/') {
+      data = []
+    } else if (url === '/api/user/self/groups') {
+      data = {}
+    } else if (url === '/api/subscription/self') {
+      data = { subscriptions: [], all_subscriptions: [] }
+    }
+    return { data: { success: true, data } }
+  })
+
+  try {
+    await user.click(screen.getByRole('button', { name: 'Switch scope' }))
+    expect((await screen.findAllByText('Blocked')).length).toBeGreaterThan(0)
+    act(() => {
+      useAuthStore
+        .getState()
+        .auth.setUser({ id: 1, username: 'tester', role: ROLE.USER })
+    })
+    expect(screen.queryByText('Blocked')).not.toBeInTheDocument()
+  } finally {
+    finishCommonRequest()
+  }
+  await waitFor(() => expect(client.isFetching()).toBe(0))
 })

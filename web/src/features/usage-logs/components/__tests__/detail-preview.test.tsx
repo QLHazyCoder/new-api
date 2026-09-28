@@ -73,10 +73,20 @@ function makeLog(other: LogOtherData): UsageLog {
   }
 }
 
-function DetailPreview(props: { other: LogOtherData; isAdmin: boolean }) {
+function DetailPreview(props: {
+  other: LogOtherData
+  isAdmin: boolean
+  type: number
+  canReviewSensitiveAudit: boolean
+}) {
   const table = useReactTable({
-    data: [makeLog(props.other)],
-    columns: useCommonLogsColumns(props.isAdmin, false),
+    data: [{ ...makeLog(props.other), type: props.type }],
+    columns: useCommonLogsColumns(
+      props.isAdmin,
+      false,
+      false,
+      props.canReviewSensitiveAudit
+    ),
     getCoreRowModel: getCoreRowModel(),
   })
   const cell = table
@@ -116,16 +126,58 @@ afterEach(() => {
   client.clear()
   useSystemConfigStore.getState().setConfig(previousConfig)
 })
-function renderPreview(other: LogOtherData, isAdmin = true) {
+function renderPreview(
+  other: LogOtherData,
+  isAdmin = true,
+  type = 2,
+  canReviewSensitiveAudit = isAdmin
+) {
   render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={client}>
-        <DetailPreview other={other} isAdmin={isAdmin} />
+        <DetailPreview
+          other={other}
+          isAdmin={isAdmin}
+          type={type}
+          canReviewSensitiveAudit={canReviewSensitiveAudit}
+        />
       </QueryClientProvider>
     </I18nextProvider>
   )
   return screen.getByRole('button', { name: /./ })
 }
+
+test.each([
+  ['blocked', 'Blocked'],
+  ['whitelist_bypass', 'Whitelist bypassed'],
+  ['observe', 'Observed'],
+  ['invalid', 'Unknown'],
+])(
+  'sensitive audit action %s appears as %s in the log list',
+  (action, label) => {
+    const preview = renderPreview(
+      { admin_info: { keyword_filter: { action } } },
+      true,
+      8
+    )
+    expect(preview).toHaveTextContent(label)
+  }
+)
+
+test('admin self view retains the audit outcome without enabling other admin columns', () => {
+  const preview = renderPreview(
+    { admin_info: { keyword_filter: { action: 'observe' } } },
+    false,
+    8,
+    true
+  )
+  expect(preview).toHaveTextContent('Observed')
+})
+
+test('type 8 never infers status from old top-level fields', () => {
+  const preview = renderPreview({ action: 'sensitive_word_block' }, true, 8)
+  expect(preview).toHaveTextContent('Unknown')
+})
 
 test('keeps log details open when the parent refreshes with unchanged data', async () => {
   const other = { model_price: 0.25 }
@@ -134,12 +186,15 @@ test('keeps log details open when the parent refreshes with unchanged data', asy
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     </I18nextProvider>
   )
-  const { rerender } = render(<DetailPreview other={other} isAdmin />, {
-    wrapper,
-  })
+  const { rerender } = render(
+    <DetailPreview other={other} isAdmin type={2} canReviewSensitiveAudit />,
+    { wrapper }
+  )
   fireEvent.click(screen.getByRole('button', { name: 'Per-call · $0.25' }))
   expect(await screen.findByRole('dialog')).toBeVisible()
-  rerender(<DetailPreview other={other} isAdmin />)
+  rerender(
+    <DetailPreview other={other} isAdmin type={2} canReviewSensitiveAudit />
+  )
   expect(screen.getByRole('dialog')).toBeVisible()
 })
 

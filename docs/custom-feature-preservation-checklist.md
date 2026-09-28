@@ -470,9 +470,12 @@
   规范化提示词；自动分组检查全部候选分组。同一请求无论命中多少词只计一次，命中
   返回不可重试的 HTTP 422 `sensitive_words_detected`；已封禁账号后续请求返回 HTTP
   403 `user_banned`，并使用协议对应的错误封装。
-- 必须保留：使用日志类型 8 `关键词拦截` 通过 request ID 关联主库审计事件；列表和
-  普通用户视图脱敏，管理员详情才可查看完整规范化提示词、命中规则、片段、规则版本
-  和处理结果。审计证据不写入原始请求体、API Key 或普通日志字段。
+- 必须保留：使用日志类型 8 `敏感词审计` 通过 request ID 关联主库审计事件；普通用户
+  `/api/log/self` 和 API Key 的 `/api/log/token` 在数据库查询及计数阶段完全排除该类型，
+  管理员/超级管理员的全局和本人视图才可查看。管理员列表明确区分拦截、白名单放行与
+  观察；审计详情要求 `AuditRead` 才能查看完整规范化提示词、命中规则、片段和规则版本。
+  新日志只写 `other.admin_info.keyword_filter`，不写公开结果；界面不解读历史顶层结构。
+  审计证据不写入原始请求体、API Key 或普通日志字段。
 - 必须保留：用户字段保存敏感词违规次数和白名单开关。白名单命中仍记录审计和日志但
   不拦截、不计数；观察模式只记录。普通用户按行锁事务原子递增，达到可配置阈值（新环境
   默认 50）时禁用
@@ -493,13 +496,11 @@
 - 必须保留：审计完整提示词在 MySQL 使用 `MEDIUMTEXT`、在 PostgreSQL/SQLite 使用 `TEXT`，
   写入前执行合法 UTF-8 的字符/字节双重截断。`observe` 模式仅对明确的审计落库失败放行并记录
   降级；规则、用户或其他事务错误以及 `block` 模式仍失败关闭返回 503，不能借故绕过策略。
-- 当前位置：`model/sensitive_word.go`、`model/user.go`、`model/main.go`、
+- 当前位置：`model/sensitive_word_{types,rules,runtime,audit,migration}.go`、
+  `model/user.go`、`model/main.go`、`model/log.go`、`model/log_other.go`、
   `relay/request_billing.go`、`controller/relay.go`、`controller/sensitive_word.go`、
-  `controller/user.go`、`middleware/auth.go`、`model/log.go`、`router/api-router.go`、
-  `web/src/features/system-settings/request-limits/sensitive-words-section.tsx`、
-  `web/src/features/system-settings/request-limits/sensitive-word-search.ts`、
-  `web/src/features/system-settings/request-limits/sensitive-word-search.test.ts`、
-  `web/src/features/system-settings/request-limits/sensitive-words-section.test.tsx`、
+  `controller/user.go`、`middleware/auth.go`、`middleware/sensitive_word.go`、
+  `router/api-router.go`、`web/src/features/system-settings/request-policies/sensitive-words/`、
   `web/src/features/users/components/users-columns.tsx`、
   `web/src/features/users/components/users-mutate-drawer.tsx`、
   `web/src/features/usage-logs/**`。

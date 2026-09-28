@@ -24,7 +24,7 @@
 
 - 规则：系统设置中的敏感词策略页。
 - 违规次数和白名单：用户管理的用户编辑左抽屉，内容安全区。
-- 命中记录和完整提示词：使用日志，类型 8“关键词拦截”的详情抽屉。
+- 命中记录和完整提示词：仅管理员使用日志，类型 8“敏感词审计”的详情抽屉。
 
 规则编辑弹窗的敏感词条搜索是纯前端草稿工具：它只查找当前弹窗中的 `draft.wordsText`，不调用后端、不改写文本，也不会改变保存请求。搜索框在“导入 TXT”按钮左侧，输入后可用 `Enter`/`Shift+Enter` 循环定位；草稿编辑只更新计数，不抢占文本框光标；关闭弹窗后搜索状态会清空。
 
@@ -45,12 +45,12 @@ Relay 在 token 估算、预扣费、计费、选渠道、上游调用和自动�
 
 ### 2.3 误判排查步骤
 
-1. 在使用日志按关键词拦截类型和 request_id 查找事件。
+1. 管理员在使用日志按敏感词审计类型和 request_id 查找事件。
 2. 管理员打开详情，核对实际分组、规则 ID/名称、命中词、匹配片段、白名单、观察/拦截状态和当前次数。
-3. 需要复核语义时，查看完整规范化提示词；普通用户日志不会也不应看到它。
+3. 需要复核语义时，查看完整规范化提示词；普通用户和 API Key 日志接口不会返回类型 8 日志行。
 4. 确认规则或绑定分组有误后先修正规则，再到用户编辑抽屉修改或清零违规次数。
 5. 不要删除单条使用日志或审计事件来处理误判。历史证据和操作审计必须保留。
-6. 用户第五次后仍可调用时，检查 users.status、auth_version、user_sessions 撤销状态和认证缓存。
+6. 用户达到策略封禁阈值后仍可调用时，检查 users.status、auth_version、user_sessions 撤销状态和认证缓存。
 
 审计详情没有完整提示词通常有两种原因：管理员关闭了“保存完整审计证据”，或证据已超过保留期被清理任务清空。清理只清空 full_prompt 和 redacted_preview，不删除审计元数据。
 
@@ -124,9 +124,9 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
     bun run typecheck
     bun run build:check
     bun run lint
-    bunx vitest run src/features/system-settings/request-limits/sensitive-word-search.test.ts src/features/system-settings/request-limits/sensitive-words-section.test.tsx
+    bunx vitest run src/features/system-settings/request-policies/sensitive-words/draft-search.test.ts src/features/usage-logs/components/__tests__/sensitive-word-audit.test.tsx src/features/usage-logs/components/__tests__/detail-preview.test.tsx src/features/usage-logs/components/__tests__/log-type-filter.test.tsx
 
-还要检查：没有乱码或 replacement character；列表没有完整提示词；普通用户日志没有 audit_id/命中词；白名单不影响计数以外的用户属性；任何自动封禁路径不写 quota。
+还要检查：没有乱码或 replacement character；列表没有完整提示词；普通用户 `/api/log/self` 和 API Key `/api/log/token` 连类型 8 日志行及其计数都拿不到；管理员列表可区分拦截、白名单放行、观察，且白名单不影响计数以外的用户属性；任何自动封禁路径不写 quota。
 
 ## 4. 标准更新流程
 
@@ -158,7 +158,7 @@ PostgreSQL/SQLite 使用 `TEXT`。新代码还会按 UTF-8 字节上限截断规
 
 1. 打开敏感词策略页，确认策略、统一规则表、分组多选和默认提示显示正确。
 2. 创建临时本地测试用户和临时规则，在非生产流量环境验证一次观察模式日志。
-3. 确认类型 8 日志详情能读取审计事件，普通用户日志不显示完整词条。
+3. 确认管理员类型 8 日志列表区分拦截、白名单放行、观察，详情能读取审计事件；普通用户和 API Key 日志接口不返回该类型日志行。
 4. 确认用户抽屉能编辑违规次数和白名单，且修改后 quota 不变。
 5. 对测试用户设置非零违规次数后点击用户列表“启用”，确认框文案正确；确认后次数为 0，
    再次启用不增加 auth_version，历史审计和 quota 均不变。

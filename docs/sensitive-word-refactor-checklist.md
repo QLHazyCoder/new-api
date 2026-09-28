@@ -28,7 +28,20 @@
 | `controller/sensitive_word.go`、`router/api-router.go` | AdminAuth 管理接口和审计详情接口 |
 | `web/src/features/system-settings/request-policies/sensitive-words/` | 策略表单、规则表、弹窗、TXT 导入、草稿搜索和独立 API |
 | `web/src/features/users/` | 违规次数/白名单维护与启用确认 |
-| `web/src/features/usage-logs/` | 管理员审计详情和历史日志兼容 |
+| `model/log.go`、`model/log_other.go` | 普通用户与 API Key 的类型 8 查询边界及公共元数据投影 |
+| `model/log_sensitive_visibility_test.go` | SQLite 角色、分页、总数、请求 ID 与 token 查询权限回归 |
+| `router/api-router.go`、`controller/log_test.go`、`controller/sensitive_word_test.go` | 管理员详情路由边界与角色/审计权限回归 |
+| `web/src/features/usage-logs/lib/sensitive-word-outcome.ts` | 管理员列表与详情共享的三态结果映射；无历史顶层兼容 |
+| `web/src/features/usage-logs/components/columns/common-logs-columns.tsx` | 管理员桌面/移动列表的结果、计数、封禁及命中词摘要 |
+| `web/src/features/usage-logs/components/dialogs/sensitive-word-audit-section.tsx` | 唯一管理员审计详情和受权限约束的证据读取 |
+| `web/src/features/usage-logs/components/dialogs/details-dialog.tsx` | 提供新结构 `audit_id` 并只挂载一次详情组件 |
+| `web/src/features/usage-logs/components/common-logs-filter-bar.tsx` | 根据账号真实角色提供类型 8 筛选项 |
+| `web/src/features/usage-logs/components/usage-logs-provider.tsx`、`components/usage-logs-table.tsx`、`lib/columns.ts` | 区分全局查看模式和账号真实角色；管理员“仅自己”保留类型 8 审计详情入口 |
+| `web/src/features/usage-logs/components/usage-logs-table.tsx`、`components/__tests__/billing-source-visibility.test.tsx` | 按用户 ID 和角色隔离日志查询缓存，角色降级时不得沿用管理员“仅自己”审计行 |
+| `web/src/features/usage-logs/components/__tests__/sensitive-word-audit.test.tsx`、`detail-preview.test.tsx`、`log-type-filter.test.tsx` | 新元数据、三态、唯一详情、权限和筛选项的前端回归 |
+| `model/log_other_test.go`、`model/sensitive_word_test.go` | 元数据和三种真实审计写入的回归 |
+| `web/src/features/system-settings/request-policies/section-registry.tsx`、`features/users/types.ts`、`features/usage-logs/lib/format.ts` | 清除合并留下的无效导入/重复键，保持后出现的实际运行值不变 |
+| `web/src/features/system-settings/models/upstream-price-cells.tsx` | 补齐现有可选比较价格类型声明，不改变调用和展示逻辑 |
 | `docs/sensitive-word-content-audit-redesign.md` | 架构、数据流、迁移和排障说明 |
 
 ## 阶段记录
@@ -58,6 +71,16 @@
 | Responses WebSocket 未经过 `Distribute`，可能在选择渠道后才被计费兜底检查 | 解析 `response.create` 后调用与 HTTP 共用的 DTO 预检；新增测试确认 `function_call_output.output` 命中时没有渠道握手、预扣费或额度变化。 |
 | 非主节点 WebSocket 测试夹具没有迁移表和标记 | 夹具显式建立敏感词 schema 并运行单向迁移，保留生产运行时对“已迁移后策略读取失败”返回 503 的安全边界。 |
 
+## 2026-09-28 本地主线日志权限与状态修复
+
+| 阶段 | 状态 | 发现与处理 | 自检/验证 |
+| --- | --- | --- | --- |
+| 查询边界 | 完成 | 普通用户与 API Key 在计数和取数前均排除类型 8；新类型 8 日志只写管理员元数据，管理员/超级管理员仍可查看本人和全局审计。 | Go `./...`、SQLite 角色/分页/筛选/路由测试通过；ClickHouse 独立库因未配置 DSN 未执行。 |
+| 管理界面 | 完成 | 合并丢失三态摘要、详情组件重复；按新 `admin_info.keyword_filter.action` 显示拦截/白名单/观察，移除旧顶层字段读取；账号/角色进入查询和草稿缓存键。 | 定向 Vitest 6 个文件 57 项通过，角色降级专项 7 项通过；`bun run typecheck`、目标格式检查和 build:check 通过。目标 lint 无错误，仅一条未改动上游定价列表 key 警告。 |
+| 文档与交付 | 完成 | 更新本清单、架构说明、P-30 保护清单和维护指南；保留其他自开发功能及既有数据迁移。 | `bun run i18n:sync` 通过且生成的无关 locale 噪声已清理；`git diff --check` 通过，待选择性提交。 |
+
+本次不更改数据库 schema、不回填或删除历史日志。旧顶层日志仍可由管理员查看日志行，但处理结果不会从旧字段推断；缺失新结果数据时界面显示“未知”。
+
 ## 已执行验证
 
 | 命令或场景 | 结果 |
@@ -77,6 +100,13 @@
 | 全局 `lint`、`format:check`、`copyright:check` | 失败项与 `d04c118c` 基线一致，且未包含本功能变更文件；保留为上游既有质量债务。 |
 | 桌面与移动视口手工检查 | 策略页、规则弹窗/搜索、左侧用户抽屉与审计详情均无横向溢出、遮挡或缺失翻译。 |
 | `bun run test -- src/features/system-settings/request-policies/__tests__/settings.test.tsx src/features/system-settings/request-policies/sensitive-words/draft-search.test.ts` | 通过，19 项 |
+| 本地主线日志权限/状态定向 Vitest | 通过，6 个文件、57 项；角色降级专项包含在内 |
+| 本地主线 `go test ./...`（`GOMAXPROCS=2 -p 1`） | 通过 |
+| `go vet ./...`、`go build ./...`（单进程） | 通过 |
+| `(cd relaykit && go test ./... && go vet ./... && go build ./...)` | 通过 |
+| `bun run build:check` | 通过 |
+| `bun run i18n:sync` | 通过；未保留生成器产生的无关 locale 重排/补键 |
+| `bun run copyright:check` | 基线既有失败 24 个文件；本次新增 helper 已通过，未执行全仓库自动改头 |
 | SQLite 新库、RC40 升级、旧版敏感词结构升级，各连续迁移两次 | 通过 |
 | 本地主线历史 `sensitive_word_whitelists` 表单向导入，删除兼容表后不重建 | 待本次集成分支复验 |
 | MySQL `8.2` 同三类迁移矩阵 | 通过，隔离临时数据库 |

@@ -156,8 +156,8 @@ func TestManageUserEnableResetsSensitiveWordStateAndPreservesResponseShape(t *te
 	assert.Equal(t, common.UserStatusEnabled, updated.Status)
 	assert.Zero(t, updated.SensitiveWordViolationCount)
 	assert.EqualValues(t, 2, updated.AuthVersion)
-	assert.Equal(t, 8_000, updated.Quota)
-	assert.Equal(t, 900, updated.UsedQuota)
+	assert.EqualValues(t, 8_000, updated.Quota)
+	assert.EqualValues(t, 900, updated.UsedQuota)
 	var session model.UserSession
 	require.NoError(t, db.First(&session, "sid = ?", "managed-enable-session").Error)
 	assert.Equal(t, model.UserSessionStatusRevoked, session.Status)

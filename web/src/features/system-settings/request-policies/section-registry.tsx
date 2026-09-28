@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { SensitiveWordsSection } from '../request-limits/sensitive-words-section'
 import { createSectionRegistry } from '../utils/section-registry'
 import { ChannelHealthSection } from './channel-health-section'
 import type { RequestPolicySettings } from './defaults'

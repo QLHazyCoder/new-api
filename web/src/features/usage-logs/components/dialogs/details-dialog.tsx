@@ -32,7 +32,6 @@ import {
   Info,
   LogIn,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
@@ -45,7 +44,6 @@ import { BILLING_PRICING_VARS } from '@/features/pricing/lib/billing-expr'
 import { pluginUsageSchema } from '@/features/pricing/lib/plugin-pricing'
 import { PolicyDecisionRecord } from '@/features/system-settings/request-policies/decision-record'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
-import { api } from '@/lib/api'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -71,12 +69,7 @@ import {
   isPerCallBilling,
   isTimingLogType,
 } from '../../lib/utils'
-import {
-  USAGE_BILLING_PATH,
-  type KeywordFilterLogData,
-  type LogOtherData,
-  type SensitiveWordAuditEvent,
-} from '../../types'
+import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
 import { DetailRow, DetailSection } from './log-detail-layout'
@@ -464,215 +457,6 @@ interface DetailsDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-function parseAuditList(value: string | undefined): string[] {
-  if (!value) return []
-  try {
-    const parsed = JSON.parse(value) as unknown
-    return Array.isArray(parsed) ? parsed.map(String) : []
-  } catch {
-    return value ? [value] : []
-  }
-}
-
-function SensitiveWordAuditSection(props: {
-  auditId?: number
-  log: UsageLog
-  other: LogOtherData | null
-  isAdmin: boolean
-  open: boolean
-  copiedText: string | null
-  onCopy: (text: string) => void
-}) {
-  const { t } = useTranslation()
-  const [event, setEvent] = useState<SensitiveWordAuditEvent | null>(null)
-  const [loadFailed, setLoadFailed] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    setEvent(null)
-    setLoadFailed(false)
-    if (!props.open || !props.isAdmin || !props.auditId) return
-    void api
-      .get(`/api/log/sensitive-word-audit/${props.auditId}`)
-      .then((response) => {
-        if (cancelled) return
-        setEvent(response.data?.data ?? null)
-      })
-      .catch(() => {
-        if (!cancelled) setLoadFailed(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [props.auditId, props.isAdmin, props.open])
-
-  if (!props.isAdmin) return null
-
-  const filter = props.other?.keyword_filter
-  const actionFilter: KeywordFilterLogData = {
-    ...filter,
-    whitelist_bypassed: event?.whitelist_bypassed ?? filter?.whitelist_bypassed,
-    blocked: event?.blocked ?? filter?.blocked,
-    observe_only: event?.observe_only ?? filter?.observe_only,
-    auto_banned: event?.auto_banned ?? filter?.auto_banned,
-    violation_count: event?.violation_count ?? filter?.violation_count,
-  }
-  const matchedWords = event
-    ? parseAuditList(event.matched_words)
-    : (filter?.matched_words ?? [])
-  const matchedRuleIds = event
-    ? parseAuditList(event.matched_rule_ids)
-    : (filter?.rule_ids ?? []).map(String)
-  const matchedRuleNames = event
-    ? parseAuditList(event.matched_rule_names)
-    : (filter?.rule_names ?? [])
-  const matchedSnippets = parseAuditList(event?.matched_snippets)
-  let resultLabel = ''
-  if (actionFilter.blocked) resultLabel = t('Blocked')
-  else if (actionFilter.whitelist_bypassed) {
-    resultLabel = t('Whitelist bypassed')
-  } else if (actionFilter.observe_only) {
-    resultLabel = t('Observed')
-  }
-  const requestId =
-    event?.request_id || filter?.request_id || props.log.request_id
-  const group = event?.group_name || filter?.group || props.log.group
-  const model = event?.model_name || filter?.model || props.log.model_name
-  const promptHash = event?.prompt_hash || filter?.prompt_hash
-  return (
-    <>
-      <DetailSection
-        icon={<ShieldCheck className='size-3.5' aria-hidden='true' />}
-        iconTone={actionFilter.blocked ? 'destructive' : 'info'}
-        variant={actionFilter.blocked ? 'danger' : 'default'}
-        label={t('Sensitive word audit')}
-      >
-        <DetailRow label={t('Result')} value={resultLabel || t('Loading...')} />
-        <DetailRow
-          label={t('Whitelist bypassed')}
-          value={actionFilter.whitelist_bypassed ? t('Yes') : t('No')}
-        />
-        <DetailRow
-          label={t('Observed')}
-          value={actionFilter.observe_only ? t('Yes') : t('No')}
-        />
-        <DetailRow label={t('Request ID')} value={requestId || '—'} mono />
-        <DetailRow label={t('Group')} value={group || '—'} mono />
-        <DetailRow label={t('Model')} value={model || '—'} mono />
-        {event?.username_snapshot && (
-          <DetailRow
-            label={t('User')}
-            value={`${event.username_snapshot} (#${event.user_id ?? '-'})`}
-          />
-        )}
-        {event?.endpoint && (
-          <DetailRow label={t('Endpoint')} value={event.endpoint} mono />
-        )}
-        {event?.protocol && (
-          <DetailRow label={t('Protocol')} value={event.protocol} mono />
-        )}
-        <DetailRow
-          label={t('Violation Count')}
-          value={String(actionFilter.violation_count ?? 0)}
-          mono
-        />
-        <DetailRow
-          label={t('Automatic Ban')}
-          value={actionFilter.auto_banned ? t('Yes') : t('No')}
-        />
-        {event && (
-          <DetailRow
-            label={t('Rule version')}
-            value={String(event.rule_version ?? filter?.rule_version ?? '—')}
-            mono
-          />
-        )}
-        {loadFailed && (
-          <DetailRow
-            label={t('Evidence')}
-            value={t('Unable to load evidence')}
-          />
-        )}
-        {!event && !loadFailed && props.auditId && (
-          <DetailRow label={t('Evidence')} value={t('Loading...')} />
-        )}
-        {!props.auditId && (
-          <DetailRow
-            label={t('Evidence')}
-            value={t('Unable to load evidence')}
-          />
-        )}
-      </DetailSection>
-
-      <DetailSection label={t('Rules')}>
-        <DetailRow
-          label={t('Rule IDs')}
-          value={matchedRuleIds.length > 0 ? matchedRuleIds.join(', ') : '—'}
-          mono
-        />
-        <DetailRow
-          label={t('Rules')}
-          value={
-            matchedRuleNames.length > 0 ? matchedRuleNames.join(', ') : '—'
-          }
-        />
-        <DetailRow
-          label={t('Matched')}
-          value={matchedWords.length > 0 ? matchedWords.join(', ') : '—'}
-        />
-        {matchedSnippets.length > 0 && (
-          <div className='space-y-1'>
-            <Label className='text-xs font-semibold'>
-              {t('Matched snippets')}
-            </Label>
-            <pre className='bg-background/60 max-h-32 overflow-y-auto rounded border p-2 text-xs leading-relaxed whitespace-pre-wrap'>
-              {matchedSnippets.join('\n')}
-            </pre>
-          </div>
-        )}
-      </DetailSection>
-
-      <DetailSection label={t('Evidence')}>
-        <DetailRow label={t('Prompt hash')} value={promptHash || '—'} mono />
-        {event?.redacted_preview ? (
-          <div className='space-y-1'>
-            <Label className='text-xs font-semibold'>
-              {t('Redacted preview')}
-            </Label>
-            <pre className='bg-background/60 max-h-32 overflow-y-auto rounded border p-2 text-xs leading-relaxed whitespace-pre-wrap'>
-              {event.redacted_preview}
-            </pre>
-          </div>
-        ) : null}
-        <div className='bg-background/60 relative min-w-0 rounded-md border p-2'>
-          <Button
-            type='button'
-            variant='ghost'
-            size='icon-sm'
-            className='absolute top-1 right-1'
-            onClick={() => props.onCopy(event?.full_prompt || '')}
-            disabled={!event?.full_prompt}
-            title={t('Copy to clipboard')}
-            aria-label={t('Copy to clipboard')}
-          >
-            {props.copiedText === event?.full_prompt ? (
-              <Check className='size-3 text-green-600' />
-            ) : (
-              <Copy className='size-3' />
-            )}
-          </Button>
-          <Label className='mb-1 block text-xs font-semibold'>
-            {t('Full prompt')}
-          </Label>
-          <pre className='max-h-72 overflow-y-auto pr-6 font-mono text-xs leading-relaxed whitespace-pre-wrap'>
-            {event?.full_prompt || t('Not retained or expired')}
-          </pre>
-        </div>
-      </DetailSection>
-    </>
-  )
-}
-
 export function DetailsDialog(props: DetailsDialogProps) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
@@ -686,15 +470,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const isManage = props.log.type === 3
   const sensitiveAuditId =
     props.log.type === 8
-      ? (other?.admin_info?.keyword_filter?.audit_id ??
-        other?.keyword_filter?.audit_id ??
-        other?.audit_id)
+      ? other?.admin_info?.keyword_filter?.audit_id
       : undefined
   const isSubscription = other?.billing_source === 'subscription'
-  const sensitiveAuditId =
-    props.log.type === 8
-      ? (other?.keyword_filter?.audit_id ?? other?.audit_id)
-      : undefined
   const isTieredBilling =
     isConsume &&
     !isViolation &&
@@ -1050,18 +828,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
           >
             <p className='text-xs wrap-break-word'>{adminInfo.reject_reason}</p>
           </DetailSection>
-        )}
-
-        {props.log.type === 8 && (
-          <SensitiveWordAuditSection
-            auditId={sensitiveAuditId}
-            log={props.log}
-            other={other}
-            isAdmin={props.isAdmin}
-            open={props.open}
-            copiedText={copiedText}
-            onCopy={copyToClipboard}
-          />
         )}
 
         {/* Violation fee info */}
@@ -1551,7 +1317,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
         )}
 
         {/* Content */}
-        {props.log.type === 8 && (
+        {props.log.type === 8 && props.isAdmin && (
           <SensitiveWordAuditSection
             auditId={sensitiveAuditId}
             log={props.log}

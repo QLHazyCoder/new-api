@@ -311,7 +311,6 @@ func TestSensitiveWordClickHouseLogMatrix(t *testing.T) {
 	require.NoError(t, db.Exec(clickHouseLogCreateTableSQL(0)).Error)
 
 	other := NewLogOther()
-	require.True(t, other.SetPublic("action", SensitiveWordLogAction))
 	require.True(t, other.SetAdmin("keyword_filter", map[string]any{
 		"audit_id":      42,
 		"matched_words": []string{"retained-for-admin"},
@@ -321,6 +320,7 @@ func TestSensitiveWordClickHouseLogMatrix(t *testing.T) {
 		Username:  "matrix-user",
 		CreatedAt: common.GetTimestamp(),
 		Type:      LogTypeSensitiveWordBlock,
+		TokenId:   71,
 		Content:   "sensitive words detected",
 		RequestId: "sensitive-word-clickhouse-matrix",
 		Other:     other.JSONString(),
@@ -337,9 +337,16 @@ func TestSensitiveWordClickHouseLogMatrix(t *testing.T) {
 	require.Contains(t, adminLog.Other, "keyword_filter")
 	require.Contains(t, adminLog.Other, "retained-for-admin")
 
-	userLog := *logs[0]
-	formatUserLogs([]*Log{&userLog}, 0)
-	require.NotContains(t, userLog.Other, "keyword_filter")
-	require.NotContains(t, userLog.Other, "retained-for-admin")
-	require.Contains(t, userLog.Other, SensitiveWordLogAction)
+	userLogs, total, err := GetUserLogsForRole(7, common.RoleCommonUser, LogTypeUnknown, 0, 0, "", "", 0, 10, "", "", "")
+	require.NoError(t, err)
+	require.Zero(t, total)
+	require.Empty(t, userLogs)
+	tokenLogs, err := GetLogByTokenId(71)
+	require.NoError(t, err)
+	require.Empty(t, tokenLogs)
+	adminLogs, total, err := GetUserLogsForRole(7, common.RoleAdminUser, LogTypeSensitiveWordBlock, 0, 0, "", "", 0, 10, "", "", "")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, adminLogs, 1)
+	require.Contains(t, adminLogs[0].Other, "retained-for-admin")
 }

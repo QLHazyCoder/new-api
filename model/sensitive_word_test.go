@@ -304,6 +304,44 @@ func TestSensitiveWordWhitelistAndRequestIdempotency(t *testing.T) {
 	require.Equal(t, 1, stored.SensitiveWordViolationCount)
 }
 
+func TestSensitiveWordUsageLogStoresOutcomeOnlyForAdministrators(t *testing.T) {
+	setupSensitiveWordTest(t)
+	require.NoError(t, MigrateSensitiveWordData())
+	saveSensitiveWordTestPolicy(t, false, SensitiveWordBanThreshold)
+	addSensitiveWordTestRule(t, "blocked", []string{"blocked marker"}, SensitiveWordScopeGlobal, nil, SensitiveWordModeBlock)
+	addSensitiveWordTestRule(t, "observed", []string{"observed marker"}, SensitiveWordScopeGlobal, nil, SensitiveWordModeObserve)
+	user := createSensitiveWordTestUser(t, 1_000_000, false)
+	whitelisted := createSensitiveWordTestUser(t, 1_000_000, true)
+
+	for _, scenario := range []struct {
+		requestID string
+		prompt    string
+		owner     *User
+		action    string
+	}{
+		{"audit-blocked", "blocked marker", user, "blocked"},
+		{"audit-whitelisted", "blocked marker", whitelisted, "whitelist_bypass"},
+		{"audit-observed", "observed marker", user, "observe"},
+	} {
+		result, err := CheckSensitiveRequest(sensitiveWordTestInput(scenario.owner, scenario.requestID, scenario.prompt))
+		require.NoError(t, err)
+		var log Log
+		require.NoError(t, LOG_DB.Where("request_id = ? AND type = ?", scenario.requestID, LogTypeSensitiveWordBlock).First(&log).Error)
+		require.Equal(t, scenario.owner.Id, log.UserId)
+		other, err := common.StrToMap(log.Other)
+		require.NoError(t, err)
+		require.NotContains(t, other, "action")
+		require.NotContains(t, other, "audit_id")
+		require.NotContains(t, other, "keyword_filter")
+		adminInfo, ok := other["admin_info"].(map[string]any)
+		require.True(t, ok)
+		filter, ok := adminInfo["keyword_filter"].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, scenario.action, filter["action"])
+		require.EqualValues(t, result.AuditID, filter["audit_id"])
+	}
+}
+
 func TestSensitiveWordConcurrentSameRequestCountsOnce(t *testing.T) {
 	setupSensitiveWordTest(t)
 	require.NoError(t, MigrateSensitiveWordData())
@@ -378,8 +416,8 @@ func TestSensitiveWordThresholdBanAndEnableResetPreserveAccounting(t *testing.T)
 	require.NoError(t, DB.First(&banned, user.Id).Error)
 	require.Equal(t, common.UserStatusDisabled, banned.Status)
 	require.Equal(t, 3, banned.SensitiveWordViolationCount)
-	require.Equal(t, 88_800_000, banned.Quota)
-	require.Equal(t, 123_456, banned.UsedQuota)
+	require.EqualValues(t, 88_800_000, banned.Quota)
+	require.EqualValues(t, 123_456, banned.UsedQuota)
 	require.Equal(t, int64(2), banned.AuthVersion)
 	var revoked UserSession
 	require.NoError(t, DB.First(&revoked, "sid = ?", session.SID).Error)
@@ -388,8 +426,8 @@ func TestSensitiveWordThresholdBanAndEnableResetPreserveAccounting(t *testing.T)
 
 	thresholdAudit := sensitiveWordTestAudit(t, "threshold-3")
 	require.True(t, thresholdAudit.AutoBanned)
-	require.Equal(t, 88_800_000, thresholdAudit.QuotaBefore)
-	require.Equal(t, 88_800_000, thresholdAudit.QuotaAfter)
+	require.EqualValues(t, 88_800_000, thresholdAudit.QuotaBefore)
+	require.EqualValues(t, 88_800_000, thresholdAudit.QuotaAfter)
 	var evidenceBefore int64
 	require.NoError(t, DB.Model(&SensitiveWordAuditEvent{}).Where("user_id = ?", user.Id).Count(&evidenceBefore).Error)
 
@@ -400,8 +438,8 @@ func TestSensitiveWordThresholdBanAndEnableResetPreserveAccounting(t *testing.T)
 	require.Equal(t, 3, reset.ViolationCountBefore)
 	require.Zero(t, reset.ViolationCountAfter)
 	require.Equal(t, int64(3), reset.AuthVersionAfter)
-	require.Equal(t, 88_800_000, reset.QuotaAfter)
-	require.Equal(t, 123_456, reset.UsedQuotaAfter)
+	require.EqualValues(t, 88_800_000, reset.QuotaAfter)
+	require.EqualValues(t, 123_456, reset.UsedQuotaAfter)
 
 	var enabled User
 	require.NoError(t, DB.First(&enabled, user.Id).Error)

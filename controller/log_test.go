@@ -83,6 +83,86 @@ func TestUsageLogModelDiagnosticsAreProjectedByRole(t *testing.T) {
 	require.Contains(t, adminRecorder.Body.String(), "scoped-upstream")
 }
 
+func TestSensitiveWordAuditRowsRequireAdministratorLogView(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousLogDB, previousLogType := model.LOG_DB, common.LogDatabaseType()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	model.LOG_DB = db
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
+	t.Cleanup(func() {
+		model.LOG_DB = previousLogDB
+		common.SetLogDatabaseType(previousLogType)
+		require.NoError(t, sqlDB.Close())
+	})
+
+	for _, log := range []model.Log{
+		{UserId: 7, TokenId: 71, Type: model.LogTypeConsume, RequestId: "visible-use"},
+		{UserId: 7, TokenId: 71, Type: model.LogTypeSensitiveWordBlock, RequestId: "private-audit", Other: `{"admin_info":{"keyword_filter":{"action":"observe","audit_id":42}}}`},
+	} {
+		require.NoError(t, db.Create(&log).Error)
+	}
+
+	type logPage struct {
+		Data struct {
+			Total int         `json:"total"`
+			Items []model.Log `json:"items"`
+		} `json:"data"`
+	}
+	var page logPage
+	decodePage := func(body string) {
+		t.Helper()
+		page = logPage{}
+		require.NoError(t, common.Unmarshal([]byte(body), &page))
+	}
+
+	decodePage(getSelfLogResponse(t, common.RoleCommonUser))
+	require.Equal(t, 1, page.Data.Total)
+	require.Len(t, page.Data.Items, 1)
+	require.Equal(t, "visible-use", page.Data.Items[0].RequestId)
+	for _, role := range []int{common.RoleAdminUser, common.RoleRootUser} {
+		decodePage(getSelfLogResponse(t, role))
+		require.Equal(t, 2, page.Data.Total)
+		require.Equal(t, model.LogTypeSensitiveWordBlock, page.Data.Items[0].Type)
+		require.Contains(t, page.Data.Items[0].Other, `"audit_id":42`)
+	}
+
+	selfRecorder := httptest.NewRecorder()
+	selfContext, _ := gin.CreateTestContext(selfRecorder)
+	selfContext.Request = httptest.NewRequest(http.MethodGet, "/api/log/self?type=8", nil)
+	selfContext.Set("id", 7)
+	selfContext.Set("role", common.RoleCommonUser)
+	GetUserLogs(selfContext)
+	decodePage(selfRecorder.Body.String())
+	require.Zero(t, page.Data.Total)
+	require.Empty(t, page.Data.Items)
+
+	tokenRecorder := httptest.NewRecorder()
+	tokenContext, _ := gin.CreateTestContext(tokenRecorder)
+	tokenContext.Request = httptest.NewRequest(http.MethodGet, "/api/log/token", nil)
+	tokenContext.Set("token_id", 71)
+	GetLogByKey(tokenContext)
+	var tokenResult struct {
+		Data []model.Log `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(tokenRecorder.Body.Bytes(), &tokenResult))
+	require.Len(t, tokenResult.Data, 1)
+	require.Equal(t, "visible-use", tokenResult.Data[0].RequestId)
+
+	adminRecorder := httptest.NewRecorder()
+	adminContext, _ := gin.CreateTestContext(adminRecorder)
+	adminContext.Request = httptest.NewRequest(http.MethodGet, "/api/log/?type=8", nil)
+	adminContext.Set("role", common.RoleAdminUser)
+	GetAllLogs(adminContext)
+	decodePage(adminRecorder.Body.String())
+	require.Equal(t, 1, page.Data.Total)
+	require.Equal(t, model.LogTypeSensitiveWordBlock, page.Data.Items[0].Type)
+}
+
 func getSelfLogResponse(t *testing.T, role int) string {
 	t.Helper()
 	recorder := httptest.NewRecorder()

@@ -36,6 +36,8 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { CommonLogsFilterBar } from '../common-logs-filter-bar'
 import { UsageLogsProvider } from '../usage-logs-provider'
@@ -53,13 +55,14 @@ function FilterFixture() {
   )
 }
 
-async function renderFilter() {
-  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
-    data: {
-      success: true,
-      data: url === '/api/user/self/groups' ? {} : { quota: 0, rpm: 0, tpm: 0 },
-    },
-  }))
+async function renderFilter(role: number = ROLE.USER) {
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'tester', role })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    let data: unknown = { quota: 0, rpm: 0, tpm: 0 }
+    if (url === '/api/user/self/groups') data = {}
+    else if (url === '/api/group/') data = []
+    return { data: { success: true, data } }
+  })
   const root = createRootRoute()
   const auth = createRoute({ getParentRoute: () => root, id: '_authenticated' })
   const logs = createRoute({
@@ -87,6 +90,7 @@ async function renderFilter() {
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  useAuthStore.setState(useAuthStore.getInitialState(), true)
 })
 
 it('marks only retired log types as deprecated while keeping historical filters selectable', async () => {
@@ -127,4 +131,19 @@ it('marks only retired log types as deprecated while keeping historical filters 
   await waitFor(() =>
     expect(router.state.location.search).toMatchObject({ type: ['7'], page: 1 })
   )
+})
+
+it('offers sensitive audit filters only to administrators', async () => {
+  await renderFilter(ROLE.USER)
+  await userEvent.click(screen.getByRole('combobox', { name: 'Type' }))
+  expect(
+    screen.queryByRole('option', { name: 'Sensitive word audit' })
+  ).not.toBeInTheDocument()
+  cleanup()
+
+  await renderFilter(ROLE.ADMIN)
+  await userEvent.click(screen.getByRole('combobox', { name: 'Type' }))
+  expect(
+    screen.getByRole('option', { name: 'Sensitive word audit' })
+  ).toBeVisible()
 })

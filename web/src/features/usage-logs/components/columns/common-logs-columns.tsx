@@ -64,6 +64,7 @@ import {
   isViolationFeeLog,
   renderAuditContent,
 } from '../../lib/format'
+import { getSensitiveWordOutcome } from '../../lib/sensitive-word-outcome'
 import {
   isDisplayableLogType,
   isTimingLogType,
@@ -116,7 +117,14 @@ function buildDetailSegments(
   language: string,
   usageSchema?: BillingUsageSchema
 ): DetailSegment[] {
-  const segments = buildTypeDetailSegments(log, other, t, language, usageSchema)
+  const segments = buildTypeDetailSegments(
+    log,
+    other,
+    t,
+    isAdmin,
+    language,
+    usageSchema
+  )
   const adminSegments: DetailSegment[] = []
   // Quota saturation is a rare, admin-only anomaly marker; surface it first
   // and in danger styling so it stands out on the related billing log. The
@@ -132,6 +140,7 @@ function buildTypeDetailSegments(
   log: UsageLog,
   other: LogOtherData | null,
   t: (key: string, opts?: Record<string, unknown>) => string,
+  isAdmin: boolean,
   language: string,
   usageSchema?: BillingUsageSchema
 ): DetailSegment[] {
@@ -143,6 +152,28 @@ function buildTypeDetailSegments(
 
   if (log.type === 6) {
     return [{ text: t('Async task refund') }]
+  }
+
+  if (log.type === 8) {
+    if (!isAdmin) return []
+    const filter = other?.admin_info?.keyword_filter
+    const outcome = getSensitiveWordOutcome(filter?.action)
+    const segments: DetailSegment[] = [
+      { text: t(outcome.label), danger: outcome.blocked },
+    ]
+    if (typeof filter?.violation_count === 'number') {
+      segments.push({
+        text: `${t('Violation Count')}: ${filter.violation_count}`,
+        muted: true,
+      })
+    }
+    if (filter?.auto_banned) {
+      segments.push({ text: t('Automatic Ban'), danger: true })
+    }
+    if (filter?.matched_words?.length) {
+      segments.push({ text: filter.matched_words.join(', '), muted: true })
+    }
+    return segments
   }
 
   if (log.type !== 2) return []
@@ -341,7 +372,8 @@ function buildTypeDetailSegments(
 export function useCommonLogsColumns(
   isAdmin: boolean,
   isRoot: boolean,
-  showBillingSource = false
+  showBillingSource = false,
+  canReviewSensitiveAudit = isAdmin
 ): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
   const currency = useSystemConfigStore((state) => state.config.currency)
@@ -809,6 +841,7 @@ export function useCommonLogsColumns(
           const [dialogOpen, setDialogOpen] = useState(false)
           const log = row.original
           const other = parseLogOther(log.other)
+          const canReviewThisAudit = log.type === 8 && canReviewSensitiveAudit
 
           const pricingData = usePricingData(
             log.type === 2 &&
@@ -825,7 +858,7 @@ export function useCommonLogsColumns(
             log,
             other,
             t,
-            isAdmin,
+            isAdmin || canReviewThisAudit,
             i18n.language,
             usageSchema
           )
@@ -876,7 +909,7 @@ export function useCommonLogsColumns(
               </button>
               <DetailsDialog
                 log={log}
-                isAdmin={isAdmin}
+                isAdmin={isAdmin || canReviewThisAudit}
                 isRoot={isRoot}
                 open={dialogOpen}
                 onOpenChange={setDialogOpen}
@@ -892,5 +925,5 @@ export function useCommonLogsColumns(
     return columns
     // Log formatters read currency settings from the store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [t, isAdmin, isRoot, showBillingSource, currency])
+  }, [t, isAdmin, isRoot, canReviewSensitiveAudit, showBillingSource, currency])
 }

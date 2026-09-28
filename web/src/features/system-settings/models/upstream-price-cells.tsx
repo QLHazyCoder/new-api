@@ -34,7 +34,10 @@ import {
 } from './upstream-ratio-sync-helpers'
 import type { PricingSyncRow } from './upstream-ratio-sync-table'
 
-export function SyncPriceCell(props: { values: PricingSyncValues }) {
+export function SyncPriceCell(props: {
+  values: PricingSyncValues
+  compareTo?: PricingSyncValues
+}) {
   const { t } = useTranslation()
   const kind = getSyncPriceKind(props.values)
   if (kind === 'unset') {
@@ -108,7 +111,10 @@ function highlightExprDiff(expr: string, base: unknown) {
     word[0] === baseWords[index] ? (
       word[0]
     ) : (
-      <mark key={word.index} className='rounded-sm bg-amber-500/25 text-inherit'>
+      <mark
+        key={word.index}
+        className='rounded-sm bg-amber-500/25 text-inherit'
+      >
         {word[0]}
       </mark>
     )

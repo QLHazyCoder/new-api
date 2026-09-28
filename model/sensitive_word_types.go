@@ -15,7 +15,6 @@ const (
 	SensitiveWordModeBlock      = "block"
 	SensitiveWordModeObserve    = "observe"
 	SensitiveWordModeOff        = "off"
-	SensitiveWordLogAction      = "sensitive_word_block"
 	SensitiveWordBanThreshold   = 50
 	SensitiveWordMaxRunes       = 200
 	SensitiveWordMaxPromptRunes = 65_536

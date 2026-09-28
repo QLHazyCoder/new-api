@@ -334,8 +334,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/audit/self", middleware.DisableCache(), middleware.UserAuth(), controller.GetAuditLogs)
 		logRoute := apiRouter.Group("/log")
 		logRoute.GET("/", middleware.AdminAuth(), controller.GetAllLogs)
-		// Type 8 log rows keep only redacted metadata. Administrators can fetch
-		// the linked evidence from the primary database when opening details.
+		// Type 8 log rows are administrator-only; linked evidence also requires
+		// the audit-read permission.
 		logRoute.GET("/sensitive-word-audit/:id", middleware.DisableCache(), middleware.AdminAuth(), middleware.RequirePermission(authz.AuditRead), controller.GetSensitiveWordAudit)
 		logRoute.GET("/stat", middleware.AdminAuth(), controller.GetLogsStat)
 		logRoute.GET("/self/stat", middleware.UserAuth(), controller.GetLogsSelfStat)

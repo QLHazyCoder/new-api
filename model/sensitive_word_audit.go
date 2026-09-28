@@ -265,7 +265,6 @@ func writeSensitiveWordUsageLog(input SensitiveCheckInput, event SensitiveWordAu
 		"rule_version": ruleVersion, "rule_modes": modes,
 	}
 	other := NewLogOther()
-	other.SetPublic("action", SensitiveWordLogAction)
 	other.SetAdmin("keyword_filter", keywordFilter)
 	log := &Log{
 		UserId: input.UserID, Username: input.Username, CreatedAt: common.GetTimestamp(),

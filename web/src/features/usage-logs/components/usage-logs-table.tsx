@@ -93,6 +93,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   const {
     isAdminView: isAdmin,
     isRootView: isRoot,
+    canManageScope,
     viewAccess,
   } = useLogsViewScope()
   const isMobile = useMediaQuery('(max-width: 640px)')
@@ -165,6 +166,8 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       'logs',
       logCategory,
       viewAccess,
+      userId,
+      canManageScope,
       pagination.pageIndex + 1,
       pagination.pageSize,
       columnFilters,
@@ -190,7 +193,9 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     placeholderData: (previousData, previousQuery) => {
       if (
         previousQuery?.queryKey[1] === logCategory &&
-        previousQuery.queryKey[2] === viewAccess
+        previousQuery.queryKey[2] === viewAccess &&
+        previousQuery.queryKey[3] === userId &&
+        previousQuery.queryKey[4] === canManageScope
       ) {
         return previousData
       }
@@ -203,7 +208,8 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     logCategory,
     isAdmin,
     isRoot,
-    showBillingSource
+    showBillingSource,
+    canManageScope
   )
   const isLoadingData = isLoading || (isFetching && !data)
 

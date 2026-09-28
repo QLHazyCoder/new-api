@@ -757,9 +757,9 @@ func TestResponsesWebSocketSensitiveWordsBlockBeforeChannelSelection(t *testing.
 	require.NoError(t, model.DB.First(&user, fixture.user.Id).Error)
 	require.NoError(t, model.DB.First(&token, fixture.token.Id).Error)
 	assert.Equal(t, 1, user.SensitiveWordViolationCount)
-	assert.Equal(t, 100000, user.Quota)
+	assert.EqualValues(t, 100000, user.Quota)
 	assert.Zero(t, user.UsedQuota)
-	assert.Equal(t, 3000, token.RemainQuota)
+	assert.EqualValues(t, 3000, token.RemainQuota)
 	assert.Zero(t, token.UsedQuota)
 	var auditCount, consumeCount int64
 	require.NoError(t, model.DB.Model(&model.SensitiveWordAuditEvent{}).
@@ -900,7 +900,7 @@ func TestResponsesWebSocketInitialUpstreamRejectionRefundsReservation(t *testing
 			rejectionError, _ := rejection["error"].(map[string]any)
 			assert.Equal(t, tc.wantType, rejectionError["type"])
 			assert.Equal(t, tc.wantMessage, rejectionError["message"])
-			assert.Equal(t, 3000, <-preConsumed, "output-only tiered pricing does not reserve unknown completion usage")
+			assert.Equal(t, 2000, <-preConsumed, "request-priced tiered pricing reserves the fixed request charge")
 			deadline := time.NewTimer(3 * time.Second)
 			defer deadline.Stop()
 			for {

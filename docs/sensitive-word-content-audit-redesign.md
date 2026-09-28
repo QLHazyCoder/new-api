@@ -55,9 +55,9 @@ OpenAI Chat、HTTP/ WebSocket Responses、Claude、Gemini 和图片请求均通�
 
 ## 日志与隐私
 
-命中事件写入使用日志类型 `8`。新日志的公开部分仅写入 `other.action=sensitive_word_block`；规则、命中词、`audit_id`、哈希和处理结果写入 `other.admin_info.keyword_filter`。普通用户投影会移除 `admin_info`、历史顶层 `audit_id` 和 `keyword_filter`；管理员审计详情同时兼容历史顶层字段。
+命中事件写入使用日志类型 `8`，结果为 `blocked`（拦截）、`whitelist_bypass`（白名单放行）或 `observe`（观察）。新日志只写入 `other.admin_info.keyword_filter`，不写公开 `other.action`；管理员列表和详情仅从该结构读取结果，缺失或无效动作显示“未知”，不推断处理结果，也不读取历史顶层 `keyword_filter` / `audit_id`。
 
-完整提示词只由 `GET /api/log/sensitive-word-audit/:id` 返回，路由受 `AdminAuth` 保护。用户使用日志及普通用户 API 不返回证据、命中词或审计 ID。
+普通用户的 `/api/log/self` 在数据库计数和分页查询前排除类型 `8`，包括显式按类型或请求 ID 检索；`/api/log/token` 始终在数据库查询前排除该类型，因为 API Key 不是管理员会话。管理员和超级管理员的全局及本人日志视图保留类型 `8`，其中“仅自己”仍以账号真实角色展示审计结果。完整提示词只由 `GET /api/log/sensitive-word-audit/:id` 返回，路由同时要求 `AdminAuth` 和 `AuditRead`，并禁用缓存。此次不迁移历史日志；旧顶层结构的记录仍可供管理员按类型查看，但界面不对其做兼容解读或证据兜底。
 
 ## 管理接口与界面
 

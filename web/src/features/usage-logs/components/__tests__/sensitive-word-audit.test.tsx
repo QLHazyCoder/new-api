@@ -54,7 +54,7 @@ function makeLog(other: LogOtherData): UsageLog {
   }
 }
 
-function renderDetails(log: UsageLog) {
+function renderDetails(log: UsageLog, isAdmin = true) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -64,7 +64,7 @@ function renderDetails(log: UsageLog) {
     <QueryClientProvider client={queryClient}>
       <DetailsDialog
         log={log}
-        isAdmin
+        isAdmin={isAdmin}
         isRoot={false}
         open
         onOpenChange={() => undefined}
@@ -84,7 +84,7 @@ describe('sensitive-word usage log details', () => {
     vi.clearAllMocks()
   })
 
-  test('loads evidence from the top-level audit id and renders the request body', async () => {
+  test('loads current admin-scoped evidence once and renders the request body', async () => {
     const event: SensitiveWordAuditEvent = {
       id: 42,
       request_id: 'req-sensitive',
@@ -109,19 +109,21 @@ describe('sensitive-word usage log details', () => {
       whitelist_bypassed: false,
       rule_version: 8,
     }
-    getMock.mockResolvedValue({ data: { data: event } })
+    getMock.mockResolvedValue({ data: { success: true, data: event } })
 
     const queryClient = renderDetails(
       makeLog({
         action: 'sensitive_word_block',
-        audit_id: 42,
-        keyword_filter: {
-          action: 'blocked',
-          blocked: true,
-          request_id: 'req-sensitive',
-          rule_ids: [12],
-          rule_names: ['全局规则'],
-          matched_words: ['危险词'],
+        admin_info: {
+          keyword_filter: {
+            audit_id: 42,
+            action: 'blocked',
+            blocked: true,
+            request_id: 'req-sensitive',
+            rule_ids: [12],
+            rule_names: ['全局规则'],
+            matched_words: ['危险词'],
+          },
         },
       })
     )
@@ -129,11 +131,38 @@ describe('sensitive-word usage log details', () => {
     await waitFor(() =>
       expect(getMock).toHaveBeenCalledWith('/api/log/sensitive-word-audit/42')
     )
+    expect(getMock).toHaveBeenCalledTimes(1)
     expect(await screen.findByText(/这是完整请求体/)).toBeInTheDocument()
+    expect(screen.getAllByText('Result')).toHaveLength(1)
     expect(screen.getAllByText('危险词').length).toBeGreaterThan(0)
     expect(screen.getByText('hash-42')).toBeInTheDocument()
     expect(screen.getByText('/v1/responses')).toBeInTheDocument()
 
+    queryClient.clear()
+  })
+
+  test('does not infer old top-level audit references or fall back to partial evidence', async () => {
+    const queryClient = renderDetails(
+      makeLog({ action: 'sensitive_word_block' })
+    )
+
+    expect(screen.getByText('Unknown')).toBeInTheDocument()
+    expect(screen.getByText('Unable to load evidence')).toBeInTheDocument()
+    expect(screen.queryByText('Rules')).not.toBeInTheDocument()
+    expect(getMock).not.toHaveBeenCalled()
+    queryClient.clear()
+  })
+
+  test('never fetches audit evidence for a non-admin dialog', () => {
+    const queryClient = renderDetails(
+      makeLog({
+        admin_info: { keyword_filter: { audit_id: 42, action: 'blocked' } },
+      }),
+      false
+    )
+
+    expect(getMock).not.toHaveBeenCalled()
+    expect(screen.queryByText('Result')).not.toBeInTheDocument()
     queryClient.clear()
   })
 })

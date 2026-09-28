@@ -99,7 +99,7 @@ export const LOG_TYPES = [
   { value: 5, label: 'Error', color: 'red' },
   { value: 6, label: 'Refund', color: 'blue' },
   { value: 7, label: 'Login', color: 'teal' },
-  { value: 8, label: 'Sensitive word block', color: 'red' },
+  { value: 8, label: 'Sensitive word audit', color: 'red' },
 ] as const
 
 /**

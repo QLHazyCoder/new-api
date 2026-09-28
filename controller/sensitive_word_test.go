@@ -11,8 +11,10 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -66,6 +68,37 @@ func TestSensitiveWordAuditDetailRetainsFullPrompt(t *testing.T) {
 	require.Contains(t, detailRecorder.Body.String(), event.FullPrompt)
 }
 
+func TestSensitiveWordAuditDetailRequiresAdminAndAuditPermission(t *testing.T) {
+	admin, adminToken := setupAccessTokenAudit(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.SensitiveWordAuditEvent{}))
+	commonToken := "sensitive-common-token"
+	user := &model.User{
+		Username: "sensitive-common", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, AuthVersion: 1,
+		AccessToken: &commonToken, AffCode: "sensitive-common",
+	}
+	require.NoError(t, model.DB.Create(user).Error)
+	event := model.SensitiveWordAuditEvent{UserID: user.Id, FullPrompt: "private-audit-evidence"}
+	require.NoError(t, model.DB.Create(&event).Error)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/log/sensitive-word-audit/:id", middleware.DisableCache(), middleware.AdminAuth(), middleware.RequirePermission(authz.AuditRead), GetSensitiveWordAudit)
+	path := "/api/log/sensitive-word-audit/" + strconv.FormatInt(event.ID, 10)
+	for _, token := range []string{commonToken, adminToken} {
+		response := auditRequest(router, http.MethodGet, path, token)
+		require.Equal(t, http.StatusForbidden, response.Code)
+		require.NotContains(t, response.Body.String(), "private-audit-evidence")
+	}
+	require.NoError(t, authz.SetUserPermissions(admin.Id, authz.PermissionsMap{
+		authz.ResourceAudit: {authz.ActionRead: true},
+	}))
+	response := auditRequest(router, http.MethodGet, path, adminToken)
+	require.Equal(t, http.StatusOK, response.Code)
+	require.Contains(t, response.Body.String(), "private-audit-evidence")
+	require.Contains(t, response.Header().Get("Cache-Control"), "no-store")
+}
+
 func TestRelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	require.NoError(t, db.AutoMigrate(
@@ -76,6 +109,7 @@ func TestRelaySensitiveWordBlockPrecedesBillingAndRedactsEndpointQuery(t *testin
 		&model.SensitiveWordPolicy{},
 		&model.SensitiveWordAuditEvent{},
 	))
+	require.NoError(t, model.MigrateSensitiveWordData())
 
 	user := model.User{
 		Username:    "relay-sensitive-user",

@@ -74,11 +74,15 @@ function isLogTypeValue(value: string): value is LogTypeValue {
   return logTypeValueSet.has(value)
 }
 
-function getLogTypeValue(value: unknown): LogTypeValue {
+function getLogTypeValue(
+  value: unknown,
+  canReviewSensitiveAudit: boolean
+): LogTypeValue {
   return Array.isArray(value) &&
     value.length === 1 &&
     typeof value[0] === 'string' &&
-    isLogTypeValue(value[0])
+    isLogTypeValue(value[0]) &&
+    (canReviewSensitiveAudit || value[0] !== '8')
     ? value[0]
     : LOG_TYPE_ALL_VALUE
 }
@@ -123,7 +127,7 @@ export function CommonLogsFilterBar<TData>(
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const searchParams = route.useSearch()
-  const { isAdminView: isAdmin } = useLogsViewScope()
+  const { isAdminView: isAdmin, canManageScope } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
   const { data: adminGroups } = useQuery({
@@ -173,9 +177,9 @@ export function CommonLogsFilterBar<TData>(
       upstreamRequestId: searchParams.upstreamRequestId || undefined,
     }
     return {
-      sourceKey: buildSearchSourceKey(sourceValues),
+      sourceKey: `${canManageScope ? 'admin' : 'user'}\u001e${buildSearchSourceKey(sourceValues)}`,
       filters,
-      logType: getLogTypeValue(searchParams.type),
+      logType: getLogTypeValue(searchParams.type, canManageScope),
     }
   }, [
     searchParams.startTime,
@@ -188,6 +192,7 @@ export function CommonLogsFilterBar<TData>(
     searchParams.requestId,
     searchParams.upstreamRequestId,
     searchParams.type,
+    canManageScope,
   ])
   const [draft, setDraft] = useState<CommonLogDraft>(() => searchState)
   const activeDraft =
@@ -284,12 +289,14 @@ export function CommonLogsFilterBar<TData>(
     : '[-webkit-text-security:disc]'
   const logTypeItems = useMemo(
     () =>
-      LOG_TYPE_FILTERS.map((type) => ({
+      LOG_TYPE_FILTERS.filter(
+        (type) => canManageScope || type.value !== '8'
+      ).map((type) => ({
         value: type.value,
         label: t(type.label),
         deprecated: type.deprecated,
       })),
-    [t]
+    [t, canManageScope]
   )
   const selectedLogType = logTypeItems.find((type) => type.value === logType)
   const deprecatedTypeDescription = t(
@@ -406,7 +413,7 @@ export function CommonLogsFilterBar<TData>(
           className='max-w-[calc(100vw-2rem)] min-w-52'
         >
           <SelectGroup>
-            {LOG_TYPE_FILTERS.map((type) => (
+            {logTypeItems.map((type) => (
               <SelectItem
                 key={type.value}
                 value={type.value}
@@ -415,7 +422,7 @@ export function CommonLogsFilterBar<TData>(
                   type.deprecated ? deprecatedTypeDescription : undefined
                 }
               >
-                {t(type.label)}
+                {type.label}
                 {type.deprecated && (
                   <Badge
                     variant='secondary'

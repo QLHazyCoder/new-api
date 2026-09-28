@@ -219,8 +219,6 @@ export interface LogOtherAdminInfo {
 
 export interface LogOtherData {
   action?: string
-  audit_id?: number
-  keyword_filter?: KeywordFilterLogData
   admin_info?: LogOtherAdminInfo
   root_info?: {
     task_plugin?: TaskPluginRuntimeInfo

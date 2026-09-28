@@ -57,8 +57,6 @@ export const userSchema = z.object({
   inviter_id: z.number().optional(),
   linux_do_id: z.string().optional(),
   status: userStatusSchema,
-  sensitive_word_violation_count: z.number().default(0),
-  sensitive_word_whitelist: z.boolean().default(false),
   role: userRoleSchema,
   sensitive_word_violation_count: z.number().optional(),
   sensitive_word_whitelist: z.boolean().optional(),

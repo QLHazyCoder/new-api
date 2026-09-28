@@ -258,20 +258,6 @@ func formatLogOtherJSON(value string, visibility logOtherVisibility) string {
 				changed = true
 			}
 		}
-		if rawFilter, exists := values["keyword_filter"]; exists {
-			var filter map[string]json.RawMessage
-			if err := common.Unmarshal(rawFilter, &filter); err == nil {
-				for _, key := range []string{"matched_words", "rule_names", "prompt_hash", "rule_ids"} {
-					if _, present := filter[key]; present {
-						delete(filter, key)
-						changed = true
-					}
-				}
-				if encoded, err := common.Marshal(filter); err == nil {
-					values["keyword_filter"] = encoded
-				}
-			}
-		}
 	} else {
 		changed = normalizeLegacyRejectReason(values)
 		if visibility == logOtherVisibilityAdmin {
