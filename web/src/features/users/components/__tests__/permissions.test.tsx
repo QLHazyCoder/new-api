@@ -45,7 +45,14 @@ const label = "View other accounts' audit logs"
 const description =
   'View audit records from user and admin roles. Root records are always excluded.'
 
-function renderPermissions(viewerRole: number, allowed?: boolean) {
+function renderPermissions(
+  viewerRole: number,
+  allowed?: boolean,
+  safetyState?: Pick<
+    User,
+    'sensitive_word_violation_count' | 'sensitive_word_whitelist'
+  >
+) {
   useAuthStore
     .getState()
     .auth.setUser({ id: 1, username: 'operator', role: viewerRole })
@@ -81,6 +88,7 @@ function renderPermissions(viewerRole: number, allowed?: boolean) {
         success: true,
         data: {
           ...target,
+          ...safetyState,
           admin_permissions:
             allowed === undefined ? {} : { audit: { read: allowed } },
         },
@@ -115,7 +123,10 @@ it.each([undefined, true])(
     const put = vi
       .spyOn(api, 'put')
       .mockResolvedValue({ data: { success: true } })
-    renderPermissions(100, allowed)
+    renderPermissions(100, allowed, {
+      sensitive_word_violation_count: 7,
+      sensitive_word_whitelist: true,
+    })
     await screen.findByDisplayValue('Managed admin')
     const checkbox = await screen.findByRole('checkbox', {
       name: new RegExp(label),
@@ -159,6 +170,53 @@ it('sends a sensitive-word field only after an administrator changes it', async 
         sensitive_word_whitelist: true,
       })
     )
+  )
+  expect(put.mock.calls[0]?.[1]).not.toHaveProperty(
+    'sensitive_word_violation_count'
+  )
+})
+
+it('sends zero only when the violation count is explicitly cleared', async () => {
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  renderPermissions(100, undefined, {
+    sensitive_word_violation_count: 7,
+    sensitive_word_whitelist: true,
+  })
+  await screen.findByDisplayValue('Managed admin')
+  await userEvent.click(screen.getByRole('button', { name: 'Clear count' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith(
+      '/api/user/',
+      expect.objectContaining({ id: 2, sensitive_word_violation_count: 0 })
+    )
+  )
+  expect(put.mock.calls[0]?.[1]).not.toHaveProperty('sensitive_word_whitelist')
+})
+
+it('sends false only when the whitelist is explicitly turned off', async () => {
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  renderPermissions(100, undefined, {
+    sensitive_word_violation_count: 7,
+    sensitive_word_whitelist: true,
+  })
+  await screen.findByDisplayValue('Managed admin')
+  await userEvent.click(
+    screen.getByRole('switch', { name: 'Sensitive-word whitelist' })
+  )
+  await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith(
+      '/api/user/',
+      expect.objectContaining({ id: 2, sensitive_word_whitelist: false })
+    )
+  )
+  expect(put.mock.calls[0]?.[1]).not.toHaveProperty(
+    'sensitive_word_violation_count'
   )
 })
 

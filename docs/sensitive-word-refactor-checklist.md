@@ -40,8 +40,12 @@
 | `web/src/features/usage-logs/components/usage-logs-table.tsx`、`components/__tests__/billing-source-visibility.test.tsx` | 按用户 ID 和角色隔离日志查询缓存，角色降级时不得沿用管理员“仅自己”审计行 |
 | `web/src/features/usage-logs/components/__tests__/sensitive-word-audit.test.tsx`、`detail-preview.test.tsx`、`log-type-filter.test.tsx` | 新元数据、三态、唯一详情、权限和筛选项的前端回归 |
 | `model/log_other_test.go`、`model/sensitive_word_test.go` | 元数据和三种真实审计写入的回归 |
+| `controller/user_manage_test.go` | 管理员编辑接口缺失/显式安全字段的 SQLite 回归，核对 quota 和 used_quota 不变 |
 | `web/src/features/system-settings/request-policies/section-registry.tsx`、`features/users/types.ts`、`features/usage-logs/lib/format.ts` | 清除合并留下的无效导入/重复键，保持后出现的实际运行值不变 |
 | `web/src/features/system-settings/models/upstream-price-cells.tsx` | 补齐现有可选比较价格类型声明，不改变调用和展示逻辑 |
+| `web/src/features/users/lib/user-form.ts` | 基础用户表单 payload 不隐式包含敏感词违规次数/白名单，避免陈旧字段覆盖安全状态 |
+| `web/src/features/users/components/users-mutate-drawer.tsx` | 仅在对应控件实际变更时追加安全字段，允许显式提交 `0` 或 `false`；本次无需修改已有 dirtyFields 分支 |
+| `web/src/features/users/lib/__tests__/user-form.test.ts`、`features/users/components/__tests__/permissions.test.tsx` | 验证转换函数不附带陈旧安全字段、权限编辑不覆盖计数和白名单、显式清零/关闭仍可提交 |
 | `docs/sensitive-word-content-audit-redesign.md` | 架构、数据流、迁移和排障说明 |
 
 ## 阶段记录
@@ -77,9 +81,17 @@
 | --- | --- | --- | --- |
 | 查询边界 | 完成 | 普通用户与 API Key 在计数和取数前均排除类型 8；新类型 8 日志只写管理员元数据，管理员/超级管理员仍可查看本人和全局审计。 | Go `./...`、SQLite 角色/分页/筛选/路由测试通过；ClickHouse 独立库因未配置 DSN 未执行。 |
 | 管理界面 | 完成 | 合并丢失三态摘要、详情组件重复；按新 `admin_info.keyword_filter.action` 显示拦截/白名单/观察，移除旧顶层字段读取；账号/角色进入查询和草稿缓存键。 | 定向 Vitest 6 个文件 57 项通过，角色降级专项 7 项通过；`bun run typecheck`、目标格式检查和 build:check 通过。目标 lint 无错误，仅一条未改动上游定价列表 key 警告。 |
-| 文档与交付 | 完成 | 更新本清单、架构说明、P-30 保护清单和维护指南；保留其他自开发功能及既有数据迁移。 | `bun run i18n:sync` 通过且生成的无关 locale 噪声已清理；`git diff --check` 通过，待选择性提交。 |
+| 文档与交付 | 完成 | 更新本清单、架构说明、P-30 保护清单和维护指南；保留其他自开发功能及既有数据迁移。 | `bun run i18n:sync` 和 `git diff --check` 通过；日志权限修复已于 `25e5f87a4` 提交推送。 |
 
 本次不更改数据库 schema、不回填或删除历史日志。旧顶层日志仍可由管理员查看日志行，但处理结果不会从旧字段推断；缺失新结果数据时界面显示“未知”。
+
+## 2026-09-28 用户编辑安全字段修复
+
+| 阶段 | 状态 | 发现与处理 | 自检/验证 |
+| --- | --- | --- | --- |
+| 前端提交边界 | 完成 | `transformFormDataToPayload` 在普通更新中无条件发送安全字段，使抽屉的 `dirtyFields` 判断失效；移除转换函数里的两个默认赋值，保留控件实际修改时的显式添加逻辑。 | 原权限用例 4 项中 2 项失败复现；修复后与新增转换单测合计 7 项通过（含非零旧计数、白名单开启、显式 `0` 和 `false`）。 |
+| 后端与余额边界 | 完成（生产代码不变） | `controller.UpdateUser` 仅按字段是否存在调用 `UpdateSensitiveWordUserFieldsWithTx`；`User.EditWithTx` 已不隐式保存安全字段。增加实际编辑接口用例，检查缺失/显式 `0` 与 `false`、quota 和 used_quota。 | SQLite 3.50.4 控制器专项通过，`go test -p 1 ./controller -count=1` 通过（52 秒）；不修改 schema 或余额相关代码。 |
+| 文档同步 | 完成 | 在 P-30 保护清单、架构文档及本清单补充端到端 patch 约束、文件职责和测试入口。 | 前端 typecheck、目标 oxlint/oxfmt 检查、`git diff --check` 通过；未重启或部署服务。 |
 
 ## 已执行验证
 
@@ -101,6 +113,11 @@
 | 桌面与移动视口手工检查 | 策略页、规则弹窗/搜索、左侧用户抽屉与审计详情均无横向溢出、遮挡或缺失翻译。 |
 | `bun run test -- src/features/system-settings/request-policies/__tests__/settings.test.tsx src/features/system-settings/request-policies/sensitive-words/draft-search.test.ts` | 通过，19 项 |
 | 本地主线日志权限/状态定向 Vitest | 通过，6 个文件、57 项；角色降级专项包含在内 |
+| 用户编辑安全字段定向 Vitest（单 worker） | 通过，2 个文件、7 项；修复前权限测试 4 项中 2 项失败 |
+| 用户编辑修复后的全量 Vitest（`GOMAXPROCS=2`、单 worker、低优先级） | 通过，181 个文件、2165 项 |
+| 用户编辑修复后的 `bun run typecheck`、目标 oxlint/oxfmt | 全部通过 |
+| `go test -p 1 ./controller -run '^TestUpdateUserSensitiveWordFieldsRequireExplicitPayload$' -count=1 -v` | SQLite 3.50.4 通过 |
+| `go test -p 1 ./controller -count=1`（`GOMAXPROCS=2`、低优先级） | 通过，52 秒 |
 | 本地主线 `go test ./...`（`GOMAXPROCS=2 -p 1`） | 通过 |
 | `go vet ./...`、`go build ./...`（单进程） | 通过 |
 | `(cd relaykit && go test ./... && go vet ./... && go build ./...)` | 通过 |
@@ -128,4 +145,6 @@ go test ./model -run 'TestSensitiveWord(DatabaseMigrationMatrix|ClickHouseLogMat
 - [x] 执行最终 `git diff --check` 与逐项反向审查，确认无旧入口和无超出本功能范围的差异。
 - [x] 重新拉取官方 `main`；发布时仍为 `d04c118c`，无需变基。
 - [x] 按“模型与迁移、Relay/安全集成、前端与文档”提交，推送功能分支并创建官方 Draft PR；官方 workflow 等待维护者批准。
-- [ ] 2026-09-27 本地主线集成：保留全部自开发契约，完成全量 Go/Web 回归和保护清单逆向审查后再提交。
+- [x] 2026-09-27 本地主线集成：`ba886153f` 将 RC-40 和 P-30 重实现集成到本地版本，
+  `3ffc9dd4f` 合入 `main`；2026-09-28 的日志权限及用户编辑修复已补充回归测试。外部数据库、
+  ClickHouse、线上部署与健康检查不因本地 Go/Web 测试通过而自动视为完成。

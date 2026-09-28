@@ -105,9 +105,8 @@ export function transformFormDataToPayload(
     // For update: quota is adjusted atomically via /api/user/manage, not sent here
     payload.group = data.group
     payload.remark = data.remark || undefined
-    payload.sensitive_word_violation_count =
-      data.sensitive_word_violation_count ?? 0
-    payload.sensitive_word_whitelist = data.sensitive_word_whitelist === true
+    // Sensitive-word safety fields are patch-only. The update drawer appends
+    // them only when the corresponding control was actually changed.
     payload.id = userId
   }
 

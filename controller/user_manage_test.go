@@ -93,6 +93,50 @@ func performManageUserRequest(t *testing.T, body string) *httptest.ResponseRecor
 	return recorder
 }
 
+func TestUpdateUserSensitiveWordFieldsRequireExplicitPayload(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	previousGinMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(previousGinMode) })
+	user := model.User{
+		Username: "safety-edit-admin", Password: "password", Role: common.RoleAdminUser,
+		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1,
+		SensitiveWordViolationCount: 7, SensitiveWordWhitelist: true,
+		Quota: 8_000, UsedQuota: 900,
+	}
+	require.NoError(t, db.Create(&user).Error)
+
+	update := func(body string) {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPut, "/api/user/", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Set("id", 9999)
+		c.Set("role", common.RoleRootUser)
+		c.Set("username", "root-operator")
+		c.Set(common.RequestIdKey, "safety-edit-request")
+		UpdateUser(c)
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Contains(t, recorder.Body.String(), `"success":true`)
+	}
+
+	update(fmt.Sprintf(`{"id":%d,"username":"safety-edit-admin","display_name":"Updated admin"}`, user.Id))
+	var stored model.User
+	require.NoError(t, db.First(&stored, user.Id).Error)
+	assert.Equal(t, 7, stored.SensitiveWordViolationCount)
+	assert.True(t, stored.SensitiveWordWhitelist)
+	assert.EqualValues(t, 8_000, stored.Quota)
+	assert.EqualValues(t, 900, stored.UsedQuota)
+
+	update(fmt.Sprintf(`{"id":%d,"username":"safety-edit-admin","sensitive_word_violation_count":0,"sensitive_word_whitelist":false}`, user.Id))
+	require.NoError(t, db.First(&stored, user.Id).Error)
+	assert.Zero(t, stored.SensitiveWordViolationCount)
+	assert.False(t, stored.SensitiveWordWhitelist)
+	assert.EqualValues(t, 8_000, stored.Quota)
+	assert.EqualValues(t, 900, stored.UsedQuota)
+}
+
 func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	now := time.Now().Unix()

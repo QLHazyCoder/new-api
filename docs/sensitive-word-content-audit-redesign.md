@@ -73,6 +73,8 @@ OpenAI Chat、HTTP/ WebSocket Responses、Claude、Gemini 和图片请求均通�
 
 管理界面位于 `/system-settings/request-policies/filtering`。旧 `/system-settings/security/sensitive-words` 路由保持重定向。规则弹窗支持一行一个词、TXT 导入、大小写不敏感草稿搜索、首次命中选择、Enter/Shift+Enter 循环命中，并在关闭时清空搜索状态。用户编辑抽屉从左侧打开，可维护白名单和违规次数；启用有违规记录的用户会要求确认重置。
 
+用户编辑接口对 `sensitive_word_violation_count` 和 `sensitive_word_whitelist` 使用显式 patch 语义：编辑用户名、备注、权限等常规字段时不得携带这两个字段，只有对应安全控件实际变更时才提交。后端按请求字段存在性调用敏感词安全字段事务，避免表单默认值或打开抽屉后的陈旧值覆盖并发产生的违规计数和白名单状态。
+
 ## 单向迁移
 
 启动先自动迁移新表与用户字段，再运行 `MigrateSensitiveWordData`。迁移顺序为策略、旧规则词条、旧 Option，以及仅在本地主线历史库中存在的独立白名单表；全部成功后才写入 `SensitiveWordRulesMigrationVersion=2`。独立白名单表只把启用用户复制到 `users.sensitive_word_whitelist`，不会由 AutoMigrate 创建。所有节点都要求该标记存在才启用新运行时，避免从节点在主节点导入旧数据期间使用部分规则。标记存在后旧值永不重新成为运行时权威；不完整或失败的迁移使新运行时失效并保持 fail-open，服务本身继续启动。迁移完成后的策略或迁移标记数据库读取异常则是不可确定的安全状态，Relay 返回不可重试 `503`，不会静默绕过审计。

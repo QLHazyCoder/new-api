@@ -54,6 +54,9 @@
 - `25e5f87a4` 修复 P-30 日志权限与结果状态：普通用户和 API Key 在查询及计数阶段排除
   类型 8，管理员列表只读取新的 `other.admin_info.keyword_filter` 三态结果，详情要求
   `AuditRead`，并移除旧顶层字段推断；该提交属于 P-30，不新增独立保护项。
+- 2026-09-28 的 P-30 用户编辑修复要求接口对 `sensitive_word_violation_count` 和
+  `sensitive_word_whitelist` 保持显式 patch 语义：常规资料/权限编辑不能携带安全字段，
+  只有对应控件实际变更才提交，避免陈旧表单值覆盖并发违规计数或白名单状态。
 - P-13/P-16 的后续 Playground 提交包括 `889436b78`、`734b60163` 和 `4cd9c9460`；
   前者保护图片历史清理的查询边界，后两者把图片能力配置外置并统一 GPT 图片模型能力。
 - 清单上次更新后新增的独立自研功能提交为 `b2e905185`（CC Switch 多来源导入）和
@@ -488,6 +491,9 @@
   默认 50）时禁用
   账户、刷新认证版本并撤销会话；封禁、清零次数、解封和白名单操作均不得清空或修改
   `quota`、余额、历史账务或历史审计证据。
+- 必须保留：常规用户资料/权限编辑的前端 payload 不含违规次数和白名单字段，后端只在请求
+  显式携带时更新；对应控件变更时必须能提交 `0` 和 `false`。不要将表单默认值或陈旧快照
+  当作显式变更写回，以免覆盖并发产生的命中或白名单更新。
 - 必须保留：默认客户端警示文案明确说明“余额不退”和严重情形报警，但这是提示文本，
   不是余额处理指令；管理员可在用户编辑左抽屉维护违规次数、清零次数和个人白名单，
   敏感词页面不承载白名单名单或审计列表，审计复核入口统一在使用日志。
@@ -508,6 +514,7 @@
   `relay/request_billing.go`、`controller/relay.go`、`controller/sensitive_word.go`、
   `controller/user.go`、`middleware/auth.go`、`middleware/sensitive_word.go`、
   `router/api-router.go`、`web/src/features/system-settings/request-policies/sensitive-words/`、
+  `web/src/features/users/lib/user-form.ts`、
   `web/src/features/users/components/users-columns.tsx`、
   `web/src/features/users/components/users-mutate-drawer.tsx`、
   `web/src/features/usage-logs/**`。
@@ -516,6 +523,8 @@
   摘要；配置关闭证据留存时不得写入完整提示词或片段。
 - 验证入口：`model/sensitive_word_test.go`、`controller/sensitive_word_test.go`、
   `controller/relay_test.go`、`controller/user_manage_test.go`、
+  `web/src/features/users/lib/__tests__/user-form.test.ts`、
+  `web/src/features/users/components/__tests__/permissions.test.tsx`、
   `relaykit/**`，以及敏感词页面、用户抽屉和使用日志的前端 typecheck/build/lint。
 - 来源提交：`21cc64f46`、`7f17b6307`、`ab37d8b51`、`384e4988c`、`416fabe52`、
   `b24c6ad95`、`52d68cb40`。
@@ -854,6 +863,8 @@ RC-40 相对 RC-39 的 14 个作者提交逐组核销如下；全部排除在 QL
 | 普通用户日志隔离 | 已完成 | `model.GetUserLogsForRole` 和 `GetLogByTokenId` 在计数/分页前排除类型 8；管理员仍可按本人或全局范围查看。 |
 | 管理员结果状态 | 已完成 | 类型 8 只使用 `other.admin_info.keyword_filter.action`，列表明确显示拦截、白名单放行、观察；缺失新结果显示未知，不从旧顶层字段推断。详情路由要求 `AuditRead`。 |
 | 用户状态写入边界 | 已完成 | `User.EditWithTx` 不再隐式提交违规次数或白名单字段，只有敏感词专用显式事务更新路径可写；不改变 quota、余额、订阅或历史账务。 |
+| 用户编辑 payload 边界 | 已修复 | `user-form.ts` 不再默认附加两个安全字段；用户抽屉仅按 `dirtyFields` 提交实际变更，包括明确清零 `0` 或关闭白名单 `false`。权限编辑、陈旧表单默认值及两个控件的独立提交均由前端回归测试覆盖；不改后端事务/数据库。 |
+| 用户编辑修复验证 | 已完成 | 前端专项 2 文件 7 项、全量 181 文件 2165 项、typecheck/目标 lint/format 通过；SQLite 3.50.4 控制器专项和 `controller` 包全套通过，未执行部署或生产数据库操作。 |
 | 验证 | 已完成（受限项已记录） | `go test ./...`、`go vet ./...`、`go build ./...`、relaykit 全套检查、目标 Vitest、typecheck、build:check、i18n sync 和 `git diff --check` 通过；copyright 仍有 24 个官方基线失败项，外部数据库/ClickHouse 因当前未配置 DSN 未执行。 |
 | 当前上游差异 | 待后续批准 | `upstream/main@c2b7a9a9e` 已领先 RC-40，尚未合入；下一次上游更新必须重新执行第 2、3 节保护项核对。 |
 
