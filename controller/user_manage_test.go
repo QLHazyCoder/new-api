@@ -671,17 +671,17 @@ func TestManageUserQuotaConcurrentSnapshots(t *testing.T) {
 	assert.EqualValues(t, balance, user.Quota)
 }
 
-func TestManageUserQuotaCacheUsesCommittedIntegerDifference(t *testing.T) {
+func TestManageUserQuotaIgnoresStaleCachedBalance(t *testing.T) {
 	for _, tc := range []struct {
-		name, mode                               string
-		before, cached, value, after, wantCached int64
-		failUpdate, failCache, missingCache      bool
+		name, mode                          string
+		before, cached, value, after        int64
+		failUpdate, failCache, missingCache bool
 	}{
-		{name: "add_preserves_reservations", mode: "add", before: 1000, cached: 900, value: 500, after: 1500, wantCached: 1400},
-		{name: "subtract_preserves_reservations", mode: "subtract", before: 1000, cached: 900, value: 500, after: 500, wantCached: 400},
-		{name: "override_preserves_reservations", mode: "override", before: 1000, cached: 900, value: 2000, after: 2000, wantCached: 1900},
-		{name: "large_odd_difference", mode: "override", before: common.MaxWalletQuota - 1, cached: common.MaxWalletQuota - 1, value: -common.MaxWalletQuota, after: -common.MaxWalletQuota, wantCached: -common.MaxWalletQuota},
-		{name: "rollback_does_not_change_cache", mode: "subtract", before: 1000, cached: 900, value: 500, after: 1000, wantCached: 900, failUpdate: true},
+		{name: "add_ignores_stale_balance", mode: "add", before: 1000, cached: 900, value: 500, after: 1500},
+		{name: "subtract_ignores_stale_balance", mode: "subtract", before: 1000, cached: 900, value: 500, after: 500},
+		{name: "override_ignores_stale_balance", mode: "override", before: 1000, cached: 900, value: 2000, after: 2000},
+		{name: "large_odd_difference", mode: "override", before: common.MaxWalletQuota - 1, cached: common.MaxWalletQuota - 1, value: -common.MaxWalletQuota, after: -common.MaxWalletQuota},
+		{name: "rollback_does_not_change_balance", mode: "subtract", before: 1000, cached: 900, value: 500, after: 1000, failUpdate: true},
 		{name: "cache_error_keeps_committed_change", mode: "add", before: 1000, value: 500, after: 1500, failCache: true},
 		{name: "missing_cache_is_not_partially_created", mode: "add", before: 1000, value: 500, after: 1500, missingCache: true},
 	} {
@@ -703,15 +703,15 @@ func TestManageUserQuotaCacheUsesCommittedIntegerDifference(t *testing.T) {
 			keys := server.Keys()
 			var quotaKey string
 			for _, key := range keys {
-				if server.HGet(key, "Id") == strconv.Itoa(user.Id) && server.HGet(key, "Quota") != "" {
+				if server.HGet(key, "Id") == strconv.Itoa(user.Id) {
 					quotaKey = key
 					break
 				}
 			}
 			require.NotEmpty(t, quotaKey)
 			if tc.failCache {
-				// A malformed cached number makes the Lua HINCRBY fail while DEL
-				// remains available to verify the recovery path.
+				// Legacy hashes may contain malformed quota fields; neither the
+				// write nor subsequent authorization may trust them.
 				server.HSet(quotaKey, "Quota", "not-an-integer")
 			} else {
 				server.HSet(quotaKey, "Quota", strconv.FormatInt(tc.cached, 10))
@@ -730,15 +730,16 @@ func TestManageUserQuotaCacheUsesCommittedIntegerDifference(t *testing.T) {
 			assert.Contains(t, recorder.Body.String(), fmt.Sprintf(`"success":%t`, !tc.failUpdate))
 			require.NoError(t, db.First(&user, user.Id).Error)
 			assert.EqualValues(t, tc.after, user.Quota)
+			fresh, err := model.GetUserCache(user.Id)
+			require.NoError(t, err)
+			assert.EqualValues(t, tc.after, fresh.Quota)
 			if tc.missingCache {
-				// Log username lookup may hydrate the whole user after commit.
+				// Log username lookup may hydrate identity metadata after commit.
 				if server.Exists(quotaKey) {
 					assert.Equal(t, strconv.Itoa(user.Id), server.HGet(quotaKey, "Id"))
 					assert.NotEmpty(t, server.HGet(quotaKey, "CacheSchema"))
-					assert.Equal(t, strconv.FormatInt(tc.after, 10), server.HGet(quotaKey, "Quota"))
+					assert.Empty(t, server.HGet(quotaKey, "Quota"))
 				}
-			} else if !tc.failCache {
-				assert.Equal(t, strconv.FormatInt(tc.wantCached, 10), server.HGet(quotaKey, "Quota"))
 			}
 		})
 	}

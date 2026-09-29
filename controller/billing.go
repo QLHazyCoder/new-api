@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"math/big"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -17,29 +19,31 @@ func GetSubscription(c *gin.Context) {
 	if common.DisplayTokenStatEnabled {
 		tokenId := c.GetInt("token_id")
 		token, err = model.GetTokenById(tokenId)
+		if err != nil {
+			billingQueryError(c, err, "upstream_error")
+			return
+		}
 		expiredTime = token.ExpiredTime
 		remainQuota = token.RemainQuota
 		usedQuota = token.UsedQuota
 	} else {
 		userId := c.GetInt("id")
 		remainQuota, err = model.GetUserQuota(userId, false)
+		if err != nil {
+			billingQueryError(c, err, "upstream_error")
+			return
+		}
 		usedQuota, err = model.GetUserUsedQuota(userId)
 	}
 	if expiredTime <= 0 {
 		expiredTime = 0
 	}
 	if err != nil {
-		openAIError := types.OpenAIError{
-			Message: err.Error(),
-			Type:    "upstream_error",
-		}
-		c.JSON(200, gin.H{
-			"error": openAIError,
-		})
+		billingQueryError(c, err, "upstream_error")
 		return
 	}
-	quota := remainQuota + usedQuota
-	amount := float64(quota)
+	quota := new(big.Int).Add(big.NewInt(remainQuota), big.NewInt(usedQuota))
+	amount, _ := new(big.Float).SetInt(quota).Float64()
 	// OpenAI 兼容接口中的 *_USD 字段含义保持“额度单位”对应值：
 	// 我们将其解释为以“站点展示类型”为准：
 	// - USD: 直接除以 QuotaPerUnit
@@ -75,19 +79,17 @@ func GetUsage(c *gin.Context) {
 	if common.DisplayTokenStatEnabled {
 		tokenId := c.GetInt("token_id")
 		token, err = model.GetTokenById(tokenId)
+		if err != nil {
+			billingQueryError(c, err, "new_api_error")
+			return
+		}
 		quota = token.UsedQuota
 	} else {
 		userId := c.GetInt("id")
 		quota, err = model.GetUserUsedQuota(userId)
 	}
 	if err != nil {
-		openAIError := types.OpenAIError{
-			Message: err.Error(),
-			Type:    "new_api_error",
-		}
-		c.JSON(200, gin.H{
-			"error": openAIError,
-		})
+		billingQueryError(c, err, "new_api_error")
 		return
 	}
 	amount := float64(quota)
@@ -105,4 +107,8 @@ func GetUsage(c *gin.Context) {
 	}
 	c.JSON(200, usage)
 	return
+}
+
+func billingQueryError(c *gin.Context, err error, kind string) {
+	c.JSON(200, gin.H{"error": types.OpenAIError{Message: err.Error(), Type: kind}})
 }

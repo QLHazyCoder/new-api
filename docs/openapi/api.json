@@ -3869,7 +3869,7 @@
       "get": {
         "summary": "获取令牌使用情况",
         "deprecated": false,
-        "description": "🔑 需要令牌认证（TokenAuth）",
+        "description": "需要令牌认证。data.total_granted、total_used、total_available 保持 JSON number；对应的 total_granted_raw、total_used_raw、total_available_raw 是精确十进制字符串。total_granted 可超过 int64，请使用 raw 字段做精确运算。",
         "tags": [
           "令牌管理"
         ],
@@ -3887,7 +3887,7 @@
         ],
         "responses": {
           "200": {
-            "description": "成功",
+            "description": "成功；data 中增加精确字符串额度字段，不改变旧数字字段和错误响应形状。",
             "headers": {}
           }
         },

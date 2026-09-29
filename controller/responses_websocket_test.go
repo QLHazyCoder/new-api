@@ -93,7 +93,7 @@ func setupResponsesWSRequestTest(t *testing.T) (*model.User, *model.Token) {
 	// before billing; create the same schema and completed marker a replica sees
 	// after its master has migrated the shared database.
 	require.NoError(t, db.AutoMigrate(
-		&model.User{}, &model.Token{}, &model.Option{},
+		&model.User{}, &model.Token{}, &model.BillingOperation{}, &model.Option{},
 		&model.SensitiveWordRule{}, &model.SensitiveWordRuleWord{}, &model.SensitiveWordRuleGroup{},
 		&model.SensitiveWordPolicy{}, &model.SensitiveWordAuditEvent{},
 	))

@@ -1,31 +1,43 @@
 package model
 
-type Midjourney struct {
-	Id          int    `json:"id"`
-	Code        int    `json:"code"`
-	UserId      int    `json:"user_id" gorm:"index"`
-	Action      string `json:"action" gorm:"type:varchar(40);index"`
-	MjId        string `json:"mj_id" gorm:"index"`
-	Prompt      string `json:"prompt"`
-	PromptEn    string `json:"prompt_en"`
-	Description string `json:"description"`
-	State       string `json:"state"`
-	SubmitTime  int64  `json:"submit_time" gorm:"index"`
-	StartTime   int64  `json:"start_time" gorm:"index"`
-	FinishTime  int64  `json:"finish_time" gorm:"index"`
-	ImageUrl    string `json:"image_url"`
-	VideoUrl    string `json:"video_url"`
-	VideoUrls   string `json:"video_urls"`
-	Status      string `json:"status" gorm:"type:varchar(20);index"`
-	Progress    string `json:"progress" gorm:"type:varchar(30);index"`
-	FailReason  string `json:"fail_reason"`
-	ChannelId   int    `json:"channel_id"`
-	Quota       int    `json:"quota"`
-	Buttons     string `json:"buttons"`
-	Properties  string `json:"properties"`
+import (
+	"errors"
 
-	TokenId          int `json:"-" gorm:"default:0"`
-	BillingChannelId int `json:"-" gorm:"default:0"`
+	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
+)
+
+type Midjourney struct {
+	Id                      int    `json:"id"`
+	Code                    int    `json:"code"`
+	UserId                  int    `json:"user_id" gorm:"index"`
+	Action                  string `json:"action" gorm:"type:varchar(40);index"`
+	MjId                    string `json:"mj_id" gorm:"index"`
+	Prompt                  string `json:"prompt"`
+	PromptEn                string `json:"prompt_en"`
+	Description             string `json:"description"`
+	State                   string `json:"state"`
+	SubmitTime              int64  `json:"submit_time" gorm:"index"`
+	StartTime               int64  `json:"start_time" gorm:"index"`
+	FinishTime              int64  `json:"finish_time" gorm:"index"`
+	ImageUrl                string `json:"image_url"`
+	VideoUrl                string `json:"video_url"`
+	VideoUrls               string `json:"video_urls"`
+	Status                  string `json:"status" gorm:"type:varchar(20);index"`
+	Progress                string `json:"progress" gorm:"type:varchar(30);index"`
+	FailReason              string `json:"fail_reason"`
+	ChannelId               int    `json:"channel_id"`
+	Quota                   int    `json:"quota"`
+	Buttons                 string `json:"buttons"`
+	Properties              string `json:"properties"`
+	BillingReviewPending    bool   `json:"-" gorm:"not null;default:false"`
+	BillingFailureConfirmed bool   `json:"-" gorm:"not null;default:false;index"`
+	BillingRequestID        string `json:"-" gorm:"type:varchar(128);index"`
+
+	TokenId          int  `json:"-" gorm:"default:0"`
+	BillingChannelId int  `json:"-" gorm:"default:0"`
+	PreparedQuota    int  `json:"-" gorm:"-:all"`
+	BillingBillable  bool `json:"-" gorm:"-:all"`
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段
@@ -95,9 +107,10 @@ func GetAllTasks(startIdx int, num int, queryParams TaskQueryParams) []*Midjourn
 
 func GetAllUnFinishTasks() []*Midjourney {
 	var tasks []*Midjourney
-	var err error
-	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Find(&tasks).Error
+	// Tasks without an upstream ID cannot be polled after their review marker is saved.
+	err := DB.Where("progress != ?", "100%").
+		Where("mj_id <> ? OR billing_review_pending = ?", "", false).
+		Find(&tasks).Error
 	if err != nil {
 		return nil
 	}
@@ -112,6 +125,7 @@ func HasUnfinishedMidjourneyTasks() bool {
 	var id int
 	err := DB.Model(&Midjourney{}).
 		Where("progress != ?", "100%").
+		Where("mj_id <> ? OR billing_review_pending = ?", "", false).
 		Limit(1).
 		Pluck("id", &id).Error
 	return err == nil && id != 0
@@ -162,9 +176,63 @@ func UpdateProgress(id int, progress string) error {
 }
 
 func (midjourney *Midjourney) Insert() error {
-	var err error
-	err = DB.Create(midjourney).Error
-	return err
+	if midjourney.BillingRequestID == "" {
+		if midjourney.PreparedQuota > 0 {
+			return errors.New("prepared Midjourney billing has no request ID")
+		}
+		return DB.Create(midjourney).Error
+	}
+	if midjourney.Id != 0 || midjourney.Quota != 0 || midjourney.PreparedQuota <= 0 || midjourney.PreparedQuota > common.MaxChargeQuota || midjourney.UserId <= 0 {
+		return errors.New("invalid prepared Midjourney task billing")
+	}
+	desired := *midjourney
+	staged := desired
+	staged.Quota = 0
+	var persistedID int
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var operation BillingOperation
+		if err := lockForUpdate(tx).Where("request_id = ? AND phase = ?", desired.BillingRequestID, "initial").First(&operation).Error; err != nil {
+			return err
+		}
+		expectedState := BillingReserved
+		if !desired.BillingBillable {
+			expectedState = BillingRefundRequested
+		}
+		if operation.State != expectedState || operation.TaskId != 0 || operation.FundingSource != "midjourney_wallet" ||
+			operation.UserId != desired.UserId || operation.ChannelId != desired.GetBillingChannelId() ||
+			operation.TokenId != desired.TokenId || operation.WalletAmount != int64(desired.PreparedQuota) ||
+			operation.TokenAmount != tokenAmountForMidjourney(desired.PreparedQuota, desired.TokenId) ||
+			operation.PreConsumed != int64(desired.PreparedQuota) || operation.Actual != int64(desired.PreparedQuota) ||
+			(operation.UpstreamResultRecorded && (operation.UpstreamTaskID != desired.MjId || operation.UpstreamCode != desired.Code)) {
+			return errors.New("Midjourney submission reservation does not match task")
+		}
+		if !desired.BillingBillable {
+			staged.TokenId = 0
+			staged.BillingChannelId = 0
+		}
+		if err := tx.Create(&staged).Error; err != nil {
+			return err
+		}
+		state := BillingSettlementRequested
+		if !desired.BillingBillable {
+			state = BillingRefundRequested
+		}
+		if err := tx.Model(&operation).Updates(map[string]any{
+			"task_id": staged.Id, "state": state, "actual": int64(desired.PreparedQuota),
+			"updated_at": common.GetTimestamp(),
+		}).Error; err != nil {
+			return err
+		}
+		persistedID = staged.Id
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	desired.Id = persistedID
+	desired.Quota = 0
+	*midjourney = desired
+	return nil
 }
 
 func (midjourney *Midjourney) Update() error {
@@ -197,6 +265,23 @@ func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) 
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+func MarkMidjourneyTaskBillingReviewRequired(taskID int) (bool, error) {
+	if taskID <= 0 {
+		return false, errors.New("invalid Midjourney task id")
+	}
+	result := DB.Model(&Midjourney{}).
+		Where("id = ? AND billing_review_pending = ?", taskID, false).
+		Update("billing_review_pending", true)
+	return result.RowsAffected > 0, result.Error
+}
+
+func ListMidjourneyBillingReviewTasks(limit int) ([]Midjourney, error) {
+	var tasks []Midjourney
+	err := DB.Where("billing_review_pending = ?", true).
+		Order("submit_time asc").Limit(limit).Find(&tasks).Error
+	return tasks, err
 }
 
 func MjBulkUpdate(mjIds []string, params map[string]any) error {

@@ -22,9 +22,9 @@ import (
 // midjourneyPollSummary is the result recorded on a midjourney_poll system task
 // row, summarizing one polling pass.
 type midjourneyPollSummary struct {
-	UnfinishedTasks int `json:"unfinished_tasks"`
-	ChannelsScanned int `json:"channels_scanned"`
-	NullTasksFailed int `json:"null_tasks_failed"`
+	UnfinishedTasks        int `json:"unfinished_tasks"`
+	ChannelsScanned        int `json:"channels_scanned"`
+	NullTasksPendingReview int `json:"null_tasks_pending_review"`
 }
 
 // runMidjourneyTaskUpdateOnce performs one Midjourney polling pass synchronously.
@@ -57,15 +57,16 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], task.MjId)
 	}
 	if len(nullTaskIds) > 0 {
-		summary.NullTasksFailed = len(nullTaskIds)
-		err := model.MjBulkUpdateByTaskIds(nullTaskIds, map[string]any{
-			"status":   "FAILURE",
-			"progress": "100%",
-		})
-		if err != nil {
-			logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error: %v", err))
-		} else {
-			logger.LogInfo(ctx, fmt.Sprintf("Fix null mj_id task success: %v", nullTaskIds))
+		for _, taskID := range nullTaskIds {
+			changed, err := model.MarkMidjourneyTaskBillingReviewRequired(taskID)
+			if err != nil {
+				logger.LogError(ctx, fmt.Sprintf("Mark Midjourney task without upstream id for billing review failed: id=%d err=%v", taskID, err))
+				continue
+			}
+			if changed {
+				summary.NullTasksPendingReview++
+				common.SysError(fmt.Sprintf("Midjourney task id=%d has no upstream task ID; quota is retained for manual billing review", taskID))
+			}
 		}
 	}
 	if len(taskChannelM) == 0 {
@@ -90,14 +91,7 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		midjourneyChannel, err := model.CacheGetChannel(channelId)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("CacheGetChannel: %v", err))
-			err := model.MjBulkUpdate(taskIds, map[string]any{
-				"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
-				"status":      "FAILURE",
-				"progress":    "100%",
-			})
-			if err != nil {
-				logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", err))
-			}
+			markStaleMidjourneyTasksForBillingReview(ctx, taskChannelTasks(taskIds, taskM))
 			continue
 		}
 		requestUrl := fmt.Sprintf("%s/mj/task/list-by-condition", *midjourneyChannel.BaseURL)
@@ -107,6 +101,7 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		})
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("Get Task marshal body error: %v", err))
+			markStaleMidjourneyTasksForBillingReview(ctx, taskChannelTasks(taskIds, taskM))
 			continue
 		}
 		timeout := time.Second * 15
@@ -115,6 +110,7 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		if err != nil {
 			cancel()
 			logger.LogError(ctx, fmt.Sprintf("Get Task error: %v", err))
+			markStaleMidjourneyTasksForBillingReview(ctx, taskChannelTasks(taskIds, taskM))
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
@@ -123,12 +119,14 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("Get Task Do req error: %v", err))
 			cancel()
+			markStaleMidjourneyTasksForBillingReview(ctx, taskChannelTasks(taskIds, taskM))
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
 			logger.LogError(ctx, fmt.Sprintf("Get Task status code: %d", resp.StatusCode))
 			resp.Body.Close()
 			cancel()
+			markStaleMidjourneyTasksForBillingReview(ctx, taskChannelTasks(taskIds, taskM))
 			continue
 		}
 		responseBody, err := io.ReadAll(resp.Body)
@@ -136,6 +134,7 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error: %v", err))
 			resp.Body.Close()
 			cancel()
+			markStaleMidjourneyTasksForBillingReview(ctx, taskChannelTasks(taskIds, taskM))
 			continue
 		}
 		var responseItems []dto.MidjourneyDto
@@ -144,6 +143,7 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			logger.LogError(ctx, fmt.Sprintf("Get Mjp Task parse body error2: %v, body: %s", err, string(responseBody)))
 			resp.Body.Close()
 			cancel()
+			markStaleMidjourneyTasksForBillingReview(ctx, taskChannelTasks(taskIds, taskM))
 			continue
 		}
 		resp.Body.Close()
@@ -157,17 +157,29 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 				continue
 			}
 
+			terminalFailure := responseItem.Status == "FAILURE"
+			terminalSuccess := responseItem.Status == "SUCCESS"
+			terminal := terminalFailure || terminalSuccess
 			useTime := (time.Now().UnixNano() / int64(time.Millisecond)) - task.SubmitTime
-			// 如果时间超过一小时，且进度不是100%，则认为任务失败
-			if useTime > 3600000 && task.Progress != "100%" {
-				responseItem.FailReason = "上游任务超时（超过1小时）"
-				responseItem.Status = "FAILURE"
+			if !terminal && (useTime > 3600000 || responseItem.Progress == "100%" || responseItem.FailReason != "") {
+				changed, err := model.MarkMidjourneyTaskBillingReviewRequired(task.Id)
+				if err != nil {
+					logger.LogError(ctx, fmt.Sprintf("Mark uncertain Midjourney task for billing review failed: id=%d err=%v", task.Id, err))
+				} else if changed {
+					common.SysError(fmt.Sprintf("Midjourney task %s has no confirmed terminal upstream result; quota is retained and will not be refunded automatically", task.MjId))
+				}
+				task.BillingReviewPending = true
 			}
-			if !checkMjTaskNeedUpdate(task, responseItem) {
+			reviewPending := !terminal
+			failureConfirmed := terminalFailure
+			if !checkMjTaskNeedUpdate(task, responseItem) &&
+				task.BillingReviewPending == reviewPending && task.BillingFailureConfirmed == failureConfirmed {
 				continue
 			}
 			preStatus := task.Status
 			task.Code = 1
+			task.BillingReviewPending = reviewPending
+			task.BillingFailureConfirmed = failureConfirmed
 			task.Progress = responseItem.Progress
 			task.PromptEn = responseItem.PromptEn
 			task.State = responseItem.State
@@ -200,14 +212,17 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			} else {
 				task.VideoUrls = "" // 空值时清空字段
 			}
+			if terminal && task.FinishTime == 0 {
+				task.FinishTime = time.Now().UnixMilli()
+			}
 
-			shouldReturnQuota := false
-			if (task.Progress != "100%" && responseItem.FailReason != "") || (task.Progress == "100%" && task.Status == "FAILURE") {
+			shouldReturnQuota := task.BillingFailureConfirmed
+			if shouldReturnQuota {
+				if task.FailReason == "" {
+					task.FailReason = "上游报告任务失败"
+				}
 				logger.LogInfo(ctx, task.MjId+" 构建失败，"+task.FailReason)
 				task.Progress = "100%"
-				if task.Quota != 0 {
-					shouldReturnQuota = true
-				}
 			}
 			won, err := task.UpdateWithStatus(preStatus)
 			if err != nil {
@@ -221,6 +236,31 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		report(totalChannels, totalChannels)
 	}
 	return summary
+}
+
+func taskChannelTasks(taskIDs []string, taskByID map[string]*model.Midjourney) []*model.Midjourney {
+	tasks := make([]*model.Midjourney, 0, len(taskIDs))
+	for _, taskID := range taskIDs {
+		if task := taskByID[taskID]; task != nil {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks
+}
+
+func markStaleMidjourneyTasksForBillingReview(ctx context.Context, tasks []*model.Midjourney) {
+	now := time.Now().UnixMilli()
+	for _, task := range tasks {
+		if task == nil || task.SubmitTime <= 0 || now-task.SubmitTime <= 3600000 {
+			continue
+		}
+		changed, err := model.MarkMidjourneyTaskBillingReviewRequired(task.Id)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("Mark stale Midjourney task for billing review failed: id=%d err=%v", task.Id, err))
+		} else if changed {
+			common.SysError(fmt.Sprintf("Midjourney task %s cannot be checked upstream after one hour; quota is retained and requires review", task.MjId))
+		}
+	}
 }
 
 func checkMjTaskNeedUpdate(oldTask *model.Midjourney, newTask dto.MidjourneyDto) bool {
@@ -252,6 +292,9 @@ func checkMjTaskNeedUpdate(oldTask *model.Midjourney, newTask dto.MidjourneyDto)
 		return true
 	}
 	if oldTask.FailReason != newTask.FailReason {
+		return true
+	}
+	if oldTask.BillingReviewPending && (newTask.Status == "SUCCESS" || newTask.Status == "FAILURE") {
 		return true
 	}
 	if oldTask.FinishTime != newTask.FinishTime {

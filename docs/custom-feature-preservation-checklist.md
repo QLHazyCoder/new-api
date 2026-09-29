@@ -553,24 +553,76 @@
   防止技术溢出的边界，不重新设置 int32 产品余额上限。现有额度单位和 `QuotaPerUnit` 不变。
 - 必须保留：单次请求费用、任务费用和历史消费日志仍在 int32 charge domain 中，异常价格
   或请求参数经过饱和/严格错误处理，不能为了放开钱包而取消单次计费溢出保护。
-- 必须保留：钱包增减、覆盖、预扣、退款回补和批量更新经过统一的 checked SQL/CAS 入口；
-  Redis 额度使用十进制字符串比较与原子 `HINCRBY`，接近 int64 边界时拒绝操作，Token
-  双字段更新失败必须回补。缓存失效和数据库降级路径不能绕过边界检查。
+- 必须保留：数据库是唯一可授信的额度来源；钱包预扣使用 `quota >= amount` 的条件
+  SQL，有限 Token 同时检查剩余额度与双字段整数边界，无限 Token 仍可欠费但不可溢出。
+  充值、兑换、签到及管理员调整与业务记录原子提交。Redis 只缓存身份和策略元数据，
+  不缓存可支出的额度；数据库故障不得用旧缓存余额授信。
+- 必须保留：`BATCH_UPDATE_ENABLED=true` 仅输出弃用与 SQL 压力告警，不再排队钱包、
+  Token 或累计用量；不得恢复 Redis 额度先写、进程队列延迟刷库的协议。
+- 必须保留：计费会话的初始预扣、图片追加预扣、差额结算与明确失败退款使用持久操作
+  状态和事务，Token、钱包、订阅同时提交；退款先持久标记、可重试且不重复加账。任务
+  提交结果先与 settlement intent 同事务持久化，资金、Token、分摊、用量和任务最终状态
+  再同事务提交；进程退出可重试已确认结算。Midjourney 在请求上游前原子预留钱包与
+  Token，收到响应后先持久记录上游任务 ID/响应码，再把任务与 settlement/refund 状态
+  同事务关联；明确拒绝可重试释放预留。传输错误、结果未知或任务事务失败时保留预留，
+  用持久上游 ID 供人工核查，禁止按超时自动退款/补扣。无 BillingSession 的实时流兼容
+  预扣/结算也必须共享 `initial` 根记录与幂等阶段；中途退出的预扣进入同一待核查清单。
 - 必须保留：旧数据库值不缩放、不重算；标准/快速迁移后校验所有钱包字段为有符号 BIGINT，
   并记录超出旧 int32 范围但被保留的历史值。API 写入兼容 JSON number/string，查询提供
   `quota_raw`、`used_quota_raw`、`remain_quota_raw` 等精确字符串字段，前端使用 BigInt。
+- 必须保留：`GET /api/usage/token/` 使用认证中间件身份，现有额度字段仍为 JSON number，
+  `total_granted_raw`、`total_used_raw`、`total_available_raw` 提供精确十进制字符串；
+  总额允许超过 `int64`，以大整数计算。旧 billing 展示接口在查询失败时返回原有错误结构。
 - 必须保留：用户余额提醒的阈值运算继续处于钱包 `int64` 域，不能通过 `int` 窄化或
   未检查的浮点转整数溢出；极大阈值必须按钱包上限安全限制。
 - 当前位置：`common/wallet_quota.go`、`common/quota_math.go`、`model/wallet_quota.go`、
   `model/wallet_quota_schema.go`、`model/quota_reserve.go`、`model/user.go`、
-  `model/token.go`、`controller/misc.go`、`controller/user.go`、`service/quota.go`、
+  `model/token.go`、`model/billing_operation.go`、`model/task_billing_operation.go`、
+  `model/midjourney.go`、`model/midjourney_billing_operation.go`、`model/subscription.go`、
+  `service/billing_session.go`、`service/task_billing.go`、`service/task_polling.go`、
+  `service/billing_recovery.go`、`service/midjourney.go`、`relay/mjproxy_handler.go`、
+  `controller/token.go`、`controller/billing.go`、
+  `controller/misc.go`、`controller/user.go`、`service/quota.go`、
   `relaykit/dto/user_settings.go`、`web/src/lib/format.ts`。
 - 数据/迁移：钱包字段迁移必须保留默认值、索引、空值行为和历史 raw quota；写入大额度后不能
-  回滚到仍带有旧钱包 int32 校验的版本。
+  回滚到仍带有旧钱包 int32 校验的版本。`billing_operations` 与 `midjourneys` 只追加账务状态、
+  请求关联及上游结果列；操作唯一键为 `(request_id, phase)`，既有行不回填、不改账；发布必须
+  停止旧实例处理在途账务后再切流，
+  历史不可判定差额只生成审计报告，不自动改账。
 - 验证入口：`common/wallet_quota_test.go`、`model/wallet_quota_test.go`、
-  `model/quota_reserve_test.go`、`controller/user_manage_test.go`、
+  `model/quota_reserve_test.go`、`model/billing_operation_database_matrix_test.go`、
+  `controller/token_quota_int64_test.go`、`service/task_billing_test.go`、
+  `controller/midjourney_billing_test.go`、`controller/user_manage_test.go`、
   `controller/topup_quota_limit_test.go`、相关前端额度格式化测试。
 - 来源提交：`afab95b53`。
+
+#### P-32 本次实施记录（发布独立授权）
+
+| 阶段 | 状态 | 修改与文件职责 | 自检与验收 |
+| --- | --- | --- | --- |
+| 1. 财务路径隔离 | 已实施 | `model/quota_reserve.go` 将钱包/Token 预扣改为 SQL CAS；`model/user.go`、`model/token.go`、`model/channel.go` 同步写账；`model/utils.go` 停用进程内财务队列；`model/user_cache.go`、`model/user_auth_cache.go`、`model/token_cache.go` 移除额度缓存依赖及字段；`model/checkin.go` 统一签到事务。 | 旧 Redis hash 与数据库余额不一致、缓存失效及 Redis 不可用只影响身份缓存，不重复授信；已新增定向用例。 |
+| 2. 精度与边界 | 已实施 | `controller/token.go` 绑定认证身份和精确返回；`controller/billing.go` 安全求和及错误处理；`model/subscription.go` checked 累计与跨事务调用；`model/db_time.go` 提供事务内数据库时间。 | 高位额度、超 `int64` 总和、分组后缀、查询失败及订阅溢出定向覆盖。 |
+| 3. 持久退款与任务 | 代码及自动化验收完成；生产负载/发布门禁未执行 | `model/billing_operation.go` 追加操作表、阶段唯一键、预留/settlement/refund 状态及上游结果字段，无会话实时流兼容预扣也写入 `initial` 根记录并幂等收口；`model/task_billing_operation.go` 原子更新任务、资金分摊及人工核查标记，并使旧任务首次终态处理创建完整的资金/Token 快照、同步根记录差额且禁止已退款任务被重算复活；`model/midjourney.go`、`model/midjourney_billing_operation.go` 在外呼前预留钱包/Token，先持久上游 ID/响应码，再原子关联 MJ 任务；上游明确拒绝时事务性进入可重试退款，接单任务可恢复结算；`relay/mjproxy_handler.go` 在两个 MJ 提交入口执行该协议；`controller/midjourney.go` 仅把明确上游终态失败作为退款依据，本地超时、渠道缓存故障和缺失上游 ID 均保留额度并标记核查；`service/billing_session.go`、`service/quota.go`、`service/task_billing.go` 统一接入并移除旧分步资金函数；`service/billing_recovery.go` 重试已确认结算/退款、告警未知结果；`model/task.go` 隐藏账务 pending 任务；`model/main.go` 注册迁移，`main.go` 启动恢复扫描及旧开关告警。 | SQLite/MySQL/PostgreSQL 矩阵覆盖旧 MJ 表追加迁移、重复启动、预留/结算故障恢复、拒绝幂等退款及通用任务结算恢复；上游已接单但任务事务失败保存 task ID、未知结果不自动退款、实时预扣中断待核查、混合资金预扣→结算→退款、终态状态竞争、退款后重算隔离与 pending 读取隔离均有回归用例。 |
+
+- 文件结构保持原有模块边界；仅新增下表列出的 6 个文件，没有目录迁移。移除已被事务
+  实现取代且无调用点的旧分步任务资金调整辅助函数。
+
+| 文件范围 | 本轮文件 | 职责 |
+| --- | --- | --- |
+| int64 财务原语、SQL 写入与身份缓存 | `common/wallet_quota.go`、`common/quota_math.go`、`model/wallet_quota.go`、`model/wallet_quota_schema.go`、`model/quota_reserve.go`、`model/user.go`、`model/token.go`、`model/channel.go`、`model/user_quota_adjustment.go`、`model/utils.go`、`model/user_cache.go`、`model/user_auth_cache.go`、`model/token_cache.go`、`model/checkin.go`、`model/db_time.go` | 钱包/Token 边界检查、原子预扣和同步写入、财务队列停用、去除额度缓存及事务时间处理。 |
+| 持久账务状态及数据迁移 | `model/billing_operation.go`（新增）、`model/task_billing_operation.go`（新增）、`model/midjourney_billing_operation.go`（新增）、`model/midjourney.go`、`model/subscription.go`、`model/task.go`、`model/main.go`、`main.go` | 操作记录、任务/订阅/MJ 事务、人工核查状态、追加迁移和恢复 worker 启动。 |
+| 服务层计费及轮询 | `service/billing.go`、`service/billing_session.go`、`service/billing_recovery.go`（新增）、`service/midjourney.go`、`service/quota.go`、`service/task_billing.go`、`service/task_polling.go`、`service/text_quota.go`、`service/violation_fee.go` | 统一预扣/结算/退款、旧实时路径幂等化、终态未知结果隔离、已知操作恢复。 |
+| Relay 与 HTTP 接口 | `relay/common/relay_info.go`、`relay/mjproxy_handler.go`、`controller/billing.go`、`controller/token.go`、`controller/midjourney.go`、`controller/relay.go` | 请求关联、MJ 外呼前预留、用量精度响应、旧 billing 错误兼容及明确失败判定。 |
+| 自动化回归与数据库夹具 | `model/billing_operation_database_matrix_test.go`（新增）、`model/quota_reserve_test.go`、`model/subscription_applicable_group_test.go`、`model/task_cas_test.go`、`model/payment_method_guard_test.go`、`model/user_cache_auth_version_test.go`、`model/user_update_test.go`、`controller/midjourney_billing_test.go`（新增）、`controller/billing_option_test.go`、`controller/plugin_native_e2e_test.go`、`controller/plugin_protocol_test.go`、`controller/relay_task_plugin_test.go`、`controller/responses_websocket_test.go`、`controller/token_quota_int64_test.go`、`controller/user_manage_test.go`、`e2e/doc_parse_test.go`、`service/task_billing_test.go`、`service/task_polling_test.go`、`service/text_quota_test.go`、`service/tiered_settle_test.go` | SQLite 与隔离 MySQL/PostgreSQL 迁移/事务测试，额度精度、回滚/重试、混合分摊、MJ 和未知任务结果覆盖；兼容既有集成测试夹具。 |
+| 文档与接口契约 | `docs/custom-feature-preservation-checklist.md`、`docs/openapi/api.json` | 维护本阶段变更/门禁记录并说明精确额度响应字段。 |
+- 兼容边界：单次请求继续使用 int32 费用域，订阅优先级和分组适用规则不变；
+  旧 billing 响应形状不变，Token 用量响应仅增加可选字符串字段。`docs/openapi/api.json`
+  同步说明精度契约。旧缓存仅保存身份元数据，旧开关继续可读取但不再启用延迟刷库。
+- 当前自检：SQLite/MySQL/PostgreSQL 旧 MJ 表迁移、重复启动和 settlement intent 事务故障/恢复/重复执行矩阵通过；
+  Midjourney 预留回滚、上游任务 ID 持久、未知结果保留、明确拒绝幂等释放及超时/明确失败轮询回归通过。旧任务
+  混合资金/Token 分摊根记录、终态退款后重算隔离回归通过。当前代码的 `go test ./...`、`go build ./...`、
+  `gofmt` 检查和 `git diff --check` 均通过。生产负载下的数据库延迟/连接池评估、待处理账务监控、历史差额审计、
+  候选镜像核验和发布切流均未执行，必须作为独立上线门禁；本次不代表已上线或生产账务已完成对账。
 
 ### P-34 CC Switch 所选密钥授权模型与可访问下拉框
 
@@ -677,6 +729,11 @@ GitHub Actions 的 amd64、arm64 与 manifest 均成功。
 
 ## 7. 维护记录
 
+- 2026-09-28：实施 P-32 钱包/Token int64 与持久任务账务根治；完成 SQL 权威额度、精度/checked 边界、
+  持久预留/结算/退款、任务与 Midjourney 状态恢复、未知结果人工核查和旧路径兼容。最终审查补齐旧任务首次
+  终态处理的资金分摊根快照，并阻止退款后重算重新修改资金；`go test ./...`、`go build ./...`、
+  SQLite/MySQL/PostgreSQL 独立数据库矩阵、格式和差异检查通过。只改本地工作区；未提交、未部署、未读写生产库；
+  生产负载与发布门禁仍待单独授权/执行。
 - 2026-08-10：以 `dd95ab677..main@b44e6971e` 的第一父提交链复核历史；确认
   `88ff1c7cd`、`571b38f03`、`3707af0c4` 已有行为或审计文档但映射不完整，已补齐；
   新增 P-28 记录文本请求成功率与日志结果契约。合并/审计维护提交已在第 1 节明确

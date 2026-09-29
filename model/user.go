@@ -1417,12 +1417,9 @@ func ValidateAccessToken(token string) (*User, error) {
 	return user, nil
 }
 
-// GetUserQuota gets quota from Redis first, falls back to DB if needed
+// GetUserQuota always reads the committed balance. fromDB is retained for callers.
 func GetUserQuota(id int, fromDB bool) (quota int64, err error) {
-	if !fromDB && common.RedisEnabled {
-		return getUserQuotaCache(id)
-	}
-	err = DB.Model(&User{}).Where("id = ?", id).Select("quota").Find(&quota).Error
+	err = DB.Model(&User{}).Where("id = ?", id).Select("quota").Take(&quota).Error
 	if err != nil {
 		return 0, err
 	}
@@ -1506,32 +1503,11 @@ func GetUserSetting(id int, fromDB bool) (settingMap dto.UserSetting, err error)
 	return userBase.GetSetting(), nil
 }
 
-func IncreaseUserQuota(id int, quota int64, db bool) (err error) {
+func IncreaseUserQuota(id int, quota int64, db bool) error {
 	if quota < 0 {
 		return errors.New("quota 不能为负数")
 	}
 	if quota == 0 {
-		return nil
-	}
-	if db {
-		if err := increaseUserQuota(id, quota); err != nil {
-			return err
-		}
-		if err := cacheIncrUserQuota(id, quota); err != nil {
-			common.SysLog("failed to increase user quota cache: " + err.Error())
-			if invalidateErr := invalidateUserCache(id); invalidateErr != nil {
-				common.SysLog("failed to invalidate user cache after quota increase: " + invalidateErr.Error())
-			}
-		}
-		return nil
-	}
-	gopool.Go(func() {
-		if err := cacheIncrUserQuota(id, quota); err != nil {
-			common.SysLog("failed to increase user quota: " + err.Error())
-		}
-	})
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, quota)
 		return nil
 	}
 	return increaseUserQuota(id, quota)
@@ -1541,33 +1517,11 @@ func increaseUserQuota(id int, quota int64) error {
 	return updateUserQuotaWithDeltaTx(DB, id, quota, nil)
 }
 
-func DecreaseUserQuota(id int, quota int64, db bool) (err error) {
+func DecreaseUserQuota(id int, quota int64, db bool) error {
 	if quota < 0 {
 		return errors.New("quota 不能为负数")
 	}
 	if quota == 0 {
-		return nil
-	}
-	if db {
-		if err := decreaseUserQuota(id, quota); err != nil {
-			return err
-		}
-		if err := cacheDecrUserQuota(id, quota); err != nil {
-			common.SysLog("failed to decrease user quota cache: " + err.Error())
-			if invalidateErr := invalidateUserCache(id); invalidateErr != nil {
-				common.SysLog("failed to invalidate user cache after quota decrease: " + invalidateErr.Error())
-			}
-		}
-		return nil
-	}
-	gopool.Go(func() {
-		err := cacheDecrUserQuota(id, quota)
-		if err != nil {
-			common.SysLog("failed to decrease user quota: " + err.Error())
-		}
-	})
-	if !db && common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
 		return nil
 	}
 	return decreaseUserQuota(id, quota)
@@ -1636,20 +1590,11 @@ func UpdateUserLastLoginAt(id int) {
 }
 
 func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUsedQuota, id, int64(quota))
-		addNewRecord(BatchUpdateTypeRequestCount, id, 1)
-		return
-	}
 	updateUserUsedQuotaAndRequestCount(id, quota, 1)
 }
 
 // UpdateUserUsedQuota adjusts accumulated usage without changing request count.
 func UpdateUserUsedQuota(id int, quota int) {
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUsedQuota, id, int64(quota))
-		return
-	}
 	if err := updateUserQuotaFieldDeltaTx(DB, id, "used_quota", int64(quota)); err != nil {
 		common.SysLog("failed to update user used quota: " + err.Error())
 	}

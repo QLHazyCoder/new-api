@@ -166,6 +166,7 @@ func main() {
 	// switch are enforced inside the runner and each handler's Enabled().
 	controller.RegisterScheduledSystemTasks()
 	service.StartSystemTaskRunner()
+	service.StartBillingRecoveryWorker()
 
 	// Playground image jobs use the normal relay pipeline in the background,
 	// while the service package owns queue leases and result persistence.
@@ -173,8 +174,6 @@ func main() {
 	service.StartPlaygroundImageTaskRunner()
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
-		common.BatchUpdateEnabled = true
-		common.SysLog("batch update enabled with interval " + strconv.Itoa(common.BatchUpdateInterval) + "s")
 		model.InitBatchUpdater()
 	}
 

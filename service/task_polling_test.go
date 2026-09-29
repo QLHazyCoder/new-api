@@ -729,7 +729,7 @@ func TestRunTaskPollingOnceDoesNotRefundHistoricalFailedTask(t *testing.T) {
 	assert.EqualValues(t, int64(0), countLogs(t))
 }
 
-func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
+func TestSweepTimedOutTasksHoldsUnknownBillingForReview(t *testing.T) {
 	truncate(t)
 
 	const (
@@ -739,6 +739,7 @@ func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
 		modernTaskQuota = 1_200
 	)
 	seedUser(t, userID, initialQuota)
+	require.NoError(t, model.DecreaseUserQuota(userID, int64(legacyTaskQuota+modernTaskQuota), true))
 
 	legacyTask := makeTask(userID, 0, legacyTaskQuota, 0, BillingSourceWallet, 0)
 	legacyTask.TaskID = "legacy_timeout_without_refund"
@@ -751,6 +752,11 @@ func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
 	modernTask.Progress = "50%"
 	modernTask.SubmitTime = 1771718400 // 2026-02-22 00:00:00 UTC
 	require.NoError(t, model.DB.Create(modernTask).Error)
+	require.NoError(t, model.DB.Create(&model.BillingOperation{
+		RequestId: "timeout-modern-task", Phase: "initial", State: model.BillingSettled,
+		UserId: userID, FundingSource: BillingSourceWallet, WalletAmount: modernTaskQuota,
+		PreConsumed: modernTaskQuota, Actual: modernTaskQuota, TaskId: modernTask.ID,
+	}).Error)
 
 	previousTimeout := constant.TaskTimeoutMinutes
 	constant.TaskTimeoutMinutes = 1
@@ -765,11 +771,22 @@ func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
 	assert.EqualValues(t, model.TaskStatusFailure, reloadedLegacy.Status)
 	assert.EqualValues(t, model.TaskStatusFailure, reloadedModern.Status)
 	assert.Zero(t, reloadedLegacy.Quota)
-	assert.Zero(t, reloadedModern.Quota)
+	assert.Equal(t, modernTaskQuota, reloadedModern.Quota)
+	assert.True(t, reloadedModern.BillingReviewPending)
 	assert.Contains(t, reloadedLegacy.FailReason, "旧系统遗留任务")
 	assert.Contains(t, reloadedModern.FailReason, "任务超时")
-	assert.EqualValues(t, initialQuota+modernTaskQuota, getUserQuota(t, userID))
-	assert.EqualValues(t, int64(1), countLogs(t))
+	assert.EqualValues(t, initialQuota-legacyTaskQuota-modernTaskQuota, getUserQuota(t, userID))
+	assert.EqualValues(t, int64(0), countLogs(t))
+	pendingRefunds, err := model.ListConfirmedFailedTasksWithPendingRefund(10)
+	require.NoError(t, err)
+	assert.Empty(t, pendingRefunds)
+	reviewTasks, err := model.ListBillingReviewTasks(10)
+	require.NoError(t, err)
+	require.Len(t, reviewTasks, 1)
+	assert.Equal(t, modernTask.ID, reviewTasks[0].ID)
+	var reviewOperation model.BillingOperation
+	require.NoError(t, model.DB.Where("request_id = ? AND phase = ?", "timeout-modern-task", "initial").First(&reviewOperation).Error)
+	assert.Equal(t, model.BillingReviewRequired, reviewOperation.State)
 }
 
 type scriptedPollingAdaptor struct {
@@ -840,14 +857,15 @@ func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {
 		wantReason    string
 		wantState     string
 		wantUnchanged bool
+		wantReview    bool
 	}{
 		{
-			name:          "404 fails immediately and refunds",
+			name:          "404 is unknown and held for review",
 			statusCode:    http.StatusNotFound,
-			wantStatus:    model.TaskStatusFailure,
-			wantRefund:    true,
-			wantReason:    "upstream task not found (HTTP 404)",
-			wantUnchanged: false,
+			wantStatus:    model.TaskStatusInProgress,
+			wantFailures:  1,
+			wantReview:    true,
+			wantUnchanged: true,
 		},
 		{
 			name:          "401 increments without changing status",
@@ -857,14 +875,14 @@ func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {
 			wantUnchanged: true,
 		},
 		{
-			name:          "429 reaches threshold and refunds",
+			name:          "429 reaches threshold and holds for review",
 			statusCode:    http.StatusTooManyRequests,
 			priorFailures: 2,
 			maxFailures:   3,
-			wantStatus:    model.TaskStatusFailure,
+			wantStatus:    model.TaskStatusInProgress,
 			wantFailures:  3,
-			wantRefund:    true,
-			wantReason:    "poll failed: transient (HTTP 429)",
+			wantReview:    true,
+			wantUnchanged: true,
 		},
 		{
 			name:          "UNKNOWN increments",
@@ -919,6 +937,7 @@ func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {
 			seedUser(t, userID, initialQuota)
 			seedToken(t, tokenID, userID, "sk-poll-class", tokenRemain)
 			ch := &model.Channel{Id: channelID, Type: constant.ChannelTypeKling, Name: "poll", Key: "sk-test", Status: common.ChannelStatusEnabled}
+			require.NoError(t, model.DB.Create(ch).Error)
 
 			if testCase.maxFailures > 0 {
 				previous := constant.TaskPollMaxFailures
@@ -944,6 +963,7 @@ func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {
 			require.NoError(t, model.DB.First(&persisted, task.ID).Error)
 			assert.EqualValues(t, testCase.wantStatus, persisted.Status)
 			assert.Equal(t, testCase.wantFailures, persisted.PrivateData.PollFailures)
+			assert.Equal(t, testCase.wantReview, persisted.BillingReviewPending)
 			if testCase.wantUnchanged {
 				assert.Empty(t, persisted.FailReason)
 			}
@@ -977,13 +997,14 @@ func TestUpdateBatchTasksPollClassification(t *testing.T) {
 		wantFailures int
 		wantRefund   bool
 		wantReason   string
+		wantReview   bool
 	}{
 		{
-			name:       "404 fails the batch and refunds",
-			statusCode: http.StatusNotFound,
-			wantStatus: model.TaskStatusFailure,
-			wantRefund: true,
-			wantReason: "upstream task not found (HTTP 404)",
+			name:         "404 holds the batch for billing review",
+			statusCode:   http.StatusNotFound,
+			wantStatus:   model.TaskStatusInProgress,
+			wantFailures: 1,
+			wantReview:   true,
 		},
 		{
 			name:         "401 increments every task",
@@ -997,6 +1018,12 @@ func TestUpdateBatchTasksPollClassification(t *testing.T) {
 			resultStatus: model.TaskStatusUnknown,
 			wantStatus:   model.TaskStatusInProgress,
 			wantFailures: 1,
+		},
+		{
+			name:         "non-terminal reason does not trigger a refund",
+			statusCode:   http.StatusOK,
+			resultStatus: model.TaskStatusInProgress,
+			wantStatus:   model.TaskStatusInProgress,
 		},
 	}
 	for _, testCase := range testCases {
@@ -1029,6 +1056,7 @@ func TestUpdateBatchTasksPollClassification(t *testing.T) {
 			require.NoError(t, model.DB.First(&persisted, task.ID).Error)
 			assert.EqualValues(t, testCase.wantStatus, persisted.Status)
 			assert.Equal(t, testCase.wantFailures, persisted.PrivateData.PollFailures)
+			assert.Equal(t, testCase.wantReview, persisted.BillingReviewPending)
 			if testCase.wantReason != "" {
 				assert.Contains(t, persisted.FailReason, testCase.wantReason)
 			}
@@ -1040,4 +1068,63 @@ func TestUpdateBatchTasksPollClassification(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpdateBatchTasksChannelLookupFailureRetainsQuotaForReview(t *testing.T) {
+	truncate(t)
+	previousMemoryCache := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCache })
+
+	const userID, tokenID, missingChannelID = 630, 630, 630
+	const initialQuota, reservedQuota, tokenRemain = 10_000, 4_000, 7_000
+	seedUser(t, userID, initialQuota)
+	seedToken(t, tokenID, userID, "sk-poll-missing-channel", tokenRemain)
+	task := makeTask(userID, missingChannelID, reservedQuota, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_missing_channel"
+	task.PrivateData.UpstreamTaskID = "upstream_missing_channel"
+	require.NoError(t, model.DB.Create(task).Error)
+
+	adaptor := &scriptedBatchPollingAdaptor{}
+	err := updateBatchTasks(context.Background(), adaptor, missingChannelID,
+		[]string{task.GetUpstreamTaskID()}, map[string]*model.Task{task.GetUpstreamTaskID(): task})
+	require.Error(t, err)
+
+	var persisted model.Task
+	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+	assert.EqualValues(t, model.TaskStatusInProgress, persisted.Status)
+	assert.Equal(t, reservedQuota, persisted.Quota)
+	assert.True(t, persisted.BillingReviewPending)
+	assert.EqualValues(t, initialQuota, getUserQuota(t, userID))
+	assert.EqualValues(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	assert.Empty(t, model.GetAllUnFinishSyncTasks(10), "review-pending tasks must leave automatic polling")
+}
+
+func TestRunTaskPollingOnceMissingUpstreamIDHoldsQuotaForReview(t *testing.T) {
+	truncate(t)
+	previousTimeout := constant.TaskTimeoutMinutes
+	constant.TaskTimeoutMinutes = 0
+	t.Cleanup(func() { constant.TaskTimeoutMinutes = previousTimeout })
+	previousQueryLimit := constant.TaskQueryLimit
+	constant.TaskQueryLimit = 10
+	t.Cleanup(func() { constant.TaskQueryLimit = previousQueryLimit })
+	previousFactory := GetTaskAdaptorFunc
+	GetTaskAdaptorFunc = func(constant.TaskPlatform) TaskPollingAdaptor { return &scriptedPollingAdaptor{} }
+	t.Cleanup(func() { GetTaskAdaptorFunc = previousFactory })
+
+	const userID, tokenID, channelID = 631, 631, 631
+	seedUser(t, userID, 10_000)
+	seedToken(t, tokenID, userID, "sk-poll-no-upstream-id", 7_000)
+	task := makeTask(userID, channelID, 4_000, tokenID, BillingSourceWallet, 0)
+	task.TaskID = ""
+	require.NoError(t, model.DB.Create(task).Error)
+
+	summary := RunTaskPollingOnce(context.Background(), nil)
+	require.Equal(t, 1, summary.NullTasksPendingReview)
+	var persisted model.Task
+	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+	assert.EqualValues(t, model.TaskStatusInProgress, persisted.Status)
+	assert.Equal(t, 4_000, persisted.Quota)
+	assert.True(t, persisted.BillingReviewPending)
+	assert.Empty(t, model.GetAllUnFinishSyncTasks(10))
 }

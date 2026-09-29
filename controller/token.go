@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -258,26 +259,8 @@ func GetTokenStatus(c *gin.Context) {
 }
 
 func GetTokenUsage(c *gin.Context) {
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "No Authorization header",
-		})
-		return
-	}
-
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "Invalid Bearer token",
-		})
-		return
-	}
-	tokenKey := parts[1]
-
-	token, err := model.GetTokenByKey(strings.TrimPrefix(tokenKey, "sk-"), false)
+	// TokenAuthReadOnly already validated the credential, including group suffix.
+	token, err := model.GetTokenByIds(c.GetInt("token_id"), c.GetInt("id"))
 	if err != nil {
 		common.SysError("failed to get token by key: " + err.Error())
 		common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
@@ -288,6 +271,7 @@ func GetTokenUsage(c *gin.Context) {
 	if expiredAt == -1 {
 		expiredAt = 0
 	}
+	totalGranted := new(big.Int).Add(big.NewInt(token.RemainQuota), big.NewInt(token.UsedQuota)).String()
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    true,
@@ -295,9 +279,12 @@ func GetTokenUsage(c *gin.Context) {
 		"data": gin.H{
 			"object":               "token_usage",
 			"name":                 token.Name,
-			"total_granted":        token.RemainQuota + token.UsedQuota,
+			"total_granted":        json.Number(totalGranted),
+			"total_granted_raw":    totalGranted,
 			"total_used":           token.UsedQuota,
+			"total_used_raw":       strconv.FormatInt(token.UsedQuota, 10),
 			"total_available":      token.RemainQuota,
+			"total_available_raw":  strconv.FormatInt(token.RemainQuota, 10),
 			"unlimited_quota":      token.UnlimitedQuota,
 			"model_limits":         token.GetModelLimitsMap(),
 			"model_limits_enabled": token.ModelLimitsEnabled,

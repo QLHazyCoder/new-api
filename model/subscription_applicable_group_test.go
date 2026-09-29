@@ -1,11 +1,32 @@
 package model
 
 import (
+	"math"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSubscriptionConsumptionRejectsInt64OverflowAndClampsRefund(t *testing.T) {
+	truncateTables(t)
+	seedSubscriptionPlanForApplicableGroupTest(t, 990, "")
+	seedUserSubscriptionWithUsedForApplicableGroupTest(t, 990, 990, 990, "", 0, math.MaxInt64-1)
+
+	_, err := PreConsumeUserSubscription("sub-overflow", 990, "model", 0, 2, "default")
+	require.ErrorIs(t, err, common.ErrWalletQuotaOverflow)
+	require.Equal(t, int64(math.MaxInt64-1), getUserSubscriptionAmountUsedForApplicableGroupTest(t, 990))
+
+	_, err = PreConsumeUserSubscriptionPartial("sub-partial-overflow", 990, "model", 0, 2, "default")
+	require.ErrorIs(t, err, common.ErrWalletQuotaOverflow)
+	require.Equal(t, int64(math.MaxInt64-1), getUserSubscriptionAmountUsedForApplicableGroupTest(t, 990))
+
+	require.ErrorIs(t, PostConsumeUserSubscriptionDelta(990, 2), common.ErrWalletQuotaOverflow)
+	require.Equal(t, int64(math.MaxInt64-1), getUserSubscriptionAmountUsedForApplicableGroupTest(t, 990))
+	require.NoError(t, PostConsumeUserSubscriptionDelta(990, math.MinInt64))
+	require.Zero(t, getUserSubscriptionAmountUsedForApplicableGroupTest(t, 990))
+}
 
 func seedSubscriptionPlanForApplicableGroupTest(t *testing.T, id int, applicableGroup string) {
 	t.Helper()

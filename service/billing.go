@@ -1,10 +1,12 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
@@ -93,11 +95,42 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	}
 
 	// 回退：无 BillingSession 时使用旧路径
-	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
-	if quotaDelta != 0 {
-		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
+	preConsumed := relayInfo.FinalPreConsumedQuota + relayInfo.RealtimePreChargedQuota
+	quotaDelta := actualQuota - preConsumed
+	if quotaDelta != 0 || actualQuota != 0 || relayInfo.BillableUsageObserved {
+		return PostConsumeQuota(relayInfo, quotaDelta, preConsumed, true)
 	}
 	return nil
+}
+
+// SettleTaskBilling commits a known task result together with the task's final
+// state. Billing sessions persist a recovery intent before the atomic commit.
+func SettleTaskBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, task *model.Task, actualQuota int, fromStatus model.TaskStatus) error {
+	if relayInfo == nil || task == nil {
+		return fmt.Errorf("task billing settlement requires relay info and task")
+	}
+	if relayInfo.Billing != nil {
+		if settler, ok := relayInfo.Billing.(interface {
+			SettleTask(int, *model.Task, model.TaskStatus) error
+		}); ok {
+			return settler.SettleTask(actualQuota, task, fromStatus)
+		}
+	}
+	return SettleBilling(ctx, relayInfo, actualQuota)
+}
+
+func InsertTaskForBilling(ctx context.Context, relayInfo *relaycommon.RelayInfo, task *model.Task, omitColumns ...string) error {
+	if task == nil {
+		return fmt.Errorf("task is required")
+	}
+	if relayInfo != nil && relayInfo.Billing != nil {
+		if _, ok := relayInfo.Billing.(interface {
+			SettleTask(int, *model.Task, model.TaskStatus) error
+		}); ok {
+			return model.InsertTaskWithBillingIntent(ctx, relayInfo.RequestId, task, task.Quota, omitColumns...)
+		}
+	}
+	return task.InsertWithContext(ctx, omitColumns...)
 }
 
 func relayBillingAllocationQuota(allocations []relaycommon.BillingAllocation, source string) int {

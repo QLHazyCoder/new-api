@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -111,7 +110,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		return err
 	}
 
-	token, err := model.GetTokenByKey(strings.TrimPrefix(relayInfo.TokenKey, "sk-"), false)
+	token, err := model.GetTokenById(relayInfo.TokenId)
 	if err != nil {
 		return err
 	}
@@ -154,6 +153,9 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 
 	quota, clamp := calculateAudioQuota(quotaInfo)
 	noteQuotaClamp(relayInfo, clamp)
+	if quota > math.MaxInt32-relayInfo.RealtimePreChargedQuota {
+		return errors.New("realtime request charge exceeds int32 quota boundary")
+	}
 
 	if userQuota < int64(quota) {
 		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota64(userQuota), logger.FormatQuota(quota))
@@ -163,10 +165,11 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota64(token.RemainQuota), logger.FormatQuota(quota))
 	}
 
-	err = PostConsumeQuota(relayInfo, quota, 0, false)
+	err = PostConsumeQuota(relayInfo, quota, 0, false, true)
 	if err != nil {
 		return err
 	}
+	relayInfo.RealtimePreChargedQuota += quota
 	logger.LogInfo(ctx, "realtime streaming consume quota success, quota: "+fmt.Sprintf("%d", quota))
 	return nil
 }
@@ -240,8 +243,7 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
 	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
-		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
+		relayInfo.BillableUsageObserved = true
 	}
 
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
@@ -373,8 +375,7 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 		logger.LogError(ctx, fmt.Sprintf("total tokens is 0, cannot consume quota, userId %d, channelId %d, "+
 			"tokenId %d, model %s， pre-consumed quota %d", relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, billingModelName, relayInfo.FinalPreConsumedQuota))
 	} else {
-		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
-		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
+		relayInfo.BillableUsageObserved = true
 	}
 
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
@@ -435,49 +436,56 @@ type postConsumeQuotaResult struct {
 	TokenApplied   bool
 }
 
-func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) error {
-	_, err := postConsumeQuotaWithResult(relayInfo, quota, preConsumedQuota, sendEmail)
+func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool, requireAvailable ...bool) error {
+	_, err := postConsumeQuotaWithResult(relayInfo, quota, preConsumedQuota, sendEmail, requireAvailable...)
 	return err
 }
 
-func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (result postConsumeQuotaResult, err error) {
-
-	// 1) Consume from wallet quota OR subscription item
-	if relayInfo != nil && relayInfo.BillingSource == BillingSourceSubscription {
-		if relayInfo.SubscriptionId == 0 {
+func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool, requireAvailable ...bool) (result postConsumeQuotaResult, err error) {
+	if relayInfo == nil {
+		return result, errors.New("relay info is missing")
+	}
+	if relayInfo.RequestId == "" {
+		relayInfo.RequestId = common.NewRequestId()
+	}
+	phase := "legacy-consume"
+	if sendEmail && preConsumedQuota > 0 {
+		phase = "legacy-settle"
+	} else if sendEmail {
+		phase = "legacy-charge"
+	} else {
+		phase = fmt.Sprintf("legacy-consume:%d", relayInfo.LegacyBillingSequence)
+	}
+	subscriptionId, tokenId := 0, relayInfo.TokenId
+	if relayInfo.BillingSource == BillingSourceSubscription {
+		subscriptionId = relayInfo.SubscriptionId
+		if subscriptionId <= 0 {
 			return result, errors.New("subscription id is missing")
 		}
-		delta := int64(quota)
-		if delta != 0 {
-			if err := model.PostConsumeUserSubscriptionDelta(relayInfo.SubscriptionId, delta); err != nil {
-				return result, err
-			}
-			relayInfo.SubscriptionPostDelta += delta
-		}
-	} else {
-		// Wallet
-		if quota > 0 {
-			err = model.DecreaseUserQuota(relayInfo.UserId, int64(quota), false)
-		} else {
-			err = model.IncreaseUserQuota(relayInfo.UserId, int64(-quota), false)
-		}
-		if err != nil {
-			return result, err
-		}
 	}
-	result.FundingApplied = true
-
-	if !relayInfo.IsPlayground {
-		if quota > 0 {
-			err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
-		} else {
-			err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, -quota)
-		}
-		if err != nil {
-			return result, err
-		}
-		result.TokenApplied = true
+	if relayInfo.IsPlayground {
+		tokenId = 0
 	}
+	available := len(requireAvailable) > 0 && requireAvailable[0]
+	usage := int64(0)
+	if sendEmail {
+		usage = int64(quota) + int64(preConsumedQuota)
+	}
+	channelID := 0
+	if relayInfo.ChannelMeta != nil {
+		channelID = relayInfo.ChannelId
+	}
+	countRequest := sendEmail && (usage > 0 || relayInfo.BillableUsageObserved)
+	if err := model.ApplyLegacyBillingDelta(relayInfo.RequestId, phase, relayInfo.UserId, channelID, tokenId, subscriptionId, int64(quota), usage, available, countRequest); err != nil {
+		return result, err
+	}
+	if !sendEmail {
+		relayInfo.LegacyBillingSequence++
+	}
+	if subscriptionId > 0 {
+		relayInfo.SubscriptionPostDelta += int64(quota)
+	}
+	result.FundingApplied, result.TokenApplied = true, tokenId > 0
 
 	if sendEmail {
 		if (quota + preConsumedQuota) != 0 {

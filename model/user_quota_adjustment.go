@@ -14,7 +14,7 @@ var (
 )
 
 // UserQuotaAdjustment is the immutable database snapshot of a committed manual
-// adjustment. Pending relay deductions in the quota cache are not part of it.
+// adjustment. Wallet quota is read from the primary database.
 type UserQuotaAdjustment struct {
 	UserID   int
 	Username string
@@ -71,20 +71,8 @@ func AdjustUserQuota(userID, operatorRole int, mode string, value int64) (*UserQ
 		return nil, err
 	}
 
-	// Apply only the committed difference, preserving outstanding reservations.
-	// Both balances are bounded above, so their difference fits in int64.
-	delta, deltaErr := common.SubWalletQuota(adjustment.After, adjustment.Before)
-	if deltaErr != nil {
-		if err := invalidateUserCache(userID); err != nil {
-			common.SysError(fmt.Sprintf("failed to invalidate user cache after manual quota adjustment for user %d: %s", userID, err))
-		}
-	} else if delta != 0 {
-		if err := cacheIncrUserQuota(userID, delta); err != nil {
-			common.SysError(fmt.Sprintf("failed to sync manual quota adjustment for user %d: %s", userID, err))
-			if invalidateErr := invalidateUserCache(userID); invalidateErr != nil {
-				common.SysError(fmt.Sprintf("failed to invalidate user cache after manual quota adjustment for user %d: %s", userID, invalidateErr))
-			}
-		}
+	if err := invalidateUserCache(userID); err != nil {
+		common.SysError(fmt.Sprintf("failed to invalidate user cache after manual quota adjustment for user %d: %s", userID, err))
 	}
 	return &adjustment, nil
 }

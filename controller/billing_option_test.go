@@ -204,7 +204,7 @@ func TestPreConsumePolicyDatabaseMatrix(t *testing.T) {
 				t.Skip("set " + dialect.env + " to run this database")
 			}
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
-			require.NoError(t, db.AutoMigrate(&model.Token{}))
+			require.NoError(t, db.AutoMigrate(&model.Token{}, &model.BillingOperation{}))
 			for key, value := range map[string]string{
 				"quota_setting.trust_quota_usd":        "10.5",
 				"quota_setting.pre_consume_multiplier": "1.5",

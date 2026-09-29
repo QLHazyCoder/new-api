@@ -47,11 +47,8 @@ func invalidateTokenCacheForMutation(key string) error {
 	return common.RDB.Del(ctx, getTokenCacheKey(key)).Err()
 }
 
-// cacheInitToken publishes a database snapshot only when no mutation fence is
-// active and the hash is cold. An existing hash only gets its TTL refreshed:
-// its RemainQuota may already be ahead of this snapshot because atomic
-// pre-consume decrements Redis first, so a snapshot must never overwrite any
-// field of a live hash.
+// cacheInitToken publishes only token identity and policy metadata. Quota
+// fields from old cache schemas are removed on both hit and cold fill.
 // 返回值：0=被 fence 拦截，1=完成初始化，2=哈希已存在，仅刷新 TTL。
 func cacheInitToken(token Token) (int, error) {
 	if !common.RedisEnabled {
@@ -66,7 +63,8 @@ if redis.call('EXISTS', KEYS[2]) == 1 then
   return 0
 end
 if redis.call('EXISTS', KEYS[1]) == 1 then
-  redis.call('EXPIRE', KEYS[1], ARGV[17])
+  redis.call('HDEL', KEYS[1], 'RemainQuota', 'UsedQuota')
+  redis.call('EXPIRE', KEYS[1], ARGV[15])
   return 2
 end
 redis.call('HSET', KEYS[1],
@@ -74,8 +72,8 @@ redis.call('HSET', KEYS[1],
   'CreatedTime', ARGV[5], 'AccessedTime', ARGV[6], 'ExpiredTime', ARGV[7],
   'UnlimitedQuota', ARGV[8], 'ModelLimitsEnabled', ARGV[9], 'ModelLimits', ARGV[10],
   'AllowIps', ARGV[11], 'Group', ARGV[12], 'CrossGroupRetry', ARGV[13],
-  'AutoGroups', ARGV[14], 'RemainQuota', ARGV[15], 'UsedQuota', ARGV[16])
-redis.call('EXPIRE', KEYS[1], ARGV[17])
+  'AutoGroups', ARGV[14])
+redis.call('EXPIRE', KEYS[1], ARGV[15])
 return 1`
 
 	return common.RDB.Eval(context.Background(), script, []string{
@@ -85,7 +83,7 @@ return 1`
 		token.CreatedTime, token.AccessedTime, token.ExpiredTime,
 		strconv.FormatBool(token.UnlimitedQuota), strconv.FormatBool(token.ModelLimitsEnabled),
 		token.ModelLimits, allowIps, token.Group, strconv.FormatBool(token.CrossGroupRetry),
-		token.AutoGroups, token.RemainQuota, token.UsedQuota,
+		token.AutoGroups,
 		tokenCacheTTLSeconds(),
 	).Int()
 }

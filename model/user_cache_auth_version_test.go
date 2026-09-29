@@ -67,7 +67,7 @@ func TestAdministrativeQuotaMutationsKeepDatabaseAndCacheConsistent(t *testing.T
 	assert.EqualValues(t, common.MaxWalletQuota, mustUserQuota(t, user.Id))
 }
 
-func TestManualQuotaAdjustmentInvalidatesCacheWhenDeltaSyncFails(t *testing.T) {
+func TestManualQuotaAdjustmentInvalidatesStaleCache(t *testing.T) {
 	truncateTables(t)
 	server := useUserCacheMiniRedis(t)
 	user := User{
@@ -77,7 +77,7 @@ func TestManualQuotaAdjustmentInvalidatesCacheWhenDeltaSyncFails(t *testing.T) {
 	require.NoError(t, DB.Create(&user).Error)
 	require.NoError(t, populateUserCache(user))
 
-	// Make the Lua HINCRBY fail while keeping Redis available for DEL.
+	// A malformed legacy quota field must not affect the database transaction.
 	server.HSet(getUserCacheKey(user.Id), "Quota", "not-an-integer")
 	adjustment, err := AdjustUserQuota(user.Id, common.RoleRootUser, "add", 25)
 	require.NoError(t, err)

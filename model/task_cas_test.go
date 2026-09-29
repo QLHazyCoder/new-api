@@ -56,6 +56,7 @@ func TestMain(m *testing.M) {
 		&SubscriptionOrder{},
 		&UserSubscription{},
 		&SubscriptionPreConsumeRecord{},
+		&BillingOperation{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
 		&SystemInstance{},
@@ -94,6 +95,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM user_subscriptions")
 		DB.Exec("DELETE FROM subscription_pre_consume_records")
+		DB.Exec("DELETE FROM billing_operations")
 		DB.Exec("DELETE FROM perf_metrics")
 		DB.Exec("DELETE FROM system_instances")
 		DB.Exec("DELETE FROM system_task_locks")
@@ -143,6 +145,34 @@ func TestGetTaskForProtocolObservationScopesOwnerAndPlatform(t *testing.T) {
 	cancel()
 	_, _, err = GetTaskForProtocolObservation(cancelled, 7, "plugin-a", task.TaskID)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestBillingPendingTaskIsHiddenFromTaskReadPaths(t *testing.T) {
+	truncateTables(t)
+	visible := &Task{TaskID: "task-visible", UserId: 7, Platform: "plugin-a", Status: TaskStatusNotStart}
+	pending := &Task{TaskID: "task-billing-pending", UserId: 7, Platform: "plugin-a", Status: TaskStatusBillingPending}
+	insertTask(t, visible)
+	insertTask(t, pending)
+
+	userTasks := TaskGetAllUserTask(7, 0, 10, SyncTaskQueryParams{})
+	require.Len(t, userTasks, 1)
+	assert.Equal(t, visible.TaskID, userTasks[0].TaskID)
+	adminTasks := TaskGetAllTasks(0, 10, SyncTaskQueryParams{})
+	require.Len(t, adminTasks, 1)
+	assert.Equal(t, visible.TaskID, adminTasks[0].TaskID)
+
+	_, exists, err := GetByTaskId(7, pending.TaskID)
+	require.NoError(t, err)
+	assert.False(t, exists)
+	_, exists, err = GetUniqueByOnlyTaskId(pending.TaskID)
+	require.NoError(t, err)
+	assert.False(t, exists)
+	_, exists, err = GetTaskForProtocolObservation(context.Background(), 7, "plugin-a", pending.TaskID)
+	require.NoError(t, err)
+	assert.False(t, exists)
+	byIDs, err := GetByTaskIdsForPlatforms(7, []constant.TaskPlatform{"plugin-a"}, []string{pending.TaskID})
+	require.NoError(t, err)
+	assert.Empty(t, byIDs)
 }
 
 // ---------------------------------------------------------------------------

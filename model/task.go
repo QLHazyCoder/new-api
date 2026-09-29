@@ -19,7 +19,7 @@ type TaskStatus string
 func (t TaskStatus) ToVideoStatus() string {
 	var status string
 	switch t {
-	case TaskStatusNotStart, TaskStatusQueued, TaskStatusSubmitted:
+	case TaskStatusBillingPending, TaskStatusNotStart, TaskStatusQueued, TaskStatusSubmitted:
 		status = dto.VideoStatusQueued
 	case TaskStatusInProgress:
 		status = dto.VideoStatusInProgress
@@ -34,13 +34,14 @@ func (t TaskStatus) ToVideoStatus() string {
 }
 
 const (
-	TaskStatusNotStart   TaskStatus = "NOT_START"
-	TaskStatusSubmitted             = "SUBMITTED"
-	TaskStatusQueued                = "QUEUED"
-	TaskStatusInProgress            = "IN_PROGRESS"
-	TaskStatusFailure               = "FAILURE"
-	TaskStatusSuccess               = "SUCCESS"
-	TaskStatusUnknown               = "UNKNOWN"
+	TaskStatusBillingPending TaskStatus = "BILLING_PENDING"
+	TaskStatusNotStart       TaskStatus = "NOT_START"
+	TaskStatusSubmitted                 = "SUBMITTED"
+	TaskStatusQueued                    = "QUEUED"
+	TaskStatusInProgress                = "IN_PROGRESS"
+	TaskStatusFailure                   = "FAILURE"
+	TaskStatusSuccess                   = "SUCCESS"
+	TaskStatusUnknown                   = "UNKNOWN"
 )
 
 // TaskRefundLegacyCutoff separates tasks created before timeout refunds were
@@ -48,24 +49,25 @@ const (
 const TaskRefundLegacyCutoff int64 = 1771718400 // 2026-02-22 00:00:00 UTC
 
 type Task struct {
-	ID         int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
-	CreatedAt  int64                 `json:"created_at" gorm:"index"`
-	UpdatedAt  int64                 `json:"updated_at"`
-	TaskID     string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
-	Platform   constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
-	UserId     int                   `json:"user_id" gorm:"index"`
-	Group      string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
-	ChannelId  int                   `json:"channel_id" gorm:"index"`
-	Quota      int                   `json:"quota"`
-	Action     string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
-	Status     TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
-	FailReason string                `json:"fail_reason"`
-	SubmitTime int64                 `json:"submit_time" gorm:"index"`
-	StartTime  int64                 `json:"start_time" gorm:"index"`
-	FinishTime int64                 `json:"finish_time" gorm:"index"`
-	Progress   string                `json:"progress" gorm:"type:varchar(20);index"`
-	Properties Properties            `json:"properties" gorm:"type:json"`
-	Username   string                `json:"username,omitempty" gorm:"-"`
+	ID                   int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
+	CreatedAt            int64                 `json:"created_at" gorm:"index"`
+	UpdatedAt            int64                 `json:"updated_at"`
+	TaskID               string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
+	Platform             constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
+	UserId               int                   `json:"user_id" gorm:"index"`
+	Group                string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
+	ChannelId            int                   `json:"channel_id" gorm:"index"`
+	Quota                int                   `json:"quota"`
+	BillingReviewPending bool                  `json:"-" gorm:"not null;default:false"`
+	Action               string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
+	Status               TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
+	FailReason           string                `json:"fail_reason"`
+	SubmitTime           int64                 `json:"submit_time" gorm:"index"`
+	StartTime            int64                 `json:"start_time" gorm:"index"`
+	FinishTime           int64                 `json:"finish_time" gorm:"index"`
+	Progress             string                `json:"progress" gorm:"type:varchar(20);index"`
+	Properties           Properties            `json:"properties" gorm:"type:json"`
+	Username             string                `json:"username,omitempty" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
@@ -323,7 +325,7 @@ func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQ
 	var err error
 
 	// 初始化查询构建器
-	query := DB.Where("user_id = ?", userId)
+	query := DB.Where("user_id = ? AND status != ?", userId, TaskStatusBillingPending)
 
 	if queryParams.TaskID != "" {
 		query = query.Where("task_id = ?", queryParams.TaskID)
@@ -361,7 +363,7 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	var err error
 
 	// 初始化查询构建器
-	query := DB
+	query := DB.Where("status != ?", TaskStatusBillingPending)
 
 	// 添加过滤条件
 	if queryParams.ChannelID != "" {
@@ -405,6 +407,8 @@ func GetTimedOutUnfinishedTasks(cutoffUnix int64, limit int) []*Task {
 	var tasks []*Task
 	err := DB.Where("progress != ?", "100%").
 		Where("status NOT IN ?", []string{TaskStatusFailure, TaskStatusSuccess}).
+		Where("status != ?", TaskStatusBillingPending).
+		Where("billing_review_pending = ?", false).
 		Where("submit_time < ?", cutoffUnix).
 		Order("submit_time").
 		Limit(limit).
@@ -419,7 +423,9 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 	var tasks []*Task
 	var err error
 	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
+	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).
+		Where("status != ?", TaskStatusBillingPending).Where("billing_review_pending = ?", false).
+		Limit(limit).Order("id").Find(&tasks).Error
 	if err != nil {
 		return nil
 	}
@@ -436,6 +442,8 @@ func HasUnfinishedSyncTasks() bool {
 		Where("progress != ?", "100%").
 		Where("status != ?", TaskStatusFailure).
 		Where("status != ?", TaskStatusSuccess).
+		Where("status != ?", TaskStatusBillingPending).
+		Where("billing_review_pending = ?", false).
 		Limit(1).
 		Pluck("id", &id).Error
 	return err == nil && id != 0
@@ -447,7 +455,7 @@ func GetByOnlyTaskId(taskId string) (*Task, bool, error) {
 	}
 	var task *Task
 	var err error
-	err = DB.Where("task_id = ?", taskId).First(&task).Error
+	err = DB.Where("task_id = ? AND status != ?", taskId, TaskStatusBillingPending).First(&task).Error
 	exist, err := RecordExist(err)
 	if err != nil {
 		return nil, false, err
@@ -464,7 +472,7 @@ func GetUniqueByOnlyTaskId(taskId string) (*Task, bool, error) {
 		return nil, false, nil
 	}
 	var tasks []*Task
-	if err := DB.Where("task_id = ?", taskId).Order("id").Limit(2).Find(&tasks).Error; err != nil {
+	if err := DB.Where("task_id = ? AND status != ?", taskId, TaskStatusBillingPending).Order("id").Limit(2).Find(&tasks).Error; err != nil {
 		return nil, false, err
 	}
 	if len(tasks) != 1 {
@@ -479,7 +487,7 @@ func GetByTaskId(userId int, taskId string) (*Task, bool, error) {
 	}
 	var task *Task
 	var err error
-	err = DB.Where("user_id = ? and task_id = ?", userId, taskId).
+	err = DB.Where("user_id = ? and task_id = ? AND status != ?", userId, taskId, TaskStatusBillingPending).
 		First(&task).Error
 	exist, err := RecordExist(err)
 	if err != nil {
@@ -494,7 +502,7 @@ func GetByTaskIdsForPlatforms(userID int, platforms []constant.TaskPlatform, tas
 	}
 	var tasks []*Task
 	err := DB.
-		Where("user_id = ? AND platform IN ? AND task_id IN ?", userID, platforms, taskIDs).
+		Where("user_id = ? AND platform IN ? AND task_id IN ? AND status != ?", userID, platforms, taskIDs, TaskStatusBillingPending).
 		Find(&tasks).Error
 	if err != nil {
 		return nil, err
@@ -511,7 +519,7 @@ func GetTaskForProtocolObservation(ctx context.Context, userID int, platform con
 	}
 	var task Task
 	err := DB.WithContext(ctx).
-		Where("user_id = ? AND platform = ? AND task_id = ?", userID, platform, taskID).
+		Where("user_id = ? AND platform = ? AND task_id = ? AND status != ?", userID, platform, taskID, TaskStatusBillingPending).
 		First(&task).Error
 	exists, err := RecordExist(err)
 	if err != nil || !exists {

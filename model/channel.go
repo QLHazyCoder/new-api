@@ -904,19 +904,23 @@ func EditChannelByTag(tag string, newTag *string, modelMapping *string, models *
 }
 
 func UpdateChannelUsedQuota(id int, quota int) {
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeChannelUsedQuota, id, int64(quota))
-		return
-	}
 	updateChannelUsedQuota(id, int64(quota))
 }
 
 func updateChannelUsedQuota(id int, delta int64) {
-	if delta == common.MinWalletQuota {
-		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, delta, common.ErrWalletQuotaOverflow))
-		return
+	if err := updateChannelUsedQuotaTx(DB, id, delta); err != nil {
+		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, delta, err))
 	}
-	query := DB.Model(&Channel{}).Where("id = ?", id)
+}
+
+func updateChannelUsedQuotaTx(tx *gorm.DB, id int, delta int64) error {
+	if delta == common.MinWalletQuota {
+		return common.ErrWalletQuotaOverflow
+	}
+	if delta == 0 {
+		return nil
+	}
+	query := tx.Model(&Channel{}).Where("id = ?", id)
 	if delta > 0 {
 		query = query.Where("used_quota <= ?", common.MaxWalletQuota-delta)
 	} else if delta < 0 {
@@ -926,7 +930,7 @@ func updateChannelUsedQuota(id int, delta int64) {
 	err := result.Error
 	if err == nil && result.RowsAffected == 0 {
 		var count int64
-		if countErr := DB.Model(&Channel{}).Where("id = ?", id).Count(&count).Error; countErr != nil {
+		if countErr := tx.Model(&Channel{}).Where("id = ?", id).Count(&count).Error; countErr != nil {
 			err = countErr
 		} else if count == 0 {
 			err = gorm.ErrRecordNotFound
@@ -934,9 +938,7 @@ func updateChannelUsedQuota(id int, delta int64) {
 			err = common.ErrWalletQuotaOverflow
 		}
 	}
-	if err != nil {
-		common.SysLog(fmt.Sprintf("failed to update channel used quota: channel_id=%d, delta_quota=%d, error=%v", id, delta, err))
-	}
+	return err
 }
 
 func DeleteChannelByStatus(status int64) (int64, error) {

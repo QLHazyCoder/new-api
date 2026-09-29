@@ -160,6 +160,10 @@ type RelayInfo struct {
 	SubscriptionPlanTitle string
 	// RequestId is used for idempotent pre-consume/refund
 	RequestId string
+	// LegacyBillingSequence separates repeated realtime debit events under one request.
+	LegacyBillingSequence   int
+	RealtimePreChargedQuota int
+	BillableUsageObserved   bool
 	// SubscriptionAmountTotal / SubscriptionAmountUsedAfterPreConsume are used to compute remaining in logs.
 	SubscriptionAmountTotal               int64
 	SubscriptionAmountUsedAfterPreConsume int64

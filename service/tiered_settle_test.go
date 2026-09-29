@@ -15,6 +15,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // Claude Sonnet-style tiered expression: standard vs long-context
@@ -470,6 +471,7 @@ func TestPrepareTieredBillingForSelectedGroupTopUpArrearsAllowsNegativeBalance(t
 		funding:          &WalletFunding{userId: userID, consumed: 50_000},
 		preConsumedQuota: 50_000,
 	}
+	seedPreConsumedBillingOperation(t, session)
 	relayInfo.Billing = session
 
 	require.Nil(t, PrepareTieredBillingForSelectedGroup(nil, relayInfo))
@@ -505,6 +507,7 @@ func TestBillingSessionReserveWalletTopUpDecrementsBalance(t *testing.T) {
 		funding:          &WalletFunding{userId: userID, consumed: 50_000},
 		preConsumedQuota: 50_000,
 	}
+	seedPreConsumedBillingOperation(t, session)
 
 	require.NoError(t, session.Reserve(100_000))
 
@@ -513,6 +516,15 @@ func TestBillingSessionReserveWalletTopUpDecrementsBalance(t *testing.T) {
 	userQuota, err := model.GetUserQuota(userID, false)
 	require.NoError(t, err)
 	assert.EqualValues(t, 450_000, userQuota)
+}
+
+func seedPreConsumedBillingOperation(t *testing.T, session *BillingSession) {
+	t.Helper()
+	session.relayInfo.RequestId = common.NewRequestId()
+	op := &model.BillingOperation{RequestId: session.relayInfo.RequestId,
+		UserId: session.relayInfo.UserId, FundingSource: BillingSourceWallet,
+		WalletAmount: int64(session.preConsumedQuota), PreConsumed: int64(session.preConsumedQuota)}
+	require.NoError(t, model.CreateBillingReservation(op, func(*gorm.DB) error { return nil }))
 }
 
 func TestTryTieredSettleUsesFinalGroupAfterRetry(t *testing.T) {
