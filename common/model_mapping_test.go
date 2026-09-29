@@ -32,3 +32,9 @@ func TestImageCapabilityUsesMappedUpstreamModel(t *testing.T) {
 	assert.True(t, IsChannelImageGenerationModel(constant.ChannelTypeGemini, "public-gemini-image", mapping))
 	assert.False(t, IsChannelImageGenerationModel(constant.ChannelTypeGemini, "public-gemini-image"))
 }
+
+func TestImageCapabilityExclusionIsNotOverriddenByLegacyNameList(t *testing.T) {
+	assert.False(t, IsChannelImageGenerationModel(constant.ChannelTypeGemini, "gpt-image-2"))
+	assert.False(t, IsChannelImageGenerationModel(constant.ChannelTypeXai, "gemini-3.1-flash-image"))
+	assert.False(t, IsChannelImageGenerationModel(constant.ChannelTypeGemini, "public-image", `{"public-image":"gpt-image-2"}`))
+}

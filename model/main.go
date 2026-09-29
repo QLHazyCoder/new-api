@@ -395,6 +395,9 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := MigrateLegacyPublicVideoEndpoints(); err != nil {
+		return err
+	}
 	if err := validateWalletQuotaSchema(); err != nil {
 		return err
 	}

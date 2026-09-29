@@ -79,6 +79,7 @@ type capabilityRegistry struct {
 	hasContentHash bool
 	lastChecked    time.Time
 	lastError      string
+	version        uint64
 }
 
 type fileFingerprint struct {
@@ -93,6 +94,33 @@ var registry = newCapabilityRegistry(runtimeConfigPath(), defaultRules, defaultC
 // channel and upstream model. It does not change the supplied model name.
 func Resolve(channelType int, modelName string) (Capability, bool) {
 	return registry.resolve(channelType, modelName)
+}
+
+// ConfigurationVersion changes whenever the live capability file loads a new
+// valid revision. Catalog caches use it without rewriting routing model names.
+func ConfigurationVersion() uint64 {
+	registry.reloadIfNeeded()
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	return registry.version
+}
+
+// KnownModel distinguishes a configured model excluded by channel policy from
+// a legacy image model that has no capability rule yet.
+func KnownModel(modelName string) bool {
+	registry.reloadIfNeeded()
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	if modelName == "" {
+		return false
+	}
+	registry.mu.RLock()
+	defer registry.mu.RUnlock()
+	for _, rule := range registry.rules {
+		if rule.Match.matchesModel(modelName) {
+			return true
+		}
+	}
+	return false
 }
 
 // EnsureRuntimeConfig creates and validates the persistent configuration during
@@ -195,7 +223,10 @@ func (r ruleMatch) matches(channelType int, modelName string) bool {
 	if containsInt(r.ExcludedChannelTypes, channelType) {
 		return false
 	}
+	return r.matchesModel(modelName)
+}
 
+func (r ruleMatch) matchesModel(modelName string) bool {
 	modelMatched := len(r.ExactModels) == 0 && len(r.ModelPrefixes) == 0
 	if containsFold(r.ExactModels, modelName) {
 		modelMatched = true
@@ -334,6 +365,7 @@ func (r *capabilityRegistry) reloadIfNeeded() {
 		return
 	}
 	r.rules = rules
+	r.version++
 	r.loadedFile = true
 	r.fingerprint = fingerprint
 	r.contentHash = contentHash

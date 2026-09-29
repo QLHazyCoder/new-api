@@ -29,14 +29,16 @@ type AbilityWithChannel struct {
 	Ability
 	ChannelType         int    `json:"channel_type"`
 	ChannelModelMapping string `json:"channel_model_mapping" gorm:"column:channel_model_mapping"`
+	ChannelSetting      string `json:"channel_setting" gorm:"column:channel_setting"`
 }
 
 func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 	var abilities []AbilityWithChannel
 	err := DB.Table("abilities").
-		Select("abilities.*, channels.type as channel_type, COALESCE(channels.model_mapping, '') as channel_model_mapping").
-		Joins("left join channels on abilities.channel_id = channels.id").
+		Select("abilities.*, channels.type as channel_type, COALESCE(channels.model_mapping, '') as channel_model_mapping, COALESCE(channels.setting, '') as channel_setting").
+		Joins("join channels on abilities.channel_id = channels.id").
 		Where("abilities.enabled = ?", true).
+		Where("channels.status = ?", common.ChannelStatusEnabled).
 		Scan(&abilities).Error
 	return abilities, err
 }
@@ -51,7 +53,7 @@ func GetEnabledAbilitiesWithChannelsByGroups(groups []string) ([]AbilityWithChan
 	}
 	var abilities []AbilityWithChannel
 	err := DB.Table("abilities").
-		Select("abilities.*, channels.type as channel_type, COALESCE(channels.model_mapping, '') as channel_model_mapping").
+		Select("abilities.*, channels.type as channel_type, COALESCE(channels.model_mapping, '') as channel_model_mapping, COALESCE(channels.setting, '') as channel_setting").
 		Joins("join channels on abilities.channel_id = channels.id").
 		Where("abilities.enabled = ?", true).
 		Where("channels.status = ?", common.ChannelStatusEnabled).

@@ -68,10 +68,26 @@ func IsImageGenerationModel(modelName string) bool {
 	return false
 }
 
-// IsChannelImageGenerationModel resolves a channel mapping before checking the
-// shared image-capability registry. This keeps image endpoint selection in
-// sync with the capability system rather than relying on model-name heuristics.
+// ResolveChannelImageCapability resolves the public name through its channel
+// mapping without changing the name that clients use in their requests.
+func ResolveChannelImageCapability(channelType int, modelName string, modelMappings ...string) (imagecapability.Capability, bool) {
+	if len(modelMappings) > 0 {
+		mappedModel, _, err := ResolveModelMapping(modelName, modelMappings[0])
+		if err != nil {
+			return imagecapability.Capability{}, false
+		}
+		publicModel := modelName
+		modelName = mappedModel
+		capability, ok := imagecapability.Resolve(channelType, modelName)
+		return imagecapability.ApplyModelAliasDefaults(capability, publicModel), ok
+	}
+	return imagecapability.Resolve(channelType, modelName)
+}
+
+// IsChannelImageGenerationModel keeps the legacy image model list for routes
+// that have not yet been given configurable Playground capabilities.
 func IsChannelImageGenerationModel(channelType int, modelName string, modelMappings ...string) bool {
+	_, ok := ResolveChannelImageCapability(channelType, modelName, modelMappings...)
 	if len(modelMappings) > 0 {
 		mappedModel, _, err := ResolveModelMapping(modelName, modelMappings[0])
 		if err != nil {
@@ -79,11 +95,8 @@ func IsChannelImageGenerationModel(channelType int, modelName string, modelMappi
 		}
 		modelName = mappedModel
 	}
-	_, ok := imagecapability.Resolve(channelType, modelName)
-	// The capability registry is authoritative when it has a channel-specific
-	// rule. Keep the upstream legacy catalogue as a fallback for compatible
-	// image models that do not yet need Playground capability metadata.
-	return ok || IsImageGenerationModel(modelName)
+	// A configured exclusion must not be undone by the legacy name list.
+	return ok || !imagecapability.KnownModel(modelName) && IsImageGenerationModel(modelName)
 }
 
 func IsOpenAITextModel(modelName string) bool {

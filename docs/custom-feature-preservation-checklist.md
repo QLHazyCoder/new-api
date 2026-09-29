@@ -243,6 +243,8 @@
   必须同时存在；只迁移其中一层会造成“看得到但不能生成”或“能路由但用户看不到”。
 - 验证入口：`pkg/imagecapability/registry_test.go`、`service/image_capability_test.go`、
   `controller/playground_test.go`、Gemini/xAI 图片 relay 测试。
+- 模型广场与插件协议的交叉验证见 `docs/model-catalog-endpoint-capabilities.md`：
+  定价端点及图片参数必须使用启用渠道、映射与配置，不能从公开模型名或插件内部协议名猜测。
 - 来源提交：`a7b870b0`、`f3018f4f`、`99f171da`、`fce66558`、`31dce377`、
   `dfe64ed2`、`cc64bf3b`、`4e40cd8a`、`3ea4788d`、`2209a200`、`734b60163`、
   `4cd9c9460`。

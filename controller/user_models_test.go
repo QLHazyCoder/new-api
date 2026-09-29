@@ -12,7 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildUserModelOptionsAddsImageGenerationEndpointByModelRule(t *testing.T) {
+func TestBuildUserModelOptionsUsesEnabledChannelEndpoints(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.Channel{Id: 1, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled}).Error)
+	for _, name := range []string{"gpt-image-1", "gpt-image-2"} {
+		require.NoError(t, db.Create(&model.Ability{Group: "default", Model: name, ChannelId: 1, Enabled: true}).Error)
+	}
+	model.InvalidatePricingCache()
+	model.GetPricing()
 	options := buildUserModelOptions([]string{
 		"gpt-image-1",
 		"gpt-image-2",
@@ -72,6 +79,7 @@ func TestGetUserModelsDefaultResponseRemainsStringArray(t *testing.T) {
 
 func TestGetUserModelsWithEndpointTypesReturnsModelOptions(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.Channel{Id: 1, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled}).Error)
 	require.NoError(t, db.Create(&model.User{
 		Id:       2002,
 		Username: "user-models-endpoints",
@@ -85,6 +93,7 @@ func TestGetUserModelsWithEndpointTypesReturnsModelOptions(t *testing.T) {
 		ChannelId: 1,
 		Enabled:   true,
 	}).Error)
+	model.InvalidatePricingCache()
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -162,6 +171,7 @@ func TestGetUserImageModelsReturnsConfiguredImageGroups(t *testing.T) {
 
 func TestGetUserModelsWithEndpointTypesHonorsRequestedGroup(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&model.Channel{Id: 1, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled}).Error)
 	require.NoError(t, db.Create(&model.User{
 		Id:       2003,
 		Username: "user-models-group-endpoints",
@@ -173,6 +183,7 @@ func TestGetUserModelsWithEndpointTypesHonorsRequestedGroup(t *testing.T) {
 		{Group: "default", Model: "gpt-image-2", ChannelId: 1, Enabled: true},
 		{Group: "default", Model: "gpt-4o-mini", ChannelId: 1, Enabled: true},
 	}).Error)
+	model.InvalidatePricingCache()
 
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -192,8 +203,11 @@ func TestGetUserModelsWithEndpointTypesHonorsRequestedGroup(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.True(t, payload.Success)
-	require.Len(t, payload.Data, 1)
-	require.Equal(t, "gpt-image-2", payload.Data[0].Label)
-	require.Equal(t, "gpt-image-2", payload.Data[0].Value)
-	require.Contains(t, payload.Data[0].SupportedEndpointTypes, "image-generation")
+	require.Len(t, payload.Data, 2)
+	byModel := make(map[string][]string, len(payload.Data))
+	for _, item := range payload.Data {
+		byModel[item.Value] = item.SupportedEndpointTypes
+	}
+	require.Contains(t, byModel["gpt-image-2"], "image-generation")
+	require.Equal(t, []string{"openai"}, byModel["gpt-4o-mini"])
 }

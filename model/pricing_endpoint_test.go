@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -188,6 +189,87 @@ func TestPricingNativeChannelEndpointTypesUnchanged(t *testing.T) {
 	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAI}, byModel["gpt-4o"])
 	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeGemini, constant.EndpointTypeOpenAI}, byModel["gemini-2.5-flash"])
 	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeAnthropic, constant.EndpointTypeOpenAI}, byModel["claude-3-5-sonnet"])
+}
+
+func TestPricingPluginEndpointsFollowChannelBindingAndModelClaims(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+	const pluginKey = "pricing-endpoint-probe"
+	const source = `
+export const meta = {
+  apiVersion: 1, key: "pricing-endpoint-probe", name: "Pricing Endpoint Probe", version: "1.0.0",
+  author: {name: "Test"}, models: ["probe-video", "gpt-image-2", "probe-text"], fetchMode: "per_task", upstreams: ["new_api"],
+  protocols: [
+    {name: "openai_video", models: ["probe-video"]},
+    {name: "openai_image", models: ["gpt-image-2"]},
+    {name: "openai_responses", models: ["probe-text"], supports: ["sync"]}
+  ]
+};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+export function listArtifacts() { return []; }
+export function buildContentRequest() { return {}; }
+export const protocols = {
+  openai_video: {decodeRequest: function() { return {}; }, render: function() { return {}; }},
+  openai_image: {decodeRequest: function() { return {}; }, render: function() { return {}; }},
+  openai_responses: {decodeRequest: function() { return {}; }, renderFinal: function() { return {}; }}
+};`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister(pluginKey) })
+
+	channel := &Channel{Id: 410, Type: constant.ChannelTypeTaskPlugin, Key: "key-410", Status: common.ChannelStatusEnabled, Name: "plugin"}
+	channel.SetSetting(dto.ChannelSettings{TaskPluginKey: pluginKey})
+	mapping := `{"public-image":"gpt-image-2","public-video":"probe-video","probe-text":"vendor-text-id"}`
+	channel.ModelMapping = &mapping
+	settings, err := common.Marshal(dto.ChannelSettings{TaskExtendPluginKeys: []string{pluginKey}})
+	require.NoError(t, err)
+	bound := AbilityWithChannel{
+		Ability: Ability{Model: "public-video"}, ChannelType: constant.ChannelTypeNewAPI,
+		ChannelModelMapping: mapping, ChannelSetting: string(settings),
+	}
+	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAIVideo}, ResolveAbilityEndpointTypes(bound, jsplugin.DefaultRegistry.Generation(), nil))
+	bound.ChannelSetting = "{}"
+	assert.NotContains(t, ResolveAbilityEndpointTypes(bound, jsplugin.DefaultRegistry.Generation(), nil), constant.EndpointTypeOpenAIVideo)
+	require.NoError(t, DB.Create(channel).Error)
+	for _, modelName := range []string{"public-image", "public-video", "probe-text", "unclaimed-model"} {
+		insertPricingEndpointAbility(t, 410, modelName)
+	}
+	require.NoError(t, DB.Create(&Model{
+		ModelName: "public-video", NameRule: NameRuleExact, Status: 1,
+		Endpoints: `{"openai":"/v1/chat/completions","openai-video":"/v1/videos"}`,
+	}).Error)
+
+	models := pricingByModel(GetPricing())
+	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeImageGeneration}, models["public-image"].SupportedEndpointTypes)
+	require.NotNil(t, models["public-image"].ImageCapabilities)
+	assert.Contains(t, models["public-image"].ImageCapabilities.Sizes, "3840x2160")
+	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAIVideo}, models["public-video"].SupportedEndpointTypes)
+	assert.Nil(t, models["public-video"].ImageCapabilities)
+	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeOpenAIResponse}, models["probe-text"].SupportedEndpointTypes)
+	assert.Empty(t, models["unclaimed-model"].SupportedEndpointTypes)
+	assert.Equal(t, common.EndpointInfo{Path: "/v1/videos", Method: "POST"}, GetSupportedEndpointMap()[string(constant.EndpointTypeOpenAIVideo)])
+	assert.NotContains(t, GetSupportedEndpointMap(), "openai_video")
+}
+
+func TestPricingImageAliasUsesMappedCapabilityWithoutAddingChat(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+	mapping := `{"public-gpt-image":"gpt-image-2"}`
+	require.NoError(t, DB.Create(&Channel{Id: 411, Type: constant.ChannelTypeOpenAI, Key: "key-411", Status: common.ChannelStatusEnabled, Name: "image", ModelMapping: &mapping}).Error)
+	insertPricingEndpointAbility(t, 411, "public-gpt-image")
+	pricing := pricingByModel(GetPricing())["public-gpt-image"]
+	assert.Equal(t, []constant.EndpointType{constant.EndpointTypeImageGeneration}, pricing.SupportedEndpointTypes)
+	require.NotNil(t, pricing.ImageCapabilities)
+	assert.Equal(t, "1024x1024", pricing.ImageCapabilities.DefaultSize)
+}
+
+func TestPricingIgnoresDisabledChannelAbilities(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+	require.NoError(t, DB.Create(&Channel{Id: 412, Type: constant.ChannelTypeOpenAI, Key: "key-412", Status: 0, Name: "disabled"}).Error)
+	require.NoError(t, DB.Model(&Channel{}).Where("id = ?", 412).Update("status", 0).Error)
+	insertPricingEndpointAbility(t, 412, "disabled-text")
+	assert.NotContains(t, pricingByModel(GetPricing()), "disabled-text")
 }
 
 func TestInitChannelCacheInvalidatesPricingCache(t *testing.T) {

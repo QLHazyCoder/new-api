@@ -689,87 +689,96 @@ const EMBEDDING_PARAMS: SupportedParameter[] = [
   },
 ]
 
-const IMAGE_PARAMS: SupportedParameter[] = [
+const VIDEO_PARAMS: SupportedParameter[] = [
   {
-    name: 'prompt',
+    name: 'model',
     type: 'string',
     required: true,
-    descriptionKey: 'Text description of the desired image',
+    descriptionKey: 'Model',
   },
-  {
-    name: 'size',
-    type: 'enum',
-    enumValues: ['256x256', '512x512', '1024x1024', '1024x1792', '1792x1024'],
-    defaultValue: '1024x1024',
-    descriptionKey: 'Output image size',
-  },
-  {
-    name: 'quality',
-    type: 'enum',
-    enumValues: ['standard', 'hd'],
-    defaultValue: 'standard',
-    descriptionKey: 'Generation quality preset',
-  },
-  {
-    name: 'style',
-    type: 'enum',
-    enumValues: ['vivid', 'natural'],
-    defaultValue: 'vivid',
-    descriptionKey: 'Aesthetic style',
-  },
-  {
-    name: 'n',
-    type: 'integer',
-    defaultValue: 1,
-    range: '1 ~ 10',
-    descriptionKey: 'Number of images to generate',
-  },
-  {
-    name: 'response_format',
-    type: 'enum',
-    enumValues: ['url', 'b64_json'],
-    defaultValue: 'url',
-    descriptionKey: 'How to deliver the resulting image',
-  },
-]
-
-const VIDEO_PARAMS: SupportedParameter[] = [
   {
     name: 'prompt',
     type: 'string',
     required: true,
     descriptionKey: 'Text description of the desired video',
   },
-  {
-    name: 'duration',
-    type: 'integer',
-    range: '1 ~ 60',
-    descriptionKey: 'Video length in seconds',
-  },
-  {
-    name: 'aspect_ratio',
-    type: 'enum',
-    enumValues: ['16:9', '9:16', '1:1'],
-    defaultValue: '16:9',
-    descriptionKey: 'Output aspect ratio',
-  },
-  {
-    name: 'fps',
-    type: 'integer',
-    range: '8 ~ 60',
-    defaultValue: 24,
-    descriptionKey: 'Frames per second',
-  },
 ]
+
+function imageParameters(model: PricingModel): SupportedParameter[] {
+  const parameters: SupportedParameter[] = [
+    { name: 'model', type: 'string', required: true, descriptionKey: 'Model' },
+    {
+      name: 'prompt',
+      type: 'string',
+      required: true,
+      descriptionKey: 'Text description of the desired image',
+    },
+  ]
+  const capability = model.image_capabilities
+  if (!capability) return parameters
+
+  const addEnum = (
+    name: string,
+    values: string[],
+    defaultValue: string | undefined,
+    descriptionKey: string
+  ) => {
+    if (values.length > 0) {
+      parameters.push({
+        name,
+        type: 'enum',
+        enumValues: values,
+        ...(defaultValue ? { defaultValue } : {}),
+        descriptionKey,
+      })
+    }
+  }
+  if (capability.size_mode === 'dimensions') {
+    addEnum(
+      'size',
+      capability.sizes,
+      capability.default_size,
+      'Output image size'
+    )
+  } else if (capability.size_mode === 'aspect_ratio_resolution') {
+    addEnum(
+      'aspect_ratio',
+      capability.aspect_ratios,
+      capability.default_aspect_ratio,
+      'Output aspect ratio'
+    )
+    addEnum(
+      'resolution',
+      capability.resolutions,
+      capability.default_resolution,
+      'Resolution'
+    )
+  }
+  addEnum(
+    'quality',
+    capability.qualities,
+    capability.default_quality,
+    'Generation quality preset'
+  )
+  addEnum(
+    'output_format',
+    capability.output_formats,
+    capability.default_output_format,
+    'Output format'
+  )
+  parameters.push({
+    name: 'n',
+    type: 'integer',
+    defaultValue: 1,
+    range: `1 ~ ${Math.max(1, capability.max_images)}`,
+    descriptionKey: 'Number of images to generate',
+  })
+  return parameters
+}
 
 type ApiCategory = 'reasoning' | 'embedding' | 'image' | 'video' | 'chat'
 
-/**
- * Refine the broad PROFILE_BY_NAME bucket into an API-shape category. The
- * `image` bucket from `PROFILE_BY_NAME` lumps still-image and video models
- * together (because their performance profiles overlap); for the API tab we
- * need to distinguish them so the request-parameter table is accurate.
- */
+// Keep legacy name-based categories for the existing static rate-limit display.
 function apiCategoryOf(model: PricingModel): ApiCategory {
   const profile = PROFILE_BY_NAME(model.model_name)
   if (profile === 'embedding' || profile === 'reasoning') return profile
@@ -787,14 +796,23 @@ function apiCategoryOf(model: PricingModel): ApiCategory {
  * each show their relevant parameter set.
  */
 export function buildSupportedParameters(
-  model: PricingModel
+  model: PricingModel,
+  endpointType = model.supported_endpoint_types?.[0]
 ): SupportedParameter[] {
-  const cat = apiCategoryOf(model)
-  if (cat === 'reasoning') return REASONING_PARAMS
-  if (cat === 'embedding') return EMBEDDING_PARAMS
-  if (cat === 'image') return IMAGE_PARAMS
-  if (cat === 'video') return VIDEO_PARAMS
-  return COMMON_CHAT_PARAMS
+  if (!endpointType) return []
+  if (endpointType === 'image-generation') return imageParameters(model)
+  if (endpointType === 'openai-video') return VIDEO_PARAMS
+  if (endpointType === 'embeddings' || endpointType === 'jina-rerank') {
+    return EMBEDDING_PARAMS
+  }
+  if (
+    ['openai', 'openai-response', 'anthropic', 'gemini'].includes(endpointType)
+  ) {
+    return PROFILE_BY_NAME(model.model_name) === 'reasoning'
+      ? REASONING_PARAMS
+      : COMMON_CHAT_PARAMS
+  }
+  return []
 }
 
 export type RateLimit = {

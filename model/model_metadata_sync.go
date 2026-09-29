@@ -117,12 +117,17 @@ func ValidateModelEndpoints(raw string) error {
 		for _, endpoint := range endpoints {
 			if text, ok := endpoint.(string); !ok || strings.TrimSpace(text) == "" {
 				return errors.New("endpoint types must be non-empty strings")
+			} else if text == "openai_video" {
+				return errors.New("use public endpoint type openai-video; openai_video is an internal plugin protocol")
 			}
 		}
 	case map[string]any:
 		for key, endpoint := range endpoints {
 			if strings.TrimSpace(key) == "" {
 				return errors.New("endpoint type is required")
+			}
+			if key == "openai_video" {
+				return errors.New("use public endpoint type openai-video; openai_video is an internal plugin protocol")
 			}
 			switch details := endpoint.(type) {
 			case string:

@@ -112,6 +112,7 @@ func TestRegistryCreatesAndReloadsExternalConfiguration(t *testing.T) {
 
 	capability, ok := registry.resolve(1, "gpt-image-2")
 	require.True(t, ok)
+	initialVersion := registry.version
 	assert.Contains(t, capability.Sizes, "3840x2160")
 	_, err := os.Stat(path)
 	require.NoError(t, err)
@@ -135,6 +136,7 @@ func TestRegistryCreatesAndReloadsExternalConfiguration(t *testing.T) {
 
 	capability, ok = registry.resolve(1, "custom-image")
 	require.True(t, ok)
+	assert.Greater(t, registry.version, initialVersion)
 	assert.Equal(t, []string{"4096x4096"}, capability.Sizes)
 	_, ok = registry.resolve(1, "gpt-image-2")
 	assert.False(t, ok)

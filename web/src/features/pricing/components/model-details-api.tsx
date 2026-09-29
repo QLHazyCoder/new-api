@@ -40,6 +40,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useStatus } from '@/hooks/use-status'
 
+import { buildImageSample, buildVideoSample } from '../lib/media-samples'
 import {
   buildRateLimits,
   buildSupportedParameters,
@@ -80,6 +81,7 @@ type SampleContext = {
   modelName: string
   endpointType: string
   endpointPath: string
+  imageCapabilities?: PricingModel['image_capabilities']
 }
 
 function buildChatSample(lang: Lang, ctx: SampleContext): string {
@@ -351,78 +353,6 @@ function buildEmbeddingSample(lang: Lang, ctx: SampleContext): string {
   ].join('\n')
 }
 
-function buildImageSample(lang: Lang, ctx: SampleContext): string {
-  const url = `${ctx.baseUrl}${ctx.endpointPath}`
-  const prompt = 'A serene koi pond at sunset, ukiyo-e style.'
-
-  if (lang === 'curl') {
-    const body = JSON.stringify(
-      { model: ctx.modelName, prompt, size: '1024x1024', n: 1 },
-      null,
-      2
-    )
-    return [
-      `curl ${url} \\`,
-      `  -H "Authorization: Bearer $${ctx.apiKeyEnv}" \\`,
-      `  -H "Content-Type: application/json" \\`,
-      `  -d '${body.replaceAll('\n', '\n     ')}'`,
-    ].join('\n')
-  }
-  if (lang === 'python') {
-    return [
-      'from openai import OpenAI',
-      '',
-      `client = OpenAI(base_url="${ctx.baseUrl}/v1", api_key="<YOUR_API_KEY>")`,
-      '',
-      'response = client.images.generate(',
-      `    model="${ctx.modelName}",`,
-      `    prompt="${prompt}",`,
-      `    size="1024x1024",`,
-      `    n=1,`,
-      ')',
-      '',
-      'print(response.data[0].url)',
-    ].join('\n')
-  }
-  if (lang === 'typescript') {
-    return [
-      `import OpenAI from 'openai'`,
-      '',
-      `const client = new OpenAI({`,
-      `  baseURL: '${ctx.baseUrl}/v1',`,
-      `  apiKey: process.env.${ctx.apiKeyEnv},`,
-      `})`,
-      '',
-      `const response = await client.images.generate({`,
-      `  model: '${ctx.modelName}',`,
-      `  prompt: '${prompt}',`,
-      `  size: '1024x1024',`,
-      `  n: 1,`,
-      `})`,
-      '',
-      `console.log(response.data[0].url)`,
-    ].join('\n')
-  }
-  return [
-    `const response = await fetch('${url}', {`,
-    `  method: 'POST',`,
-    `  headers: {`,
-    `    Authorization: \`Bearer \${process.env.${ctx.apiKeyEnv}}\`,`,
-    `    'Content-Type': 'application/json',`,
-    `  },`,
-    `  body: JSON.stringify({`,
-    `    model: '${ctx.modelName}',`,
-    `    prompt: '${prompt}',`,
-    `    size: '1024x1024',`,
-    `    n: 1,`,
-    `  }),`,
-    `})`,
-    '',
-    `const data = await response.json()`,
-    `console.log(data.data[0].url)`,
-  ].join('\n')
-}
-
 function buildSample(
   lang: Lang,
   endpointType: string,
@@ -433,7 +363,10 @@ function buildSample(
   if (endpointType === 'embeddings' || endpointType === 'jina-rerank') {
     return buildEmbeddingSample(lang, ctx)
   }
-  if (endpointType === 'image-generation') return buildImageSample(lang, ctx)
+  if (endpointType === 'image-generation') {
+    return buildImageSample(lang, ctx, ctx.imageCapabilities)
+  }
+  if (endpointType === 'openai-video') return buildVideoSample(lang, ctx)
   return buildChatSample(lang, ctx)
 }
 
@@ -444,6 +377,8 @@ function buildSample(
 function CodeSamplesSection(props: {
   model: PricingModel
   endpointMap: Record<string, { path?: string; method?: string }>
+  endpointType: string
+  onEndpointTypeChange: (type: string) => void
 }) {
   const { t } = useTranslation()
   const { status } = useStatus()
@@ -464,6 +399,18 @@ function CodeSamplesSection(props: {
   const endpoints = useMemo(() => {
     const types = props.model.supported_endpoint_types || []
     return types
+      .filter((type) =>
+        [
+          'openai',
+          'openai-response',
+          'anthropic',
+          'gemini',
+          'embeddings',
+          'jina-rerank',
+          'image-generation',
+          'openai-video',
+        ].includes(type)
+      )
       .map((type) => {
         const info = props.endpointMap[type] || {}
         let path = info.path || ''
@@ -475,14 +422,11 @@ function CodeSamplesSection(props: {
       .filter((e) => Boolean(e.path))
   }, [props.model, props.endpointMap])
 
-  const [endpointType, setEndpointType] = useState<string>(
-    endpoints[0]?.type ?? ''
-  )
   const [lang, setLang] = useState<Lang>('curl')
 
   const activeEndpoint = useMemo(() => {
-    return endpoints.find((e) => e.type === endpointType) ?? endpoints[0]
-  }, [endpointType, endpoints])
+    return endpoints.find((e) => e.type === props.endpointType) ?? endpoints[0]
+  }, [props.endpointType, endpoints])
 
   if (endpoints.length === 0 || !activeEndpoint) {
     return null
@@ -494,6 +438,7 @@ function CodeSamplesSection(props: {
     modelName: props.model.model_name || '',
     endpointType: activeEndpoint.type,
     endpointPath: activeEndpoint.path,
+    imageCapabilities: props.model.image_capabilities,
   })
 
   return (
@@ -502,7 +447,10 @@ function CodeSamplesSection(props: {
 
       <div className='flex flex-wrap items-center gap-2'>
         {endpoints.length > 1 && (
-          <Tabs value={endpointType} onValueChange={setEndpointType}>
+          <Tabs
+            value={activeEndpoint.type}
+            onValueChange={props.onEndpointTypeChange}
+          >
             <TabsList className='bg-muted/40 h-8 p-0.5'>
               {endpoints.map((ep) => (
                 <TabsTrigger
@@ -553,11 +501,14 @@ function CodeSamplesSection(props: {
 // Supported parameters table
 // ---------------------------------------------------------------------------
 
-function SupportedParametersSection(props: { model: PricingModel }) {
+function SupportedParametersSection(props: {
+  model: PricingModel
+  endpointType: string
+}) {
   const { t } = useTranslation()
   const params = useMemo(
-    () => buildSupportedParameters(props.model),
-    [props.model]
+    () => buildSupportedParameters(props.model, props.endpointType),
+    [props.model, props.endpointType]
   )
 
   if (params.length === 0) return null
@@ -636,6 +587,11 @@ function ParamRangeCell(props: { param: SupportedParameter }) {
         </code>
         {range && (
           <span className='text-muted-foreground text-sm'>{range}</span>
+        )}
+        {enumValues && enumValues.length > 0 && (
+          <span className='text-muted-foreground text-sm'>
+            {enumValues.join(', ')}
+          </span>
         )}
       </div>
     )
@@ -763,11 +719,25 @@ export function ModelDetailsApi(props: {
   model: PricingModel
   endpointMap: Record<string, { path?: string; method?: string }>
 }) {
+  const [requestedEndpoint, setRequestedEndpoint] = useState('')
+  const endpointType = props.model.supported_endpoint_types?.includes(
+    requestedEndpoint
+  )
+    ? requestedEndpoint
+    : (props.model.supported_endpoint_types?.[0] ?? '')
   return (
     <div className='space-y-6'>
-      <CodeSamplesSection model={props.model} endpointMap={props.endpointMap} />
+      <CodeSamplesSection
+        model={props.model}
+        endpointMap={props.endpointMap}
+        endpointType={endpointType}
+        onEndpointTypeChange={setRequestedEndpoint}
+      />
       <AuthSection />
-      <SupportedParametersSection model={props.model} />
+      <SupportedParametersSection
+        model={props.model}
+        endpointType={endpointType}
+      />
       <RateLimitsSection model={props.model} />
     </div>
   )

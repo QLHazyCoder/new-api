@@ -1,12 +1,15 @@
 package service
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/imagecapability"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 )
 
 func GetUserImageModelGroups(userGroup string) ([]dto.UserImageGroupOption, error) {
@@ -68,19 +71,18 @@ func buildImageModelOptions(abilities []model.AbilityWithChannel, includedGroups
 	}
 
 	models := make(map[string]aggregate)
+	generation := jsplugin.DefaultRegistry.Generation()
 	for _, ability := range abilities {
 		if !includedGroups[ability.Group] {
 			continue
 		}
-		upstreamModel, _, err := common.ResolveModelMapping(ability.Model, ability.ChannelModelMapping)
-		if err != nil {
+		if !slices.Contains(model.ResolveAbilityEndpointTypes(ability, generation, nil), constant.EndpointTypeImageGeneration) {
 			continue
 		}
-		capability, ok := imagecapability.Resolve(ability.ChannelType, upstreamModel)
+		capability, ok := common.ResolveChannelImageCapability(ability.ChannelType, ability.Model, ability.ChannelModelMapping)
 		if !ok {
 			continue
 		}
-		capability = imagecapability.ApplyModelAliasDefaults(capability, ability.Model)
 
 		current := models[ability.Model]
 		if current.initialized {
@@ -104,31 +106,10 @@ func buildImageModelOptions(abilities []model.AbilityWithChannel, includedGroups
 		options = append(options, dto.UserImageModelOption{
 			Label:        modelName,
 			Value:        modelName,
-			Capabilities: imageCapabilityDTO(capability),
+			Capabilities: dto.ImageCapabilitiesFrom(capability),
 		})
 	}
 	return options
-}
-
-func imageCapabilityDTO(capability imagecapability.Capability) dto.ImageModelCapabilities {
-	return dto.ImageModelCapabilities{
-		Provider:                  capability.Provider,
-		SizeMode:                  string(capability.SizeMode),
-		Sizes:                     append([]string{}, capability.Sizes...),
-		AspectRatios:              append([]string{}, capability.AspectRatios...),
-		Resolutions:               append([]string{}, capability.Resolutions...),
-		Qualities:                 append([]string{}, capability.Qualities...),
-		OutputFormats:             append([]string{}, capability.OutputFormats...),
-		DefaultSize:               capability.DefaultSize,
-		DefaultAspectRatio:        capability.DefaultAspectRatio,
-		DefaultResolution:         capability.DefaultResolution,
-		DefaultQuality:            capability.DefaultQuality,
-		DefaultOutputFormat:       capability.DefaultOutputFormat,
-		SupportsEditing:           capability.SupportsEditing,
-		SupportsModeration:        capability.SupportsModeration,
-		SupportsOutputCompression: capability.SupportsOutputCompression,
-		MaxImages:                 capability.MaxImages,
-	}
 }
 
 func sortedGroupNames(groups map[string]bool) []string {

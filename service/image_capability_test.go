@@ -71,6 +71,14 @@ func TestBuildImageModelOptionsSkipsInvalidMappingAndUnsupportedPair(t *testing.
 	assert.Empty(t, options)
 }
 
+func TestBuildImageModelOptionsDoesNotOfferUnboundPluginImage(t *testing.T) {
+	abilities := []model.AbilityWithChannel{{
+		Ability:     model.Ability{Group: "image", Model: "gpt-image-2"},
+		ChannelType: constant.ChannelTypeTaskPlugin,
+	}}
+	assert.Empty(t, buildImageModelOptions(abilities, map[string]bool{"image": true}))
+}
+
 func TestBuildImageModelOptionsPreservesGeminiPublicResolutionAlias(t *testing.T) {
 	abilities := []model.AbilityWithChannel{
 		{
