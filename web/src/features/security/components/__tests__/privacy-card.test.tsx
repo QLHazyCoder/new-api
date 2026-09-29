@@ -49,14 +49,14 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function renderPrivacy() {
+function renderPrivacy(nextProfile: UserProfile = profile) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const onUpdate = vi.fn()
   const rendered = render(
     <QueryClientProvider client={client}>
-      <PrivacyCard profile={profile} onUpdate={onUpdate} />
+      <PrivacyCard profile={nextProfile} onUpdate={onUpdate} />
       <Toaster />
     </QueryClientProvider>
   )
@@ -64,6 +64,13 @@ function renderPrivacy() {
 }
 
 describe('privacy settings', () => {
+  it('treats a missing IP setting as enabled', () => {
+    renderPrivacy({ ...profile, setting: JSON.stringify({}) })
+    expect(
+      screen.getByRole('switch', { name: 'Record IP Address' })
+    ).toBeChecked()
+  })
+
   it('keyboard toggling off saves false and refreshes the displayed profile', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({
       data: { success: true, data: profile },

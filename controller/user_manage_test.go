@@ -744,3 +744,56 @@ func TestManageUserQuotaIgnoresStaleCachedBalance(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateUserSettingPreservesMissingRecordIPSetting(t *testing.T) {
+	db := setupManageUserTestDB(t)
+
+	for _, tc := range []struct {
+		name       string
+		initial    string
+		request    string
+		wantRecord *bool
+	}{
+		{name: "missing_setting_stays_missing", initial: `{}`, request: `{"notify_type":"email","quota_warning_threshold":100}`, wantRecord: nil},
+		{name: "explicit_false_is_preserved", initial: `{"record_ip_log":false}`, request: `{"notify_type":"email","quota_warning_threshold":100}`, wantRecord: boolPtr(false)},
+		{name: "explicit_true_is_preserved", initial: `{"record_ip_log":true}`, request: `{"notify_type":"email","quota_warning_threshold":100}`, wantRecord: boolPtr(true)},
+		{name: "explicit_false_updates_default", initial: `{}`, request: `{"notify_type":"email","quota_warning_threshold":100,"record_ip_log":false}`, wantRecord: boolPtr(false)},
+		{name: "explicit_true_updates_default", initial: `{}`, request: `{"notify_type":"email","quota_warning_threshold":100,"record_ip_log":true}`, wantRecord: boolPtr(true)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			user := model.User{
+				Username: "record-ip-setting-" + tc.name,
+				Password: "password",
+				Role:     common.RoleCommonUser,
+				Status:   common.UserStatusEnabled,
+				Group:    "default",
+				Setting:  tc.initial,
+			}
+			require.NoError(t, db.Create(&user).Error)
+			t.Cleanup(func() { _ = db.Unscoped().Delete(&model.User{}, user.Id).Error })
+
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPut, "/api/user/setting", strings.NewReader(tc.request))
+			ctx.Request.Header.Set("Content-Type", "application/json")
+			ctx.Set("id", user.Id)
+
+			UpdateUserSetting(ctx)
+
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			var stored model.User
+			require.NoError(t, db.First(&stored, user.Id).Error)
+			got := stored.GetSetting().RecordIpLog
+			if tc.wantRecord == nil {
+				assert.Nil(t, got)
+			} else {
+				require.NotNil(t, got)
+				assert.Equal(t, *tc.wantRecord, *got)
+			}
+		})
+	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}

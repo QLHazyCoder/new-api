@@ -23,6 +23,7 @@ import { api } from '@/lib/api'
 
 import { updateUserSettings } from '../api'
 import { NotificationTab } from '../components/tabs/notification-tab'
+import { normalizeUserSettings } from '../lib/user-settings'
 import type { UserProfile } from '../types'
 
 const profile: UserProfile = {
@@ -58,6 +59,14 @@ const settings = {
 afterEach(() => vi.restoreAllMocks())
 
 describe('user settings saves across profile and security', () => {
+  it('normalizes a missing IP setting to the enabled default', () => {
+    expect(normalizeUserSettings().record_ip_log).toBe(true)
+    expect(
+      normalizeUserSettings(JSON.stringify({ record_ip_log: false }))
+        .record_ip_log
+    ).toBe(false)
+  })
+
   it('disabling IP recording sends the latest complete notification settings', async () => {
     const get = vi.spyOn(api, 'get').mockResolvedValue({
       data: {
@@ -98,6 +107,20 @@ describe('user settings saves across profile and security', () => {
       record_ip_log: true,
       upstream_model_update_notify_enabled: false,
     })
+  })
+
+  it('saving notification settings does not reintroduce the IP field', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: profile },
+    })
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+
+    await updateUserSettings({ quota_warning_threshold: 2500 })
+
+    const body = put.mock.calls[0]?.[1] as Record<string, unknown>
+    expect(body).not.toHaveProperty('record_ip_log')
   })
 
   it('alternating notification and IP saves retains the latest values from each page', async () => {
@@ -185,10 +208,11 @@ describe('user settings saves across profile and security', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }))
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
-    expect(put).toHaveBeenCalledWith('/api/user/setting', {
-      ...settings,
+    const body = put.mock.calls[0]?.[1] as Record<string, unknown>
+    const { record_ip_log: _recordIpLog, ...expectedSettings } = settings
+    expect(body).toEqual({
+      ...expectedSettings,
       quota_warning_threshold: 2700,
-      record_ip_log: false,
     })
   })
 })

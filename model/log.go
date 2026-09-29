@@ -46,6 +46,10 @@ func buildLogLikeCondition(column string, value string) (string, string, error) 
 	return column + " LIKE ? ESCAPE '!'", pattern, nil
 }
 
+func shouldRecordUserIP(recordIpLog *bool) bool {
+	return recordIpLog == nil || *recordIpLog
+}
+
 func sanitizeClickHouseLikePattern(input string) (string, error) {
 	input = strings.ReplaceAll(input, `\`, `\\`)
 	input = strings.ReplaceAll(input, `_`, `\_`)
@@ -301,7 +305,7 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
-		if settingMap.RecordIpLog == nil || *settingMap.RecordIpLog {
+		if shouldRecordUserIP(settingMap.RecordIpLog) {
 			needRecordIp = true
 		}
 	}
@@ -365,7 +369,7 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
-		if settingMap.RecordIpLog == nil || *settingMap.RecordIpLog {
+		if shouldRecordUserIP(settingMap.RecordIpLog) {
 			needRecordIp = true
 		}
 	}

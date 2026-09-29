@@ -328,8 +328,15 @@
 - 必须保留：用户设置中没有 `record_ip_log` 键时，普通请求和错误日志默认记录客户端 IP；
   用户显式设置 `false` 时停止记录。缺省值与显式关闭必须可区分，不能改成上游 RC-40
   的非指针布尔值语义。
-- 当前位置：`relaykit/dto/user_settings.go`、`controller/user.go`、`model/log.go`。
-- 合并检查：分别验证设置缺失、显式 `true` 和显式 `false`；错误日志与消费日志使用一致规则。
+- 当前位置：`relaykit/dto/user_settings.go`、`controller/user.go`、`model/log.go`、
+  `web/src/features/profile/lib/user-settings.ts`、`web/src/features/profile/api.ts`、
+  `web/src/features/security/components/privacy-card.tsx`。
+- 设置写入必须保留字段 presence：请求省略 `record_ip_log` 时保留数据库已有值，数据库缺省值继续
+  表示开启；只有显式 `false` 才关闭。通知设置保存不得从前端默认值重新注入该字段，避免覆盖安全设置。
+- 合并检查：分别验证设置缺失、显式 `true` 和显式 `false`；错误日志与消费日志使用一致规则；
+  前端缺省显示为开启，通知设置独立保存不改变 IP 记录设置。
+- 2026-09-29 修复：前端归一化和隐私卡统一采用缺省开启语义，设置请求改为指针字段并按 presence
+  合并；回归覆盖 `controller/user_manage_test.go`、`model/log_other_test.go` 及对应前端测试。
 - 来源提交：`db10c428`。
 
 ### P-19 订阅适用分组与管理界面

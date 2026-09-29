@@ -84,7 +84,11 @@ export async function updateUserSettings(
     return { success: false, message: profile.message }
   }
   const settings = normalizeUserSettings(profile.data.setting)
-  const res = await api.put('/api/user/setting', { ...settings, ...data })
+  const payload: UpdateUserSettingsRequest = { ...settings, ...data }
+  if (!Object.hasOwn(data, 'record_ip_log')) {
+    delete payload.record_ip_log
+  }
+  const res = await api.put('/api/user/setting', payload)
   return res.data
 }
 

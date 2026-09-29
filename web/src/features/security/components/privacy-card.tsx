@@ -27,7 +27,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { TitledCard } from '@/components/ui/titled-card'
 import { updateUserSettings } from '@/features/profile/api'
-import { parseUserSettings } from '@/features/profile/lib/format'
+import { normalizeUserSettings } from '@/features/profile/lib/user-settings'
 import type { UserProfile } from '@/features/profile/types'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
@@ -40,12 +40,10 @@ type PrivacyCardProps = {
 export function PrivacyCard(props: PrivacyCardProps) {
   const { t } = useTranslation()
   const [recordIpLog, setRecordIpLog] = useState(() =>
-    Boolean(parseUserSettings(props.profile.setting).record_ip_log)
+    normalizeUserSettings(props.profile.setting).record_ip_log
   )
   useEffect(() => {
-    setRecordIpLog(
-      Boolean(parseUserSettings(props.profile.setting).record_ip_log)
-    )
+    setRecordIpLog(normalizeUserSettings(props.profile.setting).record_ip_log)
   }, [props.profile.setting])
 
   const save = useMutation({

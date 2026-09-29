@@ -49,6 +49,23 @@ func TestLogOtherScopesAndMerges(t *testing.T) {
 	}`, other.JSONString())
 }
 
+func TestShouldRecordUserIPDefaultsToEnabled(t *testing.T) {
+	var enabled, disabled bool = true, false
+	for _, tc := range []struct {
+		name   string
+		value  *bool
+		wanted bool
+	}{
+		{name: "missing", value: nil, wanted: true},
+		{name: "explicit_true", value: &enabled, wanted: true},
+		{name: "explicit_false", value: &disabled, wanted: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.wanted, shouldRecordUserIP(tc.value))
+		})
+	}
+}
+
 func TestLogOtherRejectsSensitivePublicFields(t *testing.T) {
 	other := NewLogOther()
 
