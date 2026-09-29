@@ -56,6 +56,8 @@ import {
 } from './draft-search'
 import {
   emptySensitiveWordRuleDraft,
+  SENSITIVE_WORD_MODE_LABEL_KEYS,
+  SENSITIVE_WORD_SCOPE_LABEL_KEYS,
   type SensitiveWordRuleDraft,
   type SensitiveWordRuleDetail,
 } from './types'
@@ -418,12 +420,20 @@ export function SensitiveWordRuleDialog({
               }
             >
               <SelectTrigger className='w-full'>
-                <SelectValue />
+                <SelectValue>
+                  {t(SENSITIVE_WORD_MODE_LABEL_KEYS[draft.mode])}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='observe'>{t('Observe')}</SelectItem>
-                <SelectItem value='block'>{t('Block')}</SelectItem>
-                <SelectItem value='off'>{t('Off')}</SelectItem>
+                <SelectItem value='observe'>
+                  {t(SENSITIVE_WORD_MODE_LABEL_KEYS.observe)}
+                </SelectItem>
+                <SelectItem value='block'>
+                  {t(SENSITIVE_WORD_MODE_LABEL_KEYS.block)}
+                </SelectItem>
+                <SelectItem value='off'>
+                  {t(SENSITIVE_WORD_MODE_LABEL_KEYS.off)}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -440,11 +450,17 @@ export function SensitiveWordRuleDialog({
               }
             >
               <SelectTrigger className='w-full'>
-                <SelectValue />
+                <SelectValue>
+                  {t(SENSITIVE_WORD_SCOPE_LABEL_KEYS[draft.scope])}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='global'>{t('Global')}</SelectItem>
-                <SelectItem value='group'>{t('Selected groups')}</SelectItem>
+                <SelectItem value='global'>
+                  {t(SENSITIVE_WORD_SCOPE_LABEL_KEYS.global)}
+                </SelectItem>
+                <SelectItem value='group'>
+                  {t(SENSITIVE_WORD_SCOPE_LABEL_KEYS.group)}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>

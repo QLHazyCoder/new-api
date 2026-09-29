@@ -19,6 +19,21 @@ For commercial licensing, please contact support@quantumnous.com
 export type SensitiveWordMode = 'block' | 'observe' | 'off'
 export type SensitiveWordScope = 'global' | 'group'
 
+export const SENSITIVE_WORD_MODE_LABEL_KEYS: Record<SensitiveWordMode, string> =
+  {
+    block: 'Block',
+    observe: 'Observe',
+    off: 'Off',
+  }
+
+export const SENSITIVE_WORD_SCOPE_LABEL_KEYS: Record<
+  SensitiveWordScope,
+  string
+> = {
+  global: 'Global',
+  group: 'Selected groups',
+}
+
 export type SensitiveWordPolicy = {
   id: number
   enabled: boolean

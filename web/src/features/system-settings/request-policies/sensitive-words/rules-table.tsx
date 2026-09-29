@@ -48,10 +48,12 @@ import { formatDateTimeStr } from '@/lib/format'
 
 import { deleteSensitiveWordRule, setSensitiveWordRuleMode } from './api'
 import { SensitiveWordRuleDialog } from './rule-dialog'
-import type {
-  SensitiveWordMode,
-  SensitiveWordRuleDetail,
-  SensitiveWordRuleSummary,
+import {
+  SENSITIVE_WORD_MODE_LABEL_KEYS,
+  SENSITIVE_WORD_SCOPE_LABEL_KEYS,
+  type SensitiveWordMode,
+  type SensitiveWordRuleDetail,
+  type SensitiveWordRuleSummary,
 } from './types'
 
 type RulesTableProps = {
@@ -163,9 +165,7 @@ export function SensitiveWordRulesTable({
                   </TableCell>
                   <TableCell>
                     <Badge variant='outline'>
-                      {rule.scope === 'global'
-                        ? t('Global')
-                        : t('Selected groups')}
+                      {t(SENSITIVE_WORD_SCOPE_LABEL_KEYS[rule.scope])}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -179,12 +179,20 @@ export function SensitiveWordRulesTable({
                       }}
                     >
                       <SelectTrigger className='w-28'>
-                        <SelectValue />
+                        <SelectValue>
+                          {t(SENSITIVE_WORD_MODE_LABEL_KEYS[rule.mode])}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value='observe'>{t('Observe')}</SelectItem>
-                        <SelectItem value='block'>{t('Block')}</SelectItem>
-                        <SelectItem value='off'>{t('Off')}</SelectItem>
+                        <SelectItem value='observe'>
+                          {t(SENSITIVE_WORD_MODE_LABEL_KEYS.observe)}
+                        </SelectItem>
+                        <SelectItem value='block'>
+                          {t(SENSITIVE_WORD_MODE_LABEL_KEYS.block)}
+                        </SelectItem>
+                        <SelectItem value='off'>
+                          {t(SENSITIVE_WORD_MODE_LABEL_KEYS.off)}
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </TableCell>
