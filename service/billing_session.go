@@ -71,6 +71,8 @@ func (s *BillingSession) settle(actualQuota int, taskCommit *model.BillingTaskCo
 	var commit []*model.BillingTaskCommit
 	if taskCommit != nil {
 		commit = append(commit, taskCommit)
+	} else if err := model.RequestBillingSettlement(s.relayInfo.RequestId, walletDelta, subDelta, tokenDelta, int64(actualQuota), actualQuota > 0 || s.relayInfo.BillableUsageObserved); err != nil {
+		return err
 	}
 	if err := model.ApplyBillingAdjustment(s.relayInfo.RequestId, "settle", walletDelta, subDelta, tokenDelta, false, true, int64(actualQuota), actualQuota > 0 || s.relayInfo.BillableUsageObserved, commit...); err != nil {
 		return err
@@ -200,7 +202,7 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 // PreConsume — 统一预扣费入口（含信任额度旁路）
 // ---------------------------------------------------------------------------
 
-// preConsume 执行预扣费：信任检查 -> 令牌预扣 -> 资金来源预扣。
+// preConsume 执行预扣费：信任检查 -> 资金来源预扣 -> 令牌预扣。
 // 任一步骤失败时原子回滚已完成的步骤。
 func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIError {
 	effectiveQuota := quota
@@ -224,6 +226,11 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 		op.TokenId = s.relayInfo.TokenId
 	}
 	err := model.CreateBillingReservation(op, func(tx *gorm.DB) error {
+		// Funding rows are locked before the token row. This is the canonical
+		// subscription -> user -> token order shared by every billing phase.
+		if err := s.preConsumeFundingTx(tx, op, effectiveQuota); err != nil {
+			return err
+		}
 		if effectiveQuota > 0 && !s.relayInfo.IsPlayground {
 			reserved, err := model.TryReserveTokenQuotaTx(tx, op.TokenId, int64(effectiveQuota), s.relayInfo.TokenUnlimited)
 			if err != nil {
@@ -234,7 +241,7 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 			}
 			op.TokenAmount = int64(effectiveQuota)
 		}
-		return s.preConsumeFundingTx(tx, op, effectiveQuota)
+		return nil
 	})
 	if err != nil {
 		if errors.Is(err, model.ErrBillingTokenInsufficient) {

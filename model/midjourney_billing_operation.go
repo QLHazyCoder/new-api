@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -86,19 +87,12 @@ func ChargeMidjourneyTask(task *Midjourney, quota, tokenID int) (bool, error) {
 	if task == nil || task.Id <= 0 || task.UserId <= 0 || quota <= 0 {
 		return false, errors.New("invalid Midjourney charge")
 	}
+	requestID := task.BillingRequestID
+	if requestID == "" {
+		requestID = midjourneyBillingRequestID(task.Id)
+	}
 	var billed bool
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		var current Midjourney
-		if err := lockForUpdate(tx).Where("id = ?", task.Id).First(&current).Error; err != nil {
-			return err
-		}
-		if current.UserId != task.UserId {
-			return errors.New("Midjourney billing owner changed")
-		}
-		requestID := task.BillingRequestID
-		if requestID == "" {
-			requestID = midjourneyBillingRequestID(task.Id)
-		}
+	err := withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
 		var existing BillingOperation
 		found := lockForUpdate(tx).Where("request_id = ? AND phase = ?", requestID, "initial").Limit(1).Find(&existing)
 		if found.Error != nil {
@@ -106,6 +100,13 @@ func ChargeMidjourneyTask(task *Midjourney, quota, tokenID int) (bool, error) {
 		}
 		if found.RowsAffected == 0 {
 			return errors.New("Midjourney task has no durable settlement intent")
+		}
+		var current Midjourney
+		if err := lockForUpdate(tx).Where("id = ?", task.Id).First(&current).Error; err != nil {
+			return err
+		}
+		if current.UserId != task.UserId {
+			return errors.New("Midjourney billing owner changed")
 		}
 		if existing.FundingSource != "midjourney_wallet" || existing.UserId != current.UserId || existing.TokenId != tokenID ||
 			existing.ChannelId != current.GetBillingChannelId() || existing.TaskId != int64(current.Id) ||
@@ -126,6 +127,9 @@ func ChargeMidjourneyTask(task *Midjourney, quota, tokenID int) (bool, error) {
 			return errors.New("Midjourney task already has a legacy billing marker")
 		}
 		channelID := current.GetBillingChannelId()
+		if err := lockBillingUser(tx, current.UserId); err != nil {
+			return err
+		}
 		if tokenID > 0 {
 			var token Token
 			if err := lockForUpdate(tx).Select("id", "user_id").Where("id = ?", tokenID).First(&token).Error; err != nil {
@@ -205,6 +209,44 @@ func tokenAmountForMidjourney(quota, tokenID int) int64 {
 	return int64(quota)
 }
 
+func ensureMidjourneyLegacyBillingRoot(task *Midjourney, requestID string) error {
+	if task == nil || task.Id <= 0 || requestID == "" {
+		return errors.New("invalid Midjourney billing root request")
+	}
+	return withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
+		var root BillingOperation
+		found := tx.Where("request_id = ? AND phase = ?", requestID, "initial").Limit(1).Find(&root)
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected == 1 {
+			return nil
+		}
+		var current Midjourney
+		if err := lockForUpdate(tx).Where("id = ?", task.Id).First(&current).Error; err != nil {
+			return err
+		}
+		found = tx.Where("request_id = ? AND phase = ?", requestID, "initial").Limit(1).Find(&root)
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected == 1 {
+			return nil
+		}
+		tokenAmount := int64(0)
+		if current.TokenId > 0 {
+			tokenAmount = int64(current.Quota)
+		}
+		now := common.GetTimestamp()
+		root = BillingOperation{RequestId: requestID, Phase: "initial", State: BillingSettled,
+			UserId: current.UserId, ChannelId: current.GetBillingChannelId(), TokenId: current.TokenId,
+			FundingSource: "wallet", WalletAmount: int64(current.Quota), TokenAmount: tokenAmount,
+			PreConsumed: int64(current.Quota), Actual: int64(current.Quota), TaskId: int64(current.Id),
+			CreatedAt: now, UpdatedAt: now}
+		return tx.Create(&root).Error
+	})
+}
+
 // RefundMidjourneyTask also accepts pre-migration tasks: a positive persisted
 // quota was their durable charge marker. New tasks are inserted with zero quota.
 func RefundMidjourneyTask(task *Midjourney) (bool, error) {
@@ -249,46 +291,43 @@ func RefundMidjourneyTask(task *Midjourney) (bool, error) {
 		}
 		return true, nil
 	}
+	if err := ensureMidjourneyLegacyBillingRoot(&current, requestID); err != nil {
+		return false, err
+	}
 	var refunded bool
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
+		root, err := lockBillingOperation(tx, requestID)
+		if err != nil {
+			return err
+		}
 		if err := lockForUpdate(tx).Where("id = ?", task.Id).First(&current).Error; err != nil {
 			return err
 		}
 		if current.UserId != task.UserId {
 			return errors.New("Midjourney refund owner changed")
 		}
-		var root BillingOperation
-		found := lockForUpdate(tx).Where("request_id = ? AND phase = ?", requestID, "initial").Limit(1).Find(&root)
-		if found.Error != nil {
-			return found.Error
-		}
-		if found.RowsAffected == 0 {
-			now := common.GetTimestamp()
-			tokenAmount := int64(0)
-			if current.TokenId > 0 {
-				tokenAmount = int64(current.Quota)
-			}
-			root = BillingOperation{RequestId: requestID, Phase: "initial", State: BillingSettled,
-				UserId: current.UserId, ChannelId: current.GetBillingChannelId(), TokenId: current.TokenId,
-				FundingSource: "wallet", WalletAmount: int64(current.Quota), TokenAmount: tokenAmount,
-				PreConsumed: int64(current.Quota), Actual: int64(current.Quota), CreatedAt: now, UpdatedAt: now}
-			if err := tx.Create(&root).Error; err != nil {
-				return err
-			}
-		} else if root.State != BillingSettled || root.Actual != int64(current.Quota) {
+		if root.State != BillingSettled || root.Actual != int64(current.Quota) {
 			return errors.New("Midjourney refund amount does not match charge")
 		}
 		amount := int64(current.Quota)
+		if err := lockBillingUser(tx, current.UserId); err != nil {
+			return err
+		}
+		if current.TokenId > 0 {
+			if err := lockBillingToken(tx, current.TokenId); err != nil {
+				return err
+			}
+		}
 		if err := updateUserQuotaWithDeltaTx(tx, current.UserId, amount, nil); err != nil {
+			return err
+		}
+		if err := updateUserQuotaFieldDeltaTx(tx, current.UserId, "used_quota", -amount); err != nil {
 			return err
 		}
 		if current.TokenId > 0 {
 			if err := updateTokenQuotaDeltaTx(tx, current.TokenId, amount); err != nil {
 				return err
 			}
-		}
-		if err := updateUserQuotaFieldDeltaTx(tx, current.UserId, "used_quota", -amount); err != nil {
-			return err
 		}
 		if channelID := current.GetBillingChannelId(); channelID > 0 {
 			if err := updateChannelUsedQuotaTx(tx, channelID, -amount); err != nil {

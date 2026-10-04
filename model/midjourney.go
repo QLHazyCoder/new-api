@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 
 	"github.com/QuantumNous/new-api/common"
@@ -186,10 +187,12 @@ func (midjourney *Midjourney) Insert() error {
 		return errors.New("invalid prepared Midjourney task billing")
 	}
 	desired := *midjourney
-	staged := desired
-	staged.Quota = 0
+	var staged Midjourney
 	var persistedID int
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
+		staged = desired
+		staged.Id = 0
+		staged.Quota = 0
 		var operation BillingOperation
 		if err := lockForUpdate(tx).Where("request_id = ? AND phase = ?", desired.BillingRequestID, "initial").First(&operation).Error; err != nil {
 			return err

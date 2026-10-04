@@ -10,9 +10,9 @@ import (
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
-// RecoverBillingOnce only retries explicitly requested refunds or terminal
-// failed tasks. An in-flight request with an unknown upstream result is never
-// inferred to have failed solely because its reservation is old.
+// RecoverBillingOnce replays persisted settlement/refund intents and reports
+// unresolved task outcomes. An in-flight request with an unknown upstream
+// result is never inferred to have failed solely because its reservation is old.
 func RecoverBillingOnce(ctx context.Context) {
 	settlements, err := model.ListPendingBillingSettlements(100)
 	if err != nil {
@@ -28,7 +28,7 @@ func RecoverBillingOnce(ctx context.Context) {
 				continue
 			}
 			if claimed {
-				if err := model.RecoverBillingTaskSettlement(op.RequestId); err != nil {
+				if err := model.RecoverBillingSettlement(op.RequestId); err != nil {
 					common.SysError(fmt.Sprintf("billing settlement still pending for %s: %v", op.RequestId, err))
 				}
 			}

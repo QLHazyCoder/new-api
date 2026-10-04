@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strconv"
@@ -1461,7 +1462,7 @@ func PreConsumeUserSubscriptionTx(tx *gorm.DB, requestId string, userId int, mod
 	if tx != nil {
 		err = apply(tx)
 	} else {
-		err = DB.Transaction(apply)
+		err = withBillingTransaction(context.Background(), apply)
 	}
 	if err != nil {
 		return nil, err
@@ -1625,7 +1626,7 @@ func PreConsumeUserSubscriptionPartialTx(tx *gorm.DB, requestId string, userId i
 	if tx != nil {
 		err = apply(tx)
 	} else {
-		err = DB.Transaction(apply)
+		err = withBillingTransaction(context.Background(), apply)
 	}
 	if err != nil {
 		return nil, err
@@ -1638,15 +1639,20 @@ func RefundSubscriptionPreConsume(requestId string) error {
 	if strings.TrimSpace(requestId) == "" {
 		return errors.New("requestId is empty")
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
 		return refundSubscriptionPreConsumeTx(tx, requestId)
 	})
 }
 
 func refundSubscriptionPreConsumeTx(tx *gorm.DB, requestId string) error {
 	var record SubscriptionPreConsumeRecord
-	if err := lockForUpdate(tx).
-		Where("request_id = ?", requestId).First(&record).Error; err != nil {
+	if err := tx.Where("request_id = ?", requestId).First(&record).Error; err != nil {
+		return err
+	}
+	if err := lockBillingSubscription(tx, record.UserSubscriptionId); err != nil {
+		return err
+	}
+	if err := lockForUpdate(tx).Where("request_id = ?", requestId).First(&record).Error; err != nil {
 		return err
 	}
 	if record.Status == "refunded" {
@@ -1760,7 +1766,7 @@ func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error
 	if delta == 0 {
 		return nil
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
 		return postConsumeUserSubscriptionDeltaTx(tx, userSubscriptionId, delta)
 	})
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -64,23 +65,34 @@ func CreateBillingReservation(op *BillingOperation, apply func(*gorm.DB) error) 
 	if op == nil || !billingOperationKeyValid(op.RequestId, "initial") || op.UserId <= 0 || apply == nil {
 		return errors.New("invalid billing reservation")
 	}
-	op.Phase = "initial"
-	op.State = BillingReserved
-	now := common.GetTimestamp()
-	op.CreatedAt, op.UpdatedAt = now, now
-	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(op).Error; err != nil {
+	baseOp := *op
+	return withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
+		attemptOp := baseOp
+		attemptOp.Id = 0
+		attemptOp.Phase = "initial"
+		attemptOp.State = BillingReserved
+		now := common.GetTimestamp()
+		attemptOp.CreatedAt, attemptOp.UpdatedAt = now, now
+		*op = attemptOp
+		if err := tx.Create(&attemptOp).Error; err != nil {
 			return err
 		}
+		createdID := attemptOp.Id
 		if err := apply(tx); err != nil {
 			return err
 		}
-		return tx.Model(op).Updates(map[string]any{
-			"channel_id": op.ChannelId, "token_id": op.TokenId, "subscription_id": op.SubscriptionId,
-			"funding_source": op.FundingSource, "wallet_amount": op.WalletAmount,
-			"subscription_amount": op.SubscriptionAmount, "token_amount": op.TokenAmount,
-			"pre_consumed": op.PreConsumed,
-		}).Error
+		attemptOp = *op
+		attemptOp.Id = createdID
+		if err := tx.Model(&attemptOp).Updates(map[string]any{
+			"channel_id": attemptOp.ChannelId, "token_id": attemptOp.TokenId, "subscription_id": attemptOp.SubscriptionId,
+			"funding_source": attemptOp.FundingSource, "wallet_amount": attemptOp.WalletAmount,
+			"subscription_amount": attemptOp.SubscriptionAmount, "token_amount": attemptOp.TokenAmount,
+			"pre_consumed": attemptOp.PreConsumed,
+		}).Error; err != nil {
+			return err
+		}
+		*op = attemptOp
+		return nil
 	})
 }
 
@@ -99,6 +111,57 @@ type BillingTaskCommit struct {
 	FromStatus TaskStatus
 }
 
+// RequestBillingSettlement records the exact ordinary-relay settlement before
+// any balance is changed. The request row is the recovery source of truth when
+// a process exits between the upstream response and the financial commit.
+func RequestBillingSettlement(requestId string, walletDelta, subscriptionDelta, tokenDelta, actual int64, countRequest bool) error {
+	if !billingOperationKeyValid(requestId, "settlement_request") || actual < 0 || actual > int64(common.MaxChargeQuota) ||
+		walletDelta == common.MinWalletQuota || subscriptionDelta == common.MinWalletQuota || tokenDelta == common.MinWalletQuota {
+		return errors.New("invalid billing settlement request")
+	}
+	return withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
+		root, err := lockBillingOperation(tx, requestId)
+		if err != nil {
+			return err
+		}
+		if root.TaskId > 0 || root.FundingSource == "midjourney_wallet" {
+			return errors.New("task billing settlement must use its task intent")
+		}
+		var existing BillingOperation
+		found := tx.Where("request_id = ? AND phase = ?", requestId, "settlement_request").Limit(1).Find(&existing)
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected == 1 {
+			if existing.WalletAmount != walletDelta || existing.SubscriptionAmount != subscriptionDelta || existing.TokenAmount != tokenDelta ||
+				existing.Actual != actual || existing.UsageCounted != countRequest {
+				return errors.New("billing settlement request replay has different amounts")
+			}
+			return nil
+		}
+		switch root.State {
+		case BillingReserved:
+		case BillingSettled:
+			return nil
+		case BillingSettlementRequested:
+			return errors.New("billing settlement request is incomplete")
+		default:
+			return fmt.Errorf("billing operation state %s cannot request settlement", root.State)
+		}
+		now := common.GetTimestamp()
+		intent := BillingOperation{RequestId: requestId, Phase: "settlement_request", State: BillingSettlementRequested,
+			UserId: root.UserId, ChannelId: root.ChannelId, TokenId: root.TokenId, SubscriptionId: root.SubscriptionId,
+			FundingSource: root.FundingSource, WalletAmount: walletDelta, SubscriptionAmount: subscriptionDelta,
+			TokenAmount: tokenDelta, Actual: actual, UsageCounted: countRequest, CreatedAt: now, UpdatedAt: now}
+		if err := tx.Create(&intent).Error; err != nil {
+			return err
+		}
+		return tx.Model(root).Updates(map[string]any{
+			"state": BillingSettlementRequested, "actual": actual, "updated_at": now,
+		}).Error
+	})
+}
+
 func ApplyBillingAdjustment(requestId, phase string, walletDelta, subscriptionDelta, tokenDelta int64, requireWalletBalance, settle bool, actual int64, countRequest bool, taskCommit ...*BillingTaskCommit) error {
 	if !billingOperationKeyValid(requestId, phase) || phase == "initial" || phase == "refund" {
 		return errors.New("invalid billing adjustment phase")
@@ -114,19 +177,22 @@ func ApplyBillingAdjustment(requestId, phase string, walletDelta, subscriptionDe
 		}
 	}
 	var updatedTask *Task
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
 		var currentTask *Task
 		var taskToCommit *Task
+		root, err := lockBillingOperation(tx, requestId)
+		if err != nil {
+			return err
+		}
 		if commit != nil {
 			var locked Task
 			if err := lockForUpdate(tx).Where("id = ?", commit.Task.ID).First(&locked).Error; err != nil {
 				return err
 			}
+			if root.TaskId != int64(locked.ID) || root.UserId != locked.UserId {
+				return errors.New("billing task commit does not match operation root")
+			}
 			currentTask = &locked
-		}
-		root, err := lockBillingOperation(tx, requestId)
-		if err != nil {
-			return err
 		}
 		var previous BillingOperation
 		found := tx.Where("request_id = ? AND phase = ?", requestId, phase).Limit(1).Find(&previous)
@@ -148,7 +214,21 @@ func ApplyBillingAdjustment(requestId, phase string, walletDelta, subscriptionDe
 		if commit != nil && currentTask.Status != commit.FromStatus {
 			return ErrBillingTaskStateChanged
 		}
-		if root.State != BillingReserved && !(commit != nil && root.State == BillingSettlementRequested && root.Actual == actual && root.PendingTaskStatus == commit.Task.Status) {
+		settlementIntent := false
+		if settle && commit == nil && root.State == BillingSettlementRequested {
+			var intent BillingOperation
+			intentFound := tx.Where("request_id = ? AND phase = ?", requestId, "settlement_request").Limit(1).Find(&intent)
+			if intentFound.Error != nil {
+				return intentFound.Error
+			}
+			if intentFound.RowsAffected == 1 && intent.WalletAmount == walletDelta && intent.SubscriptionAmount == subscriptionDelta &&
+				intent.TokenAmount == tokenDelta && intent.Actual == actual && intent.UsageCounted == countRequest {
+				settlementIntent = true
+			} else {
+				return errors.New("billing settlement intent does not match adjustment")
+			}
+		}
+		if root.State != BillingReserved && !(commit != nil && root.State == BillingSettlementRequested && root.Actual == actual && root.PendingTaskStatus == commit.Task.Status) && !settlementIntent {
 			return fmt.Errorf("billing operation state %s cannot be adjusted", root.State)
 		}
 		walletTotal, err := common.AddWalletQuota(root.WalletAmount, walletDelta)
@@ -163,6 +243,34 @@ func ApplyBillingAdjustment(requestId, phase string, walletDelta, subscriptionDe
 		if err != nil || tokenTotal < 0 {
 			return common.ErrWalletQuotaOverflow
 		}
+		if subscriptionDelta != 0 {
+			if root.SubscriptionId <= 0 {
+				return errors.New("subscription id missing")
+			}
+			if err := lockBillingSubscription(tx, root.SubscriptionId); err != nil {
+				return err
+			}
+		}
+		if walletDelta != 0 || settle && countRequest {
+			if err := lockBillingUser(tx, root.UserId); err != nil {
+				return err
+			}
+		}
+		if tokenDelta != 0 && root.TokenId > 0 {
+			if err := lockBillingToken(tx, root.TokenId); err != nil {
+				return err
+			}
+		}
+		if subscriptionDelta != 0 {
+			if requireWalletBalance && subscriptionDelta > 0 {
+				err = reserveSubscriptionAdditionalTx(tx, root.SubscriptionId, subscriptionDelta)
+			} else {
+				err = postConsumeUserSubscriptionDeltaTx(tx, root.SubscriptionId, subscriptionDelta)
+			}
+			if err != nil {
+				return err
+			}
+		}
 		if walletDelta != 0 {
 			if requireWalletBalance && walletDelta > 0 {
 				reserved, err := reserveUserQuotaTx(tx, root.UserId, walletDelta)
@@ -173,19 +281,6 @@ func ApplyBillingAdjustment(requestId, phase string, walletDelta, subscriptionDe
 					return ErrBillingWalletInsufficient
 				}
 			} else if err := updateUserQuotaWithDeltaTx(tx, root.UserId, -walletDelta, nil); err != nil {
-				return err
-			}
-		}
-		if subscriptionDelta != 0 {
-			if root.SubscriptionId <= 0 {
-				return errors.New("subscription id missing")
-			}
-			if requireWalletBalance && subscriptionDelta > 0 {
-				err = reserveSubscriptionAdditionalTx(tx, root.SubscriptionId, subscriptionDelta)
-			} else {
-				err = postConsumeUserSubscriptionDeltaTx(tx, root.SubscriptionId, subscriptionDelta)
-			}
-			if err != nil {
 				return err
 			}
 		}
@@ -271,10 +366,12 @@ func InsertTaskWithBillingIntent(ctx context.Context, requestId string, task *Ta
 		return errors.New("invalid task billing settlement request")
 	}
 	desired := *task
-	staged := desired
-	staged.Quota = 0
-	staged.Status = TaskStatusBillingPending
-	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var staged Task
+	err := withBillingTransaction(ctx, func(tx *gorm.DB) error {
+		staged = desired
+		staged.ID = 0
+		staged.Quota = 0
+		staged.Status = TaskStatusBillingPending
 		root, err := lockBillingOperation(tx, requestId)
 		if err != nil {
 			return err
@@ -315,6 +412,34 @@ func ClaimBillingSettlement(requestId string, leaseSeconds int64) (bool, error) 
 		Where("request_id = ? AND phase = ? AND state = ? AND lease_until <= ?", requestId, "initial", BillingSettlementRequested, now).
 		Update("lease_until", now+leaseSeconds)
 	return result.RowsAffected == 1, result.Error
+}
+
+// RecoverBillingSettlement replays either an ordinary settlement request or
+// the existing task/Midjourney intent. Ordinary relay recovery never derives a
+// charge from an old reservation; it requires the persisted request row.
+func RecoverBillingSettlement(requestId string) error {
+	var root BillingOperation
+	if err := DB.Where("request_id = ? AND phase = ?", requestId, "initial").First(&root).Error; err != nil {
+		return err
+	}
+	if root.TaskId > 0 || root.FundingSource == "midjourney_wallet" {
+		return RecoverBillingTaskSettlement(requestId)
+	}
+	if root.State == BillingSettled {
+		return nil
+	}
+	if root.State != BillingSettlementRequested {
+		return errors.New("ordinary billing settlement intent is incomplete")
+	}
+	var intent BillingOperation
+	if err := DB.Where("request_id = ? AND phase = ?", requestId, "settlement_request").First(&intent).Error; err != nil {
+		return err
+	}
+	if intent.State != BillingSettlementRequested || intent.Actual < 0 || intent.Actual > int64(common.MaxChargeQuota) {
+		return errors.New("ordinary billing settlement request is invalid")
+	}
+	return ApplyBillingAdjustment(requestId, "settle", intent.WalletAmount, intent.SubscriptionAmount,
+		intent.TokenAmount, false, true, intent.Actual, intent.UsageCounted)
 }
 
 // RecoverBillingTaskSettlement settles only an intent created after a known
@@ -372,7 +497,7 @@ func RecoverBillingTaskSettlement(requestId string) error {
 // RequestBillingRefund durably records a known failure before attempting any
 // credit. An unknown upstream outcome must never call this function.
 func RequestBillingRefund(requestId string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
 		op, err := lockBillingOperation(tx, requestId)
 		if err != nil {
 			return err
@@ -394,7 +519,7 @@ func RequestBillingRefund(requestId string) error {
 }
 
 func RefundBillingOperation(requestId string) error {
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
 		op, err := lockBillingOperation(tx, requestId)
 		if err != nil {
 			return err
@@ -405,21 +530,36 @@ func RefundBillingOperation(requestId string) error {
 		if op.State != BillingRefundRequested {
 			return fmt.Errorf("billing refund not requested: %s", op.State)
 		}
-		if op.WalletAmount > 0 {
-			if err := updateUserQuotaWithDeltaTx(tx, op.UserId, op.WalletAmount, nil); err != nil {
-				return err
-			}
-		}
 		if op.SubscriptionAmount > 0 {
 			if op.SubscriptionId <= 0 {
 				return errors.New("subscription id missing on refund")
 			}
+			if err := lockBillingSubscription(tx, op.SubscriptionId); err != nil {
+				return err
+			}
+		}
+		if op.WalletAmount > 0 {
+			if err := lockBillingUser(tx, op.UserId); err != nil {
+				return err
+			}
+		}
+		if op.TokenAmount > 0 && op.TokenId > 0 {
+			if err := lockBillingToken(tx, op.TokenId); err != nil {
+				return err
+			}
+		}
+		if op.SubscriptionAmount > 0 {
 			if op.ExtraReserved > 0 {
 				if err := postConsumeUserSubscriptionDeltaTx(tx, op.SubscriptionId, -op.ExtraReserved); err != nil {
 					return err
 				}
 			}
 			if err := refundSubscriptionPreConsumeTx(tx, requestId); err != nil {
+				return err
+			}
+		}
+		if op.WalletAmount > 0 {
+			if err := updateUserQuotaWithDeltaTx(tx, op.UserId, op.WalletAmount, nil); err != nil {
 				return err
 			}
 		}
@@ -498,7 +638,7 @@ func ApplyLegacyBillingDelta(requestId, phase string, userId, channelId, tokenId
 	if settles && (usage < 0 || usage > int64(common.MaxChargeQuota)) {
 		return errors.New("legacy billing usage exceeds the single-request charge range")
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
+	return withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
 		fundingSource := "wallet"
 		if subscriptionId > 0 {
 			fundingSource = "subscription"
@@ -512,10 +652,14 @@ func ApplyLegacyBillingDelta(requestId, phase string, userId, channelId, tokenId
 			root = BillingOperation{RequestId: requestId, Phase: "initial", State: BillingReserved,
 				UserId: userId, ChannelId: channelId, TokenId: tokenId, SubscriptionId: subscriptionId,
 				FundingSource: fundingSource, CreatedAt: common.GetTimestamp(), UpdatedAt: common.GetTimestamp()}
-			if err := tx.Create(&root).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&root).Error; err != nil {
 				return err
 			}
-		} else if root.UserId != userId || root.ChannelId != channelId || root.TokenId != tokenId ||
+			if err := lockForUpdate(tx).Where("request_id = ? AND phase = ?", requestId, "initial").First(&root).Error; err != nil {
+				return err
+			}
+		}
+		if root.UserId != userId || root.ChannelId != channelId || root.TokenId != tokenId ||
 			root.SubscriptionId != subscriptionId || root.FundingSource != fundingSource {
 			return errors.New("legacy billing request identity changed")
 		}
@@ -534,6 +678,21 @@ func ApplyLegacyBillingDelta(requestId, phase string, userId, channelId, tokenId
 		}
 		if root.State != BillingReserved {
 			return fmt.Errorf("legacy billing operation is already %s", root.State)
+		}
+		if subscriptionId > 0 {
+			if err := lockBillingSubscription(tx, subscriptionId); err != nil {
+				return err
+			}
+		}
+		if delta != 0 || settles && (usage > 0 || countRequest) {
+			if err := lockBillingUser(tx, userId); err != nil {
+				return err
+			}
+		}
+		if tokenId > 0 && delta != 0 {
+			if err := lockBillingToken(tx, tokenId); err != nil {
+				return err
+			}
 		}
 		walletDelta, subscriptionDelta, tokenDelta := int64(0), int64(0), int64(0)
 		if subscriptionId > 0 {

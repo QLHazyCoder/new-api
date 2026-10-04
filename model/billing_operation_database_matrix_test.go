@@ -3,10 +3,13 @@ package model
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/go-sql-driver/mysql"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -19,6 +22,139 @@ type preBillingMidjourney struct {
 	Progress   string
 	SubmitTime int64
 	Quota      int
+}
+
+func TestBillingTransactionRetriesMySQLDeadlock(t *testing.T) {
+	attempts := 0
+	err := withBillingTransaction(context.Background(), func(*gorm.DB) error {
+		attempts++
+		if attempts < billingTransactionAttempts {
+			return &mysql.MySQLError{Number: 1213, Message: "deadlock found when trying to get lock"}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, billingTransactionAttempts, attempts)
+}
+
+func TestBillingSettlementConcurrentHotAccount(t *testing.T) {
+	db := openSensitiveWordMatrixDB(t, "sqlite", "")
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(8)
+	previous, previousLog := DB, LOG_DB
+	oldMain, oldLog := common.MainDatabaseType(), common.LogDatabaseType()
+	DB, LOG_DB = db, db
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	initCol()
+	t.Cleanup(func() {
+		DB, LOG_DB = previous, previousLog
+		common.SetDatabaseTypes(oldMain, oldLog)
+		initCol()
+	})
+	require.NoError(t, db.AutoMigrate(&User{}, &Token{}, &Channel{}, &BillingOperation{}))
+	user := User{Username: "billing-hot-account", Quota: 1_000_000, Status: common.UserStatusEnabled}
+	require.NoError(t, db.Create(&user).Error)
+	token := Token{UserId: user.Id, Key: "billing-hot-token", Status: common.TokenStatusEnabled, RemainQuota: 1_000_000, ExpiredTime: -1}
+	require.NoError(t, db.Create(&token).Error)
+	channel := Channel{Id: 901, Name: "billing-hot-channel", Key: "billing-hot"}
+	require.NoError(t, db.Create(&channel).Error)
+
+	const operationCount = 4
+	requestIDs := make([]string, operationCount)
+	for i := range requestIDs {
+		requestIDs[i] = fmt.Sprintf("hot-account-%d", i)
+		op := &BillingOperation{RequestId: requestIDs[i], UserId: user.Id, ChannelId: channel.Id,
+			TokenId: token.Id, FundingSource: "wallet", PreConsumed: 100}
+		require.NoError(t, CreateBillingReservation(op, func(tx *gorm.DB) error {
+			reserved, err := TryReserveUserQuotaTx(tx, user.Id, 100)
+			require.NoError(t, err)
+			require.True(t, reserved)
+			reserved, err = TryReserveTokenQuotaTx(tx, token.Id, 100, false)
+			require.NoError(t, err)
+			require.True(t, reserved)
+			op.WalletAmount, op.TokenAmount = 100, 100
+			return nil
+		}))
+		require.NoError(t, RequestBillingSettlement(requestIDs[i], 25, 0, 25, 125, true))
+	}
+
+	var waitGroup sync.WaitGroup
+	errorsCh := make(chan error, operationCount)
+	for _, requestID := range requestIDs {
+		requestID := requestID
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			errorsCh <- RecoverBillingSettlement(requestID)
+		}()
+	}
+	waitGroup.Wait()
+	close(errorsCh)
+	for err := range errorsCh {
+		require.NoError(t, err)
+	}
+
+	var persistedUser User
+	require.NoError(t, db.First(&persistedUser, user.Id).Error)
+	require.EqualValues(t, 999_500, persistedUser.Quota)
+	require.EqualValues(t, 500, persistedUser.UsedQuota)
+	require.EqualValues(t, operationCount, persistedUser.RequestCount)
+	var persistedToken Token
+	require.NoError(t, db.First(&persistedToken, token.Id).Error)
+	require.EqualValues(t, 999_500, persistedToken.RemainQuota)
+	require.EqualValues(t, 500, persistedToken.UsedQuota)
+	var persistedChannel Channel
+	require.NoError(t, db.First(&persistedChannel, channel.Id).Error)
+	require.EqualValues(t, 500, persistedChannel.UsedQuota)
+	var settled int64
+	require.NoError(t, db.Model(&BillingOperation{}).Where("phase = ? AND state = ?", "settle", BillingSettled).Count(&settled).Error)
+	require.EqualValues(t, operationCount, settled)
+}
+
+func TestBillingLegacyRootConcurrentInitialization(t *testing.T) {
+	db := openSensitiveWordMatrixDB(t, "sqlite", "")
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(8)
+	previous, previousLog := DB, LOG_DB
+	oldMain, oldLog := common.MainDatabaseType(), common.LogDatabaseType()
+	DB, LOG_DB = db, db
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	initCol()
+	t.Cleanup(func() {
+		DB, LOG_DB = previous, previousLog
+		common.SetDatabaseTypes(oldMain, oldLog)
+		initCol()
+	})
+	require.NoError(t, db.AutoMigrate(&User{}, &BillingOperation{}))
+	user := User{Username: "billing-legacy-root-race", Quota: 1_000, Status: common.UserStatusEnabled}
+	require.NoError(t, db.Create(&user).Error)
+
+	const operationCount = 4
+	var waitGroup sync.WaitGroup
+	errorsCh := make(chan error, operationCount)
+	for i := 0; i < operationCount; i++ {
+		phase := fmt.Sprintf("legacy-consume:%d", i)
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			errorsCh <- ApplyLegacyBillingDelta("legacy-root-race", phase, user.Id, 0, 0, 0, 10, 0, false, false)
+		}()
+	}
+	waitGroup.Wait()
+	close(errorsCh)
+	for err := range errorsCh {
+		require.NoError(t, err)
+	}
+
+	var rootCount int64
+	require.NoError(t, db.Model(&BillingOperation{}).Where("request_id = ? AND phase = ?", "legacy-root-race", "initial").Count(&rootCount).Error)
+	require.EqualValues(t, 1, rootCount)
+	var phaseCount int64
+	require.NoError(t, db.Model(&BillingOperation{}).Where("request_id = ? AND phase LIKE ?", "legacy-root-race", "legacy-consume:%").Count(&phaseCount).Error)
+	require.EqualValues(t, operationCount, phaseCount)
+	require.EqualValues(t, 960, getUserQuotaFromDB(t, user.Id))
 }
 
 func (preBillingMidjourney) TableName() string { return "midjourneys" }
@@ -123,6 +259,27 @@ func TestBillingOperationDatabaseMatrix(t *testing.T) {
 			require.EqualValues(t, 1, used.RequestCount)
 			require.NoError(t, db.First(&channel, channel.Id).Error)
 			require.EqualValues(t, 30, channel.UsedQuota)
+
+			ordinaryIntent := &BillingOperation{RequestId: "test-billing-ordinary-intent", UserId: user.Id,
+				ChannelId: channel.Id, TokenId: token.Id, FundingSource: "wallet", PreConsumed: 10}
+			require.NoError(t, CreateBillingReservation(ordinaryIntent, func(tx *gorm.DB) error {
+				reserved, err := TryReserveUserQuotaTx(tx, user.Id, 10)
+				require.NoError(t, err)
+				require.True(t, reserved)
+				reserved, err = TryReserveTokenQuotaTx(tx, token.Id, 10, false)
+				require.NoError(t, err)
+				require.True(t, reserved)
+				ordinaryIntent.WalletAmount, ordinaryIntent.TokenAmount = 10, 10
+				return nil
+			}))
+			require.NoError(t, RequestBillingSettlement(ordinaryIntent.RequestId, 0, 0, 0, 10, true))
+			var pendingOrdinary BillingOperation
+			require.NoError(t, db.Where("request_id = ? AND phase = ?", ordinaryIntent.RequestId, "initial").First(&pendingOrdinary).Error)
+			require.Equal(t, BillingSettlementRequested, pendingOrdinary.State)
+			require.NoError(t, RecoverBillingSettlement(ordinaryIntent.RequestId))
+			require.NoError(t, RecoverBillingSettlement(ordinaryIntent.RequestId))
+			require.NoError(t, db.Where("request_id = ? AND phase = ?", ordinaryIntent.RequestId, "initial").First(&pendingOrdinary).Error)
+			require.Equal(t, BillingSettled, pendingOrdinary.State)
 
 			settleUser := User{Username: "billing-task", AffCode: "billing-task-" + driver.name, Quota: 100, Status: common.UserStatusEnabled}
 			require.NoError(t, db.Create(&settleUser).Error)

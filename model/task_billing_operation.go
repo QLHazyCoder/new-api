@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -25,14 +26,20 @@ func FinalizeTaskBillingWithStatus(task *Task, actual int, refund bool, fromStat
 	if task == nil || task.ID <= 0 || actual < 0 || actual > common.MaxChargeQuota {
 		return false, errors.New("invalid task billing operation")
 	}
-	requestId := fmt.Sprintf("task:%d", task.ID)
 	phase := fmt.Sprintf("recalc:%d", actual)
 	if refund {
 		phase = "refund"
 		actual = 0
 	}
+	if err := ensureTaskBillingRoot(task); err != nil {
+		return false, err
+	}
 	var updated *Task
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
+		requestRoot, err := lockTaskBillingOperation(tx, task.ID)
+		if err != nil {
+			return err
+		}
 		var current Task
 		if err := lockForUpdate(tx).Where("id = ?", task.ID).First(&current).Error; err != nil {
 			return err
@@ -53,24 +60,9 @@ func FinalizeTaskBillingWithStatus(task *Task, actual int, refund bool, fromStat
 				stored.TieredSnapshot = incoming.TieredSnapshot
 			}
 		}
-		var root BillingOperation
-		found := lockForUpdate(tx).Where("request_id = ? AND phase = ?", requestId, "initial").Limit(1).Find(&root)
-		if found.Error != nil {
-			return found.Error
-		}
-		if found.RowsAffected == 0 {
-			fundingSource, walletAmount, subscriptionAmount, tokenAmount, subscriptionID, err := taskBillingRootSnapshot(&current)
-			if err != nil {
-				return err
-			}
-			root = BillingOperation{RequestId: requestId, Phase: "initial", State: BillingReserved,
-				TaskId: task.ID, UserId: current.UserId, ChannelId: current.ChannelId, TokenId: current.PrivateData.TokenId,
-				SubscriptionId: subscriptionID, FundingSource: fundingSource,
-				WalletAmount: walletAmount, SubscriptionAmount: subscriptionAmount, TokenAmount: tokenAmount,
-				PreConsumed: int64(current.Quota), Actual: int64(current.Quota), CreatedAt: common.GetTimestamp(), UpdatedAt: common.GetTimestamp()}
-			if err := tx.Create(&root).Error; err != nil {
-				return err
-			}
+		root := *requestRoot
+		if root.UserId != current.UserId || root.TaskId != int64(current.ID) {
+			return errors.New("task billing root does not match task")
 		}
 		switch root.State {
 		case BillingRefunded:
@@ -82,7 +74,7 @@ func FinalizeTaskBillingWithStatus(task *Task, actual int, refund bool, fromStat
 		current.PrivateData = task.PrivateData
 		delta := actual - current.Quota
 		var previous BillingOperation
-		stepFound := tx.Where("request_id = ? AND phase = ?", requestId, phase).Limit(1).Find(&previous)
+		stepFound := tx.Where("request_id = ? AND phase = ?", root.RequestId, phase).Limit(1).Find(&previous)
 		if stepFound.Error != nil {
 			return stepFound.Error
 		}
@@ -105,6 +97,9 @@ func FinalizeTaskBillingWithStatus(task *Task, actual int, refund bool, fromStat
 			if adjustedSubscriptionID > 0 {
 				subID = adjustedSubscriptionID
 			}
+			if err := updateUserQuotaFieldDeltaTx(tx, current.UserId, "used_quota", int64(delta)); err != nil {
+				return err
+			}
 			if tokenDelta != 0 {
 				if err := updateTokenQuotaDeltaTx(tx, current.PrivateData.TokenId, -tokenDelta); err != nil {
 					return err
@@ -114,9 +109,6 @@ func FinalizeTaskBillingWithStatus(task *Task, actual int, refund bool, fromStat
 				if err := updateChannelUsedQuotaTx(tx, current.ChannelId, int64(delta)); err != nil {
 					return err
 				}
-			}
-			if err := updateUserQuotaFieldDeltaTx(tx, current.UserId, "used_quota", int64(delta)); err != nil {
-				return err
 			}
 		}
 		walletTotal, err := common.AddWalletQuota(root.WalletAmount, walletDelta)
@@ -135,7 +127,7 @@ func FinalizeTaskBillingWithStatus(task *Task, actual int, refund bool, fromStat
 		if refund {
 			state = BillingRefunded
 		}
-		step := BillingOperation{RequestId: requestId, Phase: phase, State: state,
+		step := BillingOperation{RequestId: root.RequestId, Phase: phase, State: state,
 			TaskId: current.ID, UserId: current.UserId, TokenId: current.PrivateData.TokenId,
 			FundingSource: root.FundingSource, SubscriptionId: subID,
 			WalletAmount: walletDelta, SubscriptionAmount: subDelta, TokenAmount: tokenDelta,
@@ -175,6 +167,86 @@ func FinalizeTaskBillingWithStatus(task *Task, actual int, refund bool, fromStat
 		*task = *updated
 	}
 	return updated != nil, err
+}
+
+// ensureTaskBillingRoot bootstraps legacy task rows before the main billing
+// transaction. It never changes a balance, so the task-only lock cannot form
+// a cycle with the root-first settlement path.
+func ensureTaskBillingRoot(task *Task) error {
+	if task == nil || task.ID <= 0 {
+		return errors.New("invalid task billing root request")
+	}
+	requestID := fmt.Sprintf("task:%d", task.ID)
+	return withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
+		var root BillingOperation
+		found := tx.Where("task_id = ? AND phase = ?", task.ID, "initial").Limit(1).Find(&root)
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected == 0 {
+			found = tx.Where("request_id = ? AND phase = ?", requestID, "initial").Limit(1).Find(&root)
+		}
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected == 1 {
+			if root.TaskId != 0 {
+				if root.TaskId != int64(task.ID) {
+					return errors.New("task billing root does not match task")
+				}
+				return nil
+			}
+		}
+		var current Task
+		if err := lockForUpdate(tx).Where("id = ?", task.ID).First(&current).Error; err != nil {
+			return err
+		}
+		found = tx.Where("task_id = ? AND phase = ?", task.ID, "initial").Limit(1).Find(&root)
+		if found.RowsAffected == 0 {
+			found = tx.Where("request_id = ? AND phase = ?", requestID, "initial").Limit(1).Find(&root)
+		}
+		if found.Error != nil {
+			return found.Error
+		}
+		if found.RowsAffected == 1 {
+			if root.TaskId == 0 {
+				if root.UserId != current.UserId {
+					return errors.New("task billing root owner does not match task")
+				}
+				if err := tx.Model(&root).Updates(map[string]any{"task_id": current.ID, "updated_at": common.GetTimestamp()}).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		fundingSource, walletAmount, subscriptionAmount, tokenAmount, subscriptionID, err := taskBillingRootSnapshot(&current)
+		if err != nil {
+			return err
+		}
+		root = BillingOperation{RequestId: requestID, Phase: "initial", State: BillingReserved,
+			TaskId: current.ID, UserId: current.UserId, ChannelId: current.ChannelId, TokenId: current.PrivateData.TokenId,
+			SubscriptionId: subscriptionID, FundingSource: fundingSource,
+			WalletAmount: walletAmount, SubscriptionAmount: subscriptionAmount, TokenAmount: tokenAmount,
+			PreConsumed: int64(current.Quota), Actual: int64(current.Quota), CreatedAt: common.GetTimestamp(), UpdatedAt: common.GetTimestamp()}
+		return tx.Create(&root).Error
+	})
+}
+
+func lockTaskBillingOperation(tx *gorm.DB, taskID int64) (*BillingOperation, error) {
+	if taskID <= 0 {
+		return nil, errors.New("invalid task billing operation id")
+	}
+	var root BillingOperation
+	requestID := fmt.Sprintf("task:%d", taskID)
+	if err := lockForUpdate(tx).Where("task_id = ? AND phase = ?", taskID, "initial").First(&root).Error; err == nil {
+		return &root, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+	if err := lockForUpdate(tx).Where("request_id = ? AND phase = ?", requestID, "initial").First(&root).Error; err != nil {
+		return nil, err
+	}
+	return &root, nil
 }
 
 func taskBillingRootSnapshot(task *Task) (fundingSource string, walletAmount, subscriptionAmount, tokenAmount int64, subscriptionID int, err error) {
@@ -251,8 +323,15 @@ func MarkTaskBillingReviewRequired(task *Task, fromStatus TaskStatus) (bool, err
 	if task == nil || task.ID <= 0 || task.Quota < 0 {
 		return false, errors.New("invalid task billing review request")
 	}
+	if err := ensureTaskBillingRoot(task); err != nil {
+		return false, err
+	}
 	var updated *Task
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
+		root, err := lockTaskBillingOperation(tx, int64(task.ID))
+		if err != nil {
+			return err
+		}
 		var current Task
 		if err := lockForUpdate(tx).Where("id = ?", task.ID).First(&current).Error; err != nil {
 			return err
@@ -278,63 +357,11 @@ func MarkTaskBillingReviewRequired(task *Task, fromStatus TaskStatus) (bool, err
 		}).Error; err != nil {
 			return err
 		}
-		var roots []BillingOperation
-		if err := lockForUpdate(tx).Where("task_id = ? AND phase = ?", current.ID, "initial").Find(&roots).Error; err != nil {
-			return err
-		}
-		if len(roots) == 0 {
-			root := BillingOperation{RequestId: fmt.Sprintf("task:%d", current.ID), Phase: "initial",
-				State: BillingReviewRequired, UserId: current.UserId, ChannelId: current.ChannelId, TokenId: current.PrivateData.TokenId,
-				SubscriptionId: current.PrivateData.SubscriptionId, FundingSource: current.PrivateData.BillingSource,
-				PreConsumed: int64(current.Quota), Actual: int64(current.Quota), TaskId: current.ID,
-				CreatedAt: common.GetTimestamp(), UpdatedAt: common.GetTimestamp()}
-			if root.TokenId > 0 {
-				root.TokenAmount = int64(current.Quota)
-			}
-			if root.FundingSource == "" {
-				root.FundingSource = "wallet"
-			}
-			for _, allocation := range current.PrivateData.BillingAllocations {
-				var amount *int64
-				switch allocation.Source {
-				case "wallet":
-					amount = &root.WalletAmount
-				case "subscription":
-					amount = &root.SubscriptionAmount
-				}
-				if amount != nil {
-					if allocation.Source == "subscription" && allocation.Quota > 0 {
-						if allocation.SubscriptionId <= 0 || root.SubscriptionId > 0 && root.SubscriptionId != allocation.SubscriptionId {
-							return errors.New("invalid mixed subscription allocation")
-						}
-						root.SubscriptionId = allocation.SubscriptionId
-					}
-					total, err := common.AddWalletQuota(*amount, int64(allocation.Quota))
-					if err != nil || total < 0 {
-						return common.ErrWalletQuotaOverflow
-					}
-					*amount = total
-				}
-			}
-			if root.FundingSource == "wallet" {
-				root.WalletAmount = int64(current.Quota)
-			} else if root.FundingSource == "subscription" {
-				root.SubscriptionAmount = int64(current.Quota)
-			} else if root.FundingSource == "mixed" && len(current.PrivateData.BillingAllocations) == 0 {
-				root.WalletAmount = int64(current.Quota)
-			}
-			if err := tx.Create(&root).Error; err != nil {
+		if root.State == BillingSettled || root.State == BillingReserved {
+			if err := tx.Model(root).Updates(map[string]any{
+				"state": BillingReviewRequired, "updated_at": common.GetTimestamp(),
+			}).Error; err != nil {
 				return err
-			}
-		} else {
-			for _, root := range roots {
-				if root.State == BillingSettled || root.State == BillingReserved {
-					if err := tx.Model(&root).Updates(map[string]any{
-						"state": BillingReviewRequired, "updated_at": common.GetTimestamp(),
-					}).Error; err != nil {
-						return err
-					}
-				}
 			}
 		}
 		updated = &current
@@ -353,7 +380,7 @@ func CommitTaskTerminalState(task *Task, fromStatus TaskStatus, clearQuota bool)
 		return false, errors.New("invalid terminal task state")
 	}
 	var updated *Task
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := withBillingTransaction(context.Background(), func(tx *gorm.DB) error {
 		var current Task
 		if err := lockForUpdate(tx).Where("id = ?", task.ID).First(&current).Error; err != nil {
 			return err
@@ -427,13 +454,13 @@ func applyTaskFundingTx(tx *gorm.DB, task *Task, delta int) (walletDelta, subscr
 		if remaining > 0 {
 			return 0, 0, 0, fmt.Errorf("mixed billing allocations are insufficient by %d", remaining)
 		}
-		if walletDelta != 0 {
-			if err := updateUserQuotaWithDeltaTx(tx, task.UserId, -walletDelta, nil); err != nil {
+		if subscriptionDelta != 0 {
+			if err := postConsumeUserSubscriptionDeltaTx(tx, subscriptionID, subscriptionDelta); err != nil {
 				return 0, 0, 0, err
 			}
 		}
-		if subscriptionDelta != 0 {
-			if err := postConsumeUserSubscriptionDeltaTx(tx, subscriptionID, subscriptionDelta); err != nil {
+		if walletDelta != 0 {
+			if err := updateUserQuotaWithDeltaTx(tx, task.UserId, -walletDelta, nil); err != nil {
 				return 0, 0, 0, err
 			}
 		}
