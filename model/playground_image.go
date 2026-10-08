@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -41,6 +42,10 @@ const (
 )
 
 var ErrPlaygroundImageTaskNotFound = errors.New("playground image task not found")
+
+func withPlaygroundImageTransaction(fn func(*gorm.DB) error) error {
+	return withRetryableDatabaseTransaction(context.Background(), fn)
+}
 
 type PlaygroundImageBatch struct {
 	ID             int64  `json:"-" gorm:"primaryKey"`
@@ -170,7 +175,8 @@ func CreatePlaygroundImageBatch(params CreatePlaygroundImageBatchParams) (*Playg
 		ExpiresAt:      params.ExpiresAt,
 	}
 
-	err = DB.Transaction(func(tx *gorm.DB) error {
+	err = withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		batch.ID = 0
 		if err := tx.Create(batch).Error; err != nil {
 			return err
 		}
@@ -294,35 +300,48 @@ func PrepareExcessPlaygroundImageResultsForDeletion(userID int, now int64) ([]Pl
 	}
 
 	var excess []PlaygroundImageTask
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := lockForUpdate(tx).
+	err := withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		var candidateIDs []int64
+		if err := tx.Model(&PlaygroundImageTask{}).
 			Where("user_id = ? AND status = ? AND hidden = ? AND result_path <> '' AND expires_at > ?", userID, PlaygroundImageTaskSucceeded, false, now).
 			Order("id DESC").
 			Limit(playgroundImageResultRetentionBatchSize).
 			Offset(PlaygroundImageMaxStoredResultsPerUser).
-			Find(&excess).Error; err != nil {
+			Pluck("id", &candidateIDs).Error; err != nil {
 			return err
+		}
+		excess = nil
+		for _, id := range candidateIDs {
+			var task PlaygroundImageTask
+			if err := lockForUpdate(tx).
+				Where("id = ? AND user_id = ? AND status = ? AND hidden = ? AND result_path <> '' AND expires_at > ?",
+					id, userID, PlaygroundImageTaskSucceeded, false, now).
+				First(&task).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					continue
+				}
+				return err
+			}
+			excess = append(excess, task)
 		}
 		if len(excess) == 0 {
 			return nil
 		}
 
-		ids := make([]int64, len(excess))
-		for index, task := range excess {
-			ids[index] = task.ID
-		}
-		result := tx.Model(&PlaygroundImageTask{}).
-			Where("id IN ? AND user_id = ? AND status = ? AND hidden = ?", ids, userID, PlaygroundImageTaskSucceeded, false).
-			Updates(map[string]any{
-				"hidden":         true,
-				"discard_result": true,
-				"updated_at":     now,
-			})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != int64(len(ids)) {
-			return fmt.Errorf("hid %d of %d excess playground image results", result.RowsAffected, len(ids))
+		for _, task := range excess {
+			result := tx.Model(&PlaygroundImageTask{}).
+				Where("id = ? AND user_id = ? AND status = ? AND hidden = ?", task.ID, userID, PlaygroundImageTaskSucceeded, false).
+				Updates(map[string]any{
+					"hidden":         true,
+					"discard_result": true,
+					"updated_at":     now,
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return fmt.Errorf("failed to hide excess playground image result %d", task.ID)
+			}
 		}
 		return nil
 	})
@@ -436,16 +455,16 @@ func recoverExpiredPlaygroundImageLeases(tx *gorm.DB, now int64) error {
 		"updated_at":    now,
 		"expires_at":    now + int64((7 * 24 * time.Hour).Seconds()),
 	}
-	if err := tx.Model(&PlaygroundImageTask{}).
-		Where("status IN ? AND lease_until > 0 AND lease_until < ? AND upstream_started_at > 0", active, now).
-		Updates(interruptedUpdates).Error; err != nil {
+	if err := updatePlaygroundImageTasksByPrimaryKey(tx,
+		"status IN ? AND lease_until > 0 AND lease_until < ? AND upstream_started_at > 0",
+		[]any{active, now}, interruptedUpdates); err != nil {
 		return err
 	}
 	// A deleted task may still be leased before the worker records that the
 	// upstream request started. Do not requeue a hidden task that no worker can claim.
-	if err := tx.Model(&PlaygroundImageTask{}).
-		Where("status IN ? AND lease_until > 0 AND lease_until < ? AND upstream_started_at = 0 AND (hidden = ? OR discard_result = ?)", active, now, true, true).
-		Updates(map[string]any{
+	if err := updatePlaygroundImageTasksByPrimaryKey(tx,
+		"status IN ? AND lease_until > 0 AND lease_until < ? AND upstream_started_at = 0 AND (hidden = ? OR discard_result = ?)",
+		[]any{active, now, true, true}, map[string]any{
 			"status":        PlaygroundImageTaskCancelled,
 			"error_message": "Generation was cancelled before the upstream request started",
 			"error_code":    "cancelled_before_upstream",
@@ -454,18 +473,105 @@ func recoverExpiredPlaygroundImageLeases(tx *gorm.DB, now int64) error {
 			"finished_at":   now,
 			"updated_at":    now,
 			"expires_at":    now + int64((7 * 24 * time.Hour).Seconds()),
-		}).Error; err != nil {
+		}); err != nil {
 		return err
 	}
-	return tx.Model(&PlaygroundImageTask{}).
-		Where("status IN ? AND lease_until > 0 AND lease_until < ? AND upstream_started_at = 0 AND hidden = ? AND discard_result = ?", active, now, false, false).
-		Updates(map[string]any{
+	return updatePlaygroundImageTasksByPrimaryKey(tx,
+		"status IN ? AND lease_until > 0 AND lease_until < ? AND upstream_started_at = 0 AND hidden = ? AND discard_result = ?",
+		[]any{active, now, false, false}, map[string]any{
 			"status":      PlaygroundImageTaskQueued,
 			"lease_owner": "",
 			"lease_until": 0,
 			"started_at":  0,
 			"updated_at":  now,
-		}).Error
+		})
+}
+
+// updatePlaygroundImageTasksByPrimaryKey keeps lifecycle writes in the same
+// lock order as task completion: read candidate IDs without row locks, then
+// update each row through its primary key in ascending order. The conditions
+// are repeated on the update so a concurrent state transition is harmless.
+func updatePlaygroundImageTasksByPrimaryKey(tx *gorm.DB, where string, args []any, updates map[string]any) error {
+	var ids []int64
+	if err := tx.Model(&PlaygroundImageTask{}).
+		Where(where, args...).
+		Order("id ASC").
+		Pluck("id", &ids).Error; err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := tx.Model(&PlaygroundImageTask{}).
+			Where("id = ?", id).
+			Where(where, args...).
+			Updates(updates).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func findPlaygroundImageTaskPrimaryKey(tx *gorm.DB, taskID, where string, args ...any) (int64, error) {
+	var candidate struct {
+		ID int64
+	}
+	query := tx.Model(&PlaygroundImageTask{}).Select("id").Where("task_id = ?", taskID)
+	if where != "" {
+		query = query.Where(where, args...)
+	}
+	if err := query.First(&candidate).Error; err != nil {
+		return 0, err
+	}
+	return candidate.ID, nil
+}
+
+// lockPlaygroundImageTaskByPrimaryKey resolves the public task ID without a
+// lock, then acquires the row lock through PRIMARY. Repeating the predicates
+// after the lock prevents a stale lookup from changing a newer task state.
+func lockPlaygroundImageTaskByPrimaryKey(tx *gorm.DB, taskID, where string, args ...any) (PlaygroundImageTask, error) {
+	id, err := findPlaygroundImageTaskPrimaryKey(tx, taskID, where, args...)
+	if err != nil {
+		return PlaygroundImageTask{}, err
+	}
+	query := lockForUpdate(tx).Where("id = ? AND task_id = ?", id, taskID)
+	if where != "" {
+		query = query.Where(where, args...)
+	}
+	var task PlaygroundImageTask
+	if err := query.First(&task).Error; err != nil {
+		return PlaygroundImageTask{}, err
+	}
+	return task, nil
+}
+
+func updatePlaygroundImageTaskByPrimaryKey(tx *gorm.DB, taskID, where string, args []any, updates map[string]any) (int64, error) {
+	id, err := findPlaygroundImageTaskPrimaryKey(tx, taskID, where, args...)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	query := tx.Model(&PlaygroundImageTask{}).Where("id = ? AND task_id = ?", id, taskID)
+	if where != "" {
+		query = query.Where(where, args...)
+	}
+	result := query.Updates(updates)
+	return result.RowsAffected, result.Error
+}
+
+func deletePlaygroundImageTaskByPrimaryKey(tx *gorm.DB, taskID, where string, args ...any) error {
+	id, err := findPlaygroundImageTaskPrimaryKey(tx, taskID, where, args...)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	query := tx.Where("id = ? AND task_id = ?", id, taskID)
+	if where != "" {
+		query = query.Where(where, args...)
+	}
+	return query.Delete(&PlaygroundImageTask{}).Error
 }
 
 func hasQueuedPlaygroundImageTasks(tx *gorm.DB, now int64) (bool, error) {
@@ -498,7 +604,9 @@ func ClaimPlaygroundImageTasks(owner string, claimLimit int, now, leaseUntil int
 	}
 	var claimed []PlaygroundImageTask
 	var continueClaiming bool
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		claimed = nil
+		continueClaiming = false
 		if err := lockPlaygroundImageQueue(tx, now); err != nil {
 			return err
 		}
@@ -576,32 +684,45 @@ func ClaimPlaygroundImageTasks(owner string, claimLimit int, now, leaseUntil int
 }
 
 func HeartbeatPlaygroundImageTask(taskID, owner string, leaseUntil, now int64) error {
-	return DB.Model(&PlaygroundImageTask{}).
-		Where("task_id = ? AND lease_owner = ? AND status IN ?", taskID, owner, []PlaygroundImageTaskStatus{PlaygroundImageTaskRunning, PlaygroundImageTaskSaving}).
-		Updates(map[string]any{"lease_until": leaseUntil, "updated_at": now}).Error
+	return withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		_, err := updatePlaygroundImageTaskByPrimaryKey(tx, taskID,
+			"lease_owner = ? AND status IN ?", []any{owner, []PlaygroundImageTaskStatus{PlaygroundImageTaskRunning, PlaygroundImageTaskSaving}},
+			map[string]any{"lease_until": leaseUntil, "updated_at": now})
+		return err
+	})
 }
 
 func MarkPlaygroundImageTaskUpstreamStarted(taskID, owner string, now int64) error {
-	result := DB.Model(&PlaygroundImageTask{}).
-		Where("task_id = ? AND lease_owner = ? AND status = ?", taskID, owner, PlaygroundImageTaskRunning).
-		Updates(map[string]any{"upstream_started_at": now, "updated_at": now})
-	if result.Error != nil {
-		return result.Error
+	var rowsAffected int64
+	err := withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		var err error
+		rowsAffected, err = updatePlaygroundImageTaskByPrimaryKey(tx, taskID,
+			"lease_owner = ? AND status = ?", []any{owner, PlaygroundImageTaskRunning},
+			map[string]any{"upstream_started_at": now, "updated_at": now})
+		return err
+	})
+	if err != nil {
+		return err
 	}
-	if result.RowsAffected != 1 {
+	if rowsAffected != 1 {
 		return ErrPlaygroundImageTaskNotFound
 	}
 	return nil
 }
 
 func MarkPlaygroundImageTaskSaving(taskID, owner string, now int64) error {
-	result := DB.Model(&PlaygroundImageTask{}).
-		Where("task_id = ? AND lease_owner = ? AND status = ?", taskID, owner, PlaygroundImageTaskRunning).
-		Updates(map[string]any{"status": PlaygroundImageTaskSaving, "updated_at": now})
-	if result.Error != nil {
-		return result.Error
+	var rowsAffected int64
+	err := withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		var err error
+		rowsAffected, err = updatePlaygroundImageTaskByPrimaryKey(tx, taskID,
+			"lease_owner = ? AND status = ?", []any{owner, PlaygroundImageTaskRunning},
+			map[string]any{"status": PlaygroundImageTaskSaving, "updated_at": now})
+		return err
+	})
+	if err != nil {
+		return err
 	}
-	if result.RowsAffected != 1 {
+	if rowsAffected != 1 {
 		return ErrPlaygroundImageTaskNotFound
 	}
 	return nil
@@ -610,9 +731,11 @@ func MarkPlaygroundImageTaskSaving(taskID, owner string, now int64) error {
 func CompletePlaygroundImageTask(taskID, owner, resultPath, mimeType string, resultSize, now int64) (bool, int64, error) {
 	var discard bool
 	var batchRecordID int64
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		var task PlaygroundImageTask
-		if err := lockForUpdate(tx).Where("task_id = ? AND lease_owner = ?", taskID, owner).First(&task).Error; err != nil {
+	err := withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		discard = false
+		batchRecordID = 0
+		task, err := lockPlaygroundImageTaskByPrimaryKey(tx, taskID, "lease_owner = ?", owner)
+		if err != nil {
 			return err
 		}
 		batchRecordID = task.BatchRecordID
@@ -642,9 +765,10 @@ func CompletePlaygroundImageTask(taskID, owner, resultPath, mimeType string, res
 
 func InterruptPlaygroundImageTask(taskID, owner, message, code string, now int64) (int64, error) {
 	var batchRecordID int64
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		var task PlaygroundImageTask
-		if err := lockForUpdate(tx).Where("task_id = ? AND lease_owner = ?", taskID, owner).First(&task).Error; err != nil {
+	err := withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		batchRecordID = 0
+		task, err := lockPlaygroundImageTaskByPrimaryKey(tx, taskID, "lease_owner = ?", owner)
+		if err != nil {
 			return err
 		}
 		batchRecordID = task.BatchRecordID
@@ -664,9 +788,10 @@ func InterruptPlaygroundImageTask(taskID, owner, message, code string, now int64
 
 func FailPlaygroundImageTask(taskID, owner, message, code string, now int64) (int64, error) {
 	var batchRecordID int64
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		var task PlaygroundImageTask
-		if err := lockForUpdate(tx).Where("task_id = ? AND lease_owner = ?", taskID, owner).First(&task).Error; err != nil {
+	err := withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		batchRecordID = 0
+		task, err := lockPlaygroundImageTaskByPrimaryKey(tx, taskID, "lease_owner = ?", owner)
+		if err != nil {
 			return err
 		}
 		batchRecordID = task.BatchRecordID
@@ -690,14 +815,14 @@ func FailPlaygroundImageTask(taskID, owner, message, code string, now int64) (in
 
 func DeletePlaygroundImageTask(taskID string, userID int, now int64) (*PlaygroundImageDeleteResult, error) {
 	result := &PlaygroundImageDeleteResult{}
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		var task PlaygroundImageTask
-		query := lockForUpdate(tx).Where("task_id = ? AND user_id = ?", taskID, userID).Limit(1).Find(&task)
-		if query.Error != nil {
-			return query.Error
-		}
-		if query.RowsAffected == 0 {
-			return ErrPlaygroundImageTaskNotFound
+	err := withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		*result = PlaygroundImageDeleteResult{}
+		task, err := lockPlaygroundImageTaskByPrimaryKey(tx, taskID, "user_id = ?", userID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPlaygroundImageTaskNotFound
+			}
+			return err
 		}
 		result.BatchRecordID = task.BatchRecordID
 		result.ResultPath = task.ResultPath
@@ -733,13 +858,16 @@ func DeletePlaygroundImageTask(taskID string, userID int, now int64) (*Playgroun
 // be hard-deleted while a worker is still using it.
 func DeleteHiddenPlaygroundImageTask(taskID, resultPath string) (int64, error) {
 	var batchRecordID int64
-	err := DB.Transaction(func(tx *gorm.DB) error {
-		query := lockForUpdate(tx).Where("task_id = ? AND hidden = ?", taskID, true)
+	err := withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		batchRecordID = 0
+		where := "hidden = ?"
+		args := []any{true}
 		if resultPath != "" {
-			query = query.Where("result_path = ?", resultPath)
+			where += " AND result_path = ?"
+			args = append(args, resultPath)
 		}
-		var task PlaygroundImageTask
-		if err := query.First(&task).Error; err != nil {
+		task, err := lockPlaygroundImageTaskByPrimaryKey(tx, taskID, where, args...)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrPlaygroundImageTaskNotFound
 			}
@@ -756,7 +884,8 @@ func DeleteHiddenPlaygroundImageTask(taskID, resultPath string) (int64, error) {
 
 func GetPlaygroundImageBatchReferencesIfTerminal(batchRecordID int64) (string, error) {
 	var references string
-	err := DB.Transaction(func(tx *gorm.DB) error {
+	err := withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		references = ""
 		var batch PlaygroundImageBatch
 		if err := lockForUpdate(tx).Where("id = ?", batchRecordID).First(&batch).Error; err != nil {
 			return err
@@ -819,12 +948,11 @@ func ListExpiredPlaygroundImageTasks(now int64, limit int) ([]PlaygroundImageTas
 }
 
 func DeleteExpiredPlaygroundImageTask(taskID string, now int64) error {
-	return DB.Where(
-		"task_id = ? AND expires_at <= ? AND status NOT IN ?",
-		taskID,
-		now,
-		[]PlaygroundImageTaskStatus{PlaygroundImageTaskRunning, PlaygroundImageTaskSaving},
-	).Delete(&PlaygroundImageTask{}).Error
+	return withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		return deletePlaygroundImageTaskByPrimaryKey(tx, taskID,
+			"expires_at <= ? AND status NOT IN ?", now,
+			[]PlaygroundImageTaskStatus{PlaygroundImageTaskRunning, PlaygroundImageTaskSaving})
+	})
 }
 
 func DeleteExpiredPlaygroundImageBatches(now int64) error {

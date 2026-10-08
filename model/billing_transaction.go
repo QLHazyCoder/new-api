@@ -13,12 +13,13 @@ import (
 
 const billingTransactionAttempts = 5
 
-// withBillingTransaction retries the complete database transaction after a
-// transient deadlock or serialization failure. Retrying the whole closure is
-// required so every row read and write observes a fresh snapshot and lock set.
-func withBillingTransaction(ctx context.Context, fn func(*gorm.DB) error) error {
+// withRetryableDatabaseTransaction retries the complete database transaction
+// after a transient deadlock or serialization failure. Retrying the whole
+// closure is required so every row read and write observes a fresh snapshot
+// and lock set.
+func withRetryableDatabaseTransaction(ctx context.Context, fn func(*gorm.DB) error) error {
 	if fn == nil {
-		return errors.New("billing transaction callback is nil")
+		return errors.New("database transaction callback is nil")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -29,7 +30,7 @@ func withBillingTransaction(ctx context.Context, fn func(*gorm.DB) error) error 
 			return ctxErr
 		}
 		err = DB.WithContext(ctx).Transaction(fn)
-		if !isRetryableBillingTransactionError(err) || attempt == billingTransactionAttempts-1 {
+		if !isRetryableDatabaseTransactionError(err) || attempt == billingTransactionAttempts-1 {
 			return err
 		}
 		// A lock can outlive the statement that reported it (especially on
@@ -47,7 +48,11 @@ func withBillingTransaction(ctx context.Context, fn func(*gorm.DB) error) error 
 	return err
 }
 
-func isRetryableBillingTransactionError(err error) bool {
+func withBillingTransaction(ctx context.Context, fn func(*gorm.DB) error) error {
+	return withRetryableDatabaseTransaction(ctx, fn)
+}
+
+func isRetryableDatabaseTransactionError(err error) bool {
 	if err == nil {
 		return false
 	}

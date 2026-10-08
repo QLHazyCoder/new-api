@@ -374,6 +374,58 @@ func TestExpiredStartedLeaseBecomesInterruptedWithoutResubmission(t *testing.T) 
 	assert.Equal(t, int64(0), task.LeaseUntil)
 }
 
+func TestExpiredPlaygroundImageLeasesReconcileAllStatesByPrimaryKey(t *testing.T) {
+	truncateTables(t)
+	batch, _, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
+		UserID:         1,
+		ClientBatchID:  "expired-lease-state-matrix",
+		Mode:           PlaygroundImageModeGenerate,
+		Prompt:         "draw three images",
+		Model:          "gpt-image-2",
+		RequestPayload: `{"model":"gpt-image-2","n":1}`,
+		Count:          3,
+	})
+	require.NoError(t, err)
+	now := common.GetTimestamp()
+	var tasks []PlaygroundImageTask
+	require.NoError(t, DB.Where("batch_record_id = ?", batch.ID).Order("id ASC").Find(&tasks).Error)
+	require.Len(t, tasks, 3)
+	require.NoError(t, DB.Model(&PlaygroundImageTask{}).Where("id = ?", tasks[0].ID).Updates(map[string]any{
+		"status":              PlaygroundImageTaskRunning,
+		"lease_owner":         "worker-started",
+		"lease_until":         now - 1,
+		"upstream_started_at": now - 2,
+	}).Error)
+	require.NoError(t, DB.Model(&PlaygroundImageTask{}).Where("id = ?", tasks[1].ID).Updates(map[string]any{
+		"status":         PlaygroundImageTaskSaving,
+		"lease_owner":    "worker-hidden",
+		"lease_until":    now - 1,
+		"hidden":         true,
+		"discard_result": true,
+	}).Error)
+	require.NoError(t, DB.Model(&PlaygroundImageTask{}).Where("id = ?", tasks[2].ID).Updates(map[string]any{
+		"status":      PlaygroundImageTaskSaving,
+		"lease_owner": "worker-queued",
+		"lease_until": now - 1,
+	}).Error)
+
+	require.NoError(t, withPlaygroundImageTransaction(func(tx *gorm.DB) error {
+		return recoverExpiredPlaygroundImageLeases(tx, now)
+	}))
+
+	var reloaded []PlaygroundImageTask
+	require.NoError(t, DB.Where("id IN ?", []int64{tasks[0].ID, tasks[1].ID, tasks[2].ID}).Order("id ASC").Find(&reloaded).Error)
+	require.Len(t, reloaded, 3)
+	assert.Equal(t, PlaygroundImageTaskInterrupted, reloaded[0].Status)
+	assert.Empty(t, reloaded[0].LeaseOwner)
+	assert.Equal(t, int64(0), reloaded[0].LeaseUntil)
+	assert.Equal(t, PlaygroundImageTaskCancelled, reloaded[1].Status)
+	assert.Equal(t, "cancelled_before_upstream", reloaded[1].ErrorCode)
+	assert.Equal(t, PlaygroundImageTaskQueued, reloaded[2].Status)
+	assert.Empty(t, reloaded[2].LeaseOwner)
+	assert.Equal(t, int64(0), reloaded[2].LeaseUntil)
+}
+
 func TestDiscardedRunningTaskCanBeHardDeletedAfterFileRemoval(t *testing.T) {
 	truncateTables(t)
 	setPlaygroundImageMaxConcurrency(t, 0)
