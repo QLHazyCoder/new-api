@@ -114,6 +114,44 @@ func TestSystemTaskHistoryDatabaseMatrix(t *testing.T) {
 			deleted, err = DeleteSystemTaskHistory(SystemTaskFilter{})
 			require.NoError(t, err)
 			assert.Zero(t, deleted, "repeated cleanup preserves the scheduler's latest runs")
+
+			t.Run("lease_cleanup_keeps_playground_queue_mutex", func(t *testing.T) {
+				require.NoError(t, db.AutoMigrate(&SystemTaskLock{}))
+				t.Cleanup(func() { require.NoError(t, db.Migrator().DropTable(&SystemTaskLock{})) })
+				now := common.GetTimestamp()
+				tasks := []SystemTask{
+					{TaskID: "expired-lease", Type: "expired-lease", Status: SystemTaskStatusRunning, LockedBy: "runner-expired"},
+					{TaskID: "live-lease", Type: "live-lease", Status: SystemTaskStatusRunning, LockedBy: "runner-live"},
+				}
+				require.NoError(t, db.Create(&tasks).Error)
+				queue := SystemTaskLock{Type: playgroundImageQueueLockType, UpdatedAt: now - 60}
+				require.NoError(t, db.Create(&[]SystemTaskLock{
+					queue,
+					{Type: "expired-lease", TaskID: tasks[0].TaskID, LockedBy: tasks[0].LockedBy, LockedUntil: now - 1},
+					{Type: "live-lease", TaskID: tasks[1].TaskID, LockedBy: tasks[1].LockedBy, LockedUntil: now + 60},
+				}).Error)
+				for range 2 {
+					require.NoError(t, ExpireStaleSystemTaskLocks(now))
+					var retained SystemTaskLock
+					require.NoError(t, db.Where("type = ?", playgroundImageQueueLockType).First(&retained).Error)
+					assert.Equal(t, queue, retained, "the queue mutex has no lease and must not be expired")
+				}
+				var locks []SystemTaskLock
+				require.NoError(t, db.Order("type ASC").Find(&locks).Error)
+				var types []string
+				for _, lock := range locks {
+					types = append(types, lock.Type)
+				}
+				assert.ElementsMatch(t, []string{playgroundImageQueueLockType, "live-lease"}, types)
+				expired, err := GetSystemTaskByTaskID(tasks[0].TaskID)
+				require.NoError(t, err)
+				require.NotNil(t, expired)
+				assert.Equal(t, SystemTaskStatusFailed, expired.Status)
+				live, err := GetSystemTaskByTaskID(tasks[1].TaskID)
+				require.NoError(t, err)
+				require.NotNil(t, live)
+				assert.Equal(t, SystemTaskStatusRunning, live.Status)
+			})
 		})
 	}
 }

@@ -1136,3 +1136,31 @@ bun run test -- src/features/channels/components/__tests__/model-mapping-editor.
   外部自动化需在过渡期内自行迁移，本轮不擅自轮换生产凭据。
 - 本文件记录源码与提交前门禁。Actions、镜像身份及生产 5 分钟观测必须取本轮实时结果，
   不能从历史发布记录推断或把预定步骤写成已完成。
+
+### 首轮发布与现场复查补充
+
+- 合并提交 `54e3fb3859e3ef4feebca1db92d760cca314e7f2` 已推送 `main`。
+  [Actions 38017506491](https://github.com/QLHazyCoder/new-api/actions/runs/38017506491)
+  的 amd64、arm64、manifest 全部成功；部署镜像 `main-54e3fb3` 的 OCI revision
+  与提交一致，manifest 为 `sha256:ce43f1e8bab64fd651869851b46e01c0d400e12d0c203ebf43bd0ee707b1f1a1`。
+- 2026-10-10 02:45:34 UTC 从蓝槽位切到已健康的绿槽位，观察到 02:51:41 UTC，
+  累计 367 秒、21 轮三公网入口与 Docker/Tools 健康检查均通过。桌面 1440x960、
+  手机 390x844 登录页面 HTTP 200，无 JavaScript 异常、页面资源 5xx 或水平溢出；
+  Tools 数据库健康检查为 connected，未重建 Tools、Sub2API 或公网 Caddy。
+- 该固定观察窗处理 1171 个请求；无 panic/OOM、数据库/迁移错误或管理接口 5xx。
+  9 个 relay 5xx 按请求 ID 核对：8 个请求的模型/分组没有可用渠道，1 个上游渠道失败。
+  不能把这些业务/上游错误隐去或将健康结果写成所有请求零错误。
+- 现场还有 3 次 `claim playground image tasks: record not found`。旧蓝槽位原日志已有
+  430 次同类记录，相关自研队列代码本轮未变；但不能因此忽略。隔离回归已确认
+  `ExpireStaleSystemTaskLocks` 会把没有租约的 `playground_image_queue` 永久互斥锁删除，
+  与领取任务的加锁读取并发时可导致记录缺失。
+- 最小修复只调整 `model/system_task.go` 的过期选择条件，排除该永久互斥锁；
+  不改变图片任务的资金、并发、状态、保留时间或上游实现。新增断言放在既有
+  `model/system_task_test.go` 三数据库矩阵，验证永久锁保留、真实过期租约清理、
+  活跃租约保留和重复清理幂等。修复前 SQLite 用例确定失败，修复后三真实方言
+  `GOWORK=off go test -json ./model -run '^TestSystemTaskHistoryDatabaseMatrix$' -count=2`
+  全通过（14 个通过项，无跳过），测试库为空后清理，未触碰生产数据。修复后根模块
+  vet/build/全量 test 再次通过（4982 个通过项、54 个明确跳过），前端和独立模块无新改动。
+- 旧蓝槽位于 02:54:09 UTC 开始停止，02:56:09 UTC 退出码 0；停止后三公网入口
+  和新槽位健康仍正常。修复须重新提交、等待对应 Actions、按相反备用槽位发布，
+  并从修复版切流后重新完整观察至少 5 分钟，不能使用本段首轮窗口代替。

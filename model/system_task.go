@@ -421,7 +421,8 @@ func MarkSystemTaskLeaseExpired(taskID string) error {
 
 func ExpireStaleSystemTaskLocks(now int64) error {
 	var locks []*SystemTaskLock
-	if err := DB.Where("locked_until < ?", now).Find(&locks).Error; err != nil {
+	// The image queue uses a permanent mutex, not a scheduler lease.
+	if err := DB.Where("type <> ? AND locked_until < ?", playgroundImageQueueLockType, now).Find(&locks).Error; err != nil {
 		return err
 	}
 	for _, lock := range locks {
