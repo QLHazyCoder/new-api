@@ -130,7 +130,7 @@ func TestSecurityAccountDeletionAcceptsEitherFactorAndRevokesSessions(t *testing
 			}
 			otherSession, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "second-session")
 			require.NoError(t, err)
-			require.NoError(t, model.UpdateUserAccessToken(user.Id, "account-delete-access-token"))
+			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("access_token", "account-delete-access-token").Error)
 			response := securityEnrollmentRequest("DELETE", "/api/user/self", "", proof, identity, DeleteSelf)
 			var result securityEnrollmentResponse
 			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
@@ -195,7 +195,8 @@ func TestSecurityAccountDeletionRechecksTransactionAndConsumesFailedProof(t *tes
 				assert.Contains(t, response.Body.String(), "SECURITY_PROOF_CONSUMED")
 			}
 			if scenario != "write failure" {
-				assert.Error(t, model.DeleteUserForSession(identity))
+				_, err := model.DeleteUserForSession(identity)
+				assert.Error(t, err)
 			}
 			_, err := model.GetUserById(user.Id, false)
 			require.NoError(t, err)
@@ -205,6 +206,41 @@ func TestSecurityAccountDeletionRechecksTransactionAndConsumesFailedProof(t *tes
 			}
 		})
 	}
+}
+
+func TestSecurityAccountDeletionRetriesTransactionWithoutRepeatingRevocation(t *testing.T) {
+	user, identity := setupSecurityEnrollmentTest(t)
+	_, token := createScopedAccessToken(t, user.Id, 0, "profile:read")
+	proof := issueSecurityEnrollmentProof(t, identity, service.VerificationOperation{Scope: service.VerificationScopeAccountDelete}, "password")
+	attempts := 0
+	const callback = "account-delete-transient-lock"
+	require.NoError(t, model.DB.Callback().Delete().Before("gorm:delete").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "users" {
+			attempts++
+			if attempts == 1 {
+				_ = tx.AddError(errors.New("database is locked"))
+			}
+		}
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Delete().Remove(callback) })
+	response := securityEnrollmentRequest("DELETE", "/api/user/self", "", proof, identity, DeleteSelf)
+	var result securityEnrollmentResponse
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+	require.True(t, result.Success, response.Body.String())
+	assert.Equal(t, 2, attempts)
+	var deleted model.User
+	require.NoError(t, model.DB.Unscoped().First(&deleted, user.Id).Error)
+	assert.True(t, deleted.DeletedAt.Valid)
+	assert.Equal(t, identity.UserAuthVersion+1, deleted.AuthVersion)
+	remaining, err := model.FindUserAccessTokenByHash(token.TokenHash)
+	require.NoError(t, err)
+	assert.Nil(t, remaining)
+	var audit model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("action = ?", "user.account_delete").Last(&audit).Error)
+	assert.True(t, audit.Success)
+	encoded, err := common.Marshal(audit.Other.Op.Params["revoked_access_tokens"])
+	require.NoError(t, err)
+	assert.Equal(t, "1", string(encoded))
 }
 
 func TestSecurityAccountDeletionConcurrentRequestsHaveOneWinner(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"mime/multipart"
@@ -403,6 +404,69 @@ export function buildSubmitRequest(ctx){return {url:ctx.baseUrl+"/submit"}} expo
 	assert.Contains(t, taskErr.Message, "must not return renderer")
 }
 
+const orderedProtocolPlugin = `
+export const meta = {apiVersion:1,key:"ordered",name:"Ordered",version:"1.0.0",author:{name:"Test"},models:["m"],fetchMode:"per_task",requiredCapabilities:["json-order@1"],protocols:[{name:"openai_responses",supports:["sync"]}]};
+export const protocols = {openai_responses:{decodeRequest:function(ctx){const b = ctx.body.value; return {kind:"submit",model:ctx.model,requestBody:{model:b.model,state:b.state,questions:b.questions}};},renderFinal:function(){return {};}}};
+export function buildSubmitRequest(ctx){const b = ctx.requestBody; return {url:ctx.baseUrl+"/submit",body:{model:b.model,state:b.state,questions:b.questions}}}
+export function parseSubmitResponse(){return {taskId:"one"}} export function buildQueryRequest(){return {}} export function parseTaskResult(){return {status:"SUCCESS"}}
+`
+
+// A plugin declaring json-order@1 forwards the members in the order the client
+// sent them, through the final decode, the request body hooks receive and the
+// upstream body, while billing bounds still read the decoded value; other
+// plugins keep the host codec's sorted encoding.
+func TestTaskAdaptorJSONOrderCapability(t *testing.T) {
+	client := `{"model":"m","state":{"zeta":"1","alpha":"2","mid":"&<>"},"questions":{"q2":{"type":"noul"},"q1":{"type":"noul"}}}`
+	undeclared := strings.Replace(orderedProtocolPlugin, `requiredCapabilities:["json-order@1"],`, "", 1)
+	cases := []struct {
+		name   string
+		source string
+		client string
+		want   string
+		status int
+	}{
+		{name: "declared keeps the client's order", source: orderedProtocolPlugin, client: client,
+			want: `{"model":"m","state":{"zeta":"1","alpha":"2","mid":"&<>"},"questions":{"q2":{"type":"noul"},"q1":{"type":"noul"}}}`},
+		{name: "undeclared stays sorted", source: undeclared, client: client,
+			want: `{"model":"m","questions":{"q1":{"type":"noul"},"q2":{"type":"noul"}},"state":{"alpha":"2","mid":"\u0026\u003c\u003e","zeta":"1"}}`},
+		{name: "declared still bounds billing quantities", source: orderedProtocolPlugin,
+			client: `{"model":"m","state":{"duration":3601},"questions":{}}`, status: http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			plugin, err := pluginruntime.NewRegistry().Register(tc.source, pluginruntime.Options{})
+			require.NoError(t, err)
+			var value any
+			require.NoError(t, common.Unmarshal([]byte(tc.client), &value))
+			protocolContext := pluginruntime.ProtocolRequestContext{
+				RouteRequestContext: pluginruntime.RouteRequestContext{Body: map[string]any{"kind": "json", "value": value}, BodyText: json.RawMessage(tc.client)},
+				Protocol:            "openai_responses", Model: "m",
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			c.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{Plugin: plugin, Protocol: "openai_responses", Model: "m"})
+			c.Set(pluginruntime.ContextKeyProtocolRequest, protocolContext)
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://provider.example"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}, OriginModelName: "m"}
+			adaptor := New(plugin)
+			adaptor.Init(info)
+
+			taskErr := adaptor.ValidateRequestAndSetAction(c, info)
+			if tc.status != 0 {
+				require.NotNil(t, taskErr)
+				assert.Equal(t, tc.status, taskErr.StatusCode)
+				assert.Equal(t, "plugin_usage_invalid", taskErr.Code)
+				return
+			}
+			require.Nil(t, taskErr)
+			body, err := adaptor.BuildRequestBody(c, info)
+			require.NoError(t, err)
+			raw, err := io.ReadAll(body)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(raw))
+		})
+	}
+}
+
 func TestTaskAdaptorBuildContentRequestHookAndMissingFallback(t *testing.T) {
 	source := strings.Replace(mockPlugin, `export function listArtifacts() { return []; }
 export function buildContentRequest() { throw new Error("artifact_not_found"); }`, `export function listArtifacts(task) { return [{key: "video", type: "video", mimeType: "video/mp4"}]; }
@@ -662,13 +726,22 @@ func TestTaskAdaptorPreservesSoraVideoResponseFields(t *testing.T) {
 }
 
 func TestTaskAdaptorRejectsNonObjectOpenAIVideoRendererOutput(t *testing.T) {
-	for _, value := range []string{"null", "[]", `"video"`, "42", "false"} {
+	for value, message := range map[string]string{
+		"null":           "plugin returned an invalid OpenAI video object",
+		"undefined":      "plugin returned an invalid OpenAI video object",
+		"[]":             "plugin returned an invalid OpenAI video object",
+		`"video"`:        "plugin returned an invalid OpenAI video object",
+		"42":             "plugin returned an invalid OpenAI video object",
+		"false":          "plugin returned an invalid OpenAI video object",
+		"{seconds: NaN}": "json: unsupported value: NaN",
+		"[Infinity]":     "json: unsupported value: +Inf",
+	} {
 		t.Run(value, func(t *testing.T) {
 			source := strings.Replace(mockPlugin, `return {id: task.task_id, status: "completed"};`, "return "+value+";", 1)
 			plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
 			require.NoError(t, err)
 			_, err = New(plugin).ConvertToOpenAIVideo(&model.Task{TaskID: "task_public"})
-			require.ErrorContains(t, err, "invalid OpenAI video object")
+			require.EqualError(t, err, message)
 		})
 	}
 }
@@ -1150,6 +1223,26 @@ func TestSubmitContextOriginTasksNilDataOnInvalidJSON(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, originTasks, 1)
 	assert.Nil(t, originTasks[0]["data"])
+}
+
+func TestSubmitContextNormalizesRequestBodyOnEveryCall(t *testing.T) {
+	plugin, err := pluginruntime.NewRegistry().Register(mockPlugin, pluginruntime.Options{})
+	require.NoError(t, err)
+	adaptor := New(plugin)
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://provider.example"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	adaptor.Init(info)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Set("task_request", map[string]any{"prompt": string([]byte{0xff}), "count": int64(math.MaxInt64)})
+
+	normalized := map[string]any{"prompt": "�", "count": float64(math.MaxInt64)}
+	assert.Equal(t, normalized, adaptor.submitContext(c, info)["requestBody"])
+	assert.Equal(t, normalized, adaptor.submitContext(c, info)["requestBody"])
+	assert.Equal(t, normalized, adaptor.submitContext(nil, info)["requestBody"])
+
+	replaced := map[string]any{"prompt": "second", "count": int64(2)}
+	c.Set("task_request", replaced)
+	assert.Equal(t, replaced, adaptor.submitContext(c, info)["requestBody"])
 }
 
 func TestTaskAdaptorRejectsRequestHostOverride(t *testing.T) {
@@ -1757,27 +1850,112 @@ func TestTaskSubmitStreamIdleTimeout(t *testing.T) {
 }
 
 func TestPluginJSONValuesPreserveCodecNormalizationAndIsolation(t *testing.T) {
-	for _, value := range []any{
-		map[string]any{"units": int64(3), "nested": []any{true, "<image> / 图像", math.Copysign(0, -1), nil}},
-		map[string]any{"empty": []any{}, "null": []any(nil), "object": map[string]any(nil)},
-		map[string]any{"large": int64(math.MaxInt64), "invalid UTF-8": string([]byte{0xff, 0xfe})},
-		map[string]any{string([]byte{0xff}): "invalid key"},
-		map[string]any{"bytes": []byte{0, 1, 255}, "number": json.Number("9007199254740993")},
-		json.RawMessage(`{"units":2,"enabled":false}`),
-		struct {
+	for _, tc := range []struct {
+		value any
+		plain bool
+	}{
+		{map[string]any{"units": int64(3), "nested": []any{true, "<image> / 图像", math.Copysign(0, -1), nil}}, true},
+		{map[string]any{"empty": []any{}, "object": map[string]any(nil)}, true},
+		{map[string]any{"null": []any(nil)}, false},
+		{map[string]any{"large": int64(math.MaxInt64), "invalid UTF-8": string([]byte{0xff, 0xfe})}, false},
+		{map[string]any{string([]byte{0xff}): "invalid key"}, false},
+		{map[string]any{"bytes": []byte{0, 1, 255}, "number": json.Number("9007199254740993")}, false},
+		{json.RawMessage(`{"units":2,"enabled":false}`), false},
+		{struct {
 			Units int `json:"units"`
-		}{Units: 0},
+		}{Units: 0}, false},
 	} {
-		encoded, err := common.Marshal(value)
+		encoded, err := common.Marshal(tc.value)
 		require.NoError(t, err)
 		var expected any
 		require.NoError(t, common.Unmarshal(encoded, &expected))
-		assert.Equal(t, expected, jsonValue(value))
+		assert.Equal(t, expected, jsonValue(tc.value))
+		assert.Equal(t, tc.plain, isPlainJSONValue(tc.value, 0))
 	}
 	source := map[string]any{"items": []any{map[string]any{"label": "original"}}}
 	copy := jsonValue(source).(map[string]any)
 	copy["items"].([]any)[0].(map[string]any)["label"] = "changed"
 	assert.Equal(t, "original", source["items"].([]any)[0].(map[string]any)["label"])
+}
+
+func TestRequestDescriptorDecodingMatchesCodec(t *testing.T) {
+	engine, err := pluginruntime.Compile(`
+class Descriptor { constructor() { this.url = "u"; this.method = "PUT"; } }
+let deep = "leaf";
+for (let i = 0; i < 70; i++) deep = [deep];
+const results = {
+  "plain body": () => ({url: "https://provider.example/submit", method: "POST", headers: {"X-Plugin": "submit"}, body: {
+    units: 3, large: 2 ** 60, zero: -0, text: "<image> &   图像", missing: undefined,
+    items: [null, true, 1.5, {}, [], undefined],
+  }}),
+  "argument body": (arg) => ({url: "u", body: arg}),
+  "argument headers": (arg) => ({url: "u", headers: arg.headers}),
+  "changed argument body": (arg) => { arg.units = 4; return {url: "u", body: arg}; },
+  "string body": () => ({url: "u", body: '{"raw":true}'}),
+  "null body": () => ({url: "u", body: null}),
+  "undefined body": () => ({url: "u", body: undefined}),
+  "no body": () => ({url: "u", credentialless: true}),
+  "class instance": () => new Descriptor(),
+  "null prototype": () => Object.assign(Object.create(null), {url: "u", body: {a: 1}}),
+  "getter body": () => ({url: "u", get body() { return {from: "getter"}; }}),
+  "date body": () => ({url: "u", body: {at: new Date(0)}}),
+  "typed array body": () => ({url: "u", body: new Uint8Array([0, 1, 255])}),
+  "deep body": () => ({url: "u", body: deep}),
+  "capitalized body key": () => ({url: "u", Body: {from: "Body"}}),
+  "body and capitalized body": () => ({url: "u", body: {from: "body"}, Body: {from: "Body"}, BODY: "upper"}),
+  "case-insensitive other field": () => ({URL: "u", Method: "PUT", body: "text"}),
+  "NaN body": () => ({url: "u", body: {ratio: NaN}}),
+  "infinite method": () => ({url: "u", method: Infinity, body: {}}),
+  "cyclic body": () => { const body = {}; body.self = body; return {url: "u", body}; },
+  "invalid header": () => ({url: "u", headers: {x: 1}, body: {}}),
+  "invalid parts": () => ({url: "u", parts: "none", body: {}}),
+  "not an object": () => "descriptor",
+  "throwing getter": () => ({url: "u", get body() { throw new Error("getter failed"); }}),
+};
+export function build(name, arg) { return results[name](arg); }
+`, pluginruntime.Options{})
+	require.NoError(t, err)
+	argument := func() map[string]any {
+		return map[string]any{
+			"units": int64(3), "large": int64(math.MaxInt64), "zero": math.Copysign(0, -1),
+			"headers": map[string]any{"X-Plugin": "submit"},
+			"items":   []any{nil, true, 1.5, map[string]any{"label": "original"}, []any{}},
+		}
+	}
+	for _, name := range []string{
+		"plain body", "argument body", "argument headers", "changed argument body", "string body", "null body",
+		"undefined body", "no body", "class instance", "null prototype", "getter body", "date body",
+		"typed array body", "deep body", "capitalized body key", "body and capitalized body",
+		"case-insensitive other field", "NaN body", "infinite method", "cyclic body", "invalid header",
+		"invalid parts", "not an object", "throwing getter",
+	} {
+		var expected requestDescriptor
+		value, expectedErr := engine.Call(t.Context(), "build", name, argument())
+		hookFailed := expectedErr != nil
+		if !hookFailed {
+			expectedErr = convert(value, &expected)
+		}
+		var decoded requestDescriptor
+		err := engine.CallInto(t.Context(), &decoded, "build", name, argument())
+		if expectedErr != nil {
+			require.EqualError(t, err, expectedErr.Error(), name)
+			var invalid *pluginruntime.ResultError
+			assert.Equal(t, !hookFailed, errors.As(err, &invalid), name)
+			continue
+		}
+		require.NoError(t, err, name)
+		assert.Equal(t, expected, decoded, name)
+		expectedJSON, err := common.Marshal(expected)
+		require.NoError(t, err, name)
+		decodedJSON, err := common.Marshal(decoded)
+		require.NoError(t, err, name)
+		assert.Equal(t, string(expectedJSON), string(decodedJSON), name)
+	}
+	source := argument()
+	var decoded requestDescriptor
+	require.NoError(t, engine.CallInto(t.Context(), &decoded, "build", "argument body", source))
+	decoded.Body.(map[string]any)["items"].([]any)[3].(map[string]any)["label"] = "changed"
+	assert.Equal(t, "original", source["items"].([]any)[3].(map[string]any)["label"])
 }
 
 func TestTaskSubmitHooksReceiveIndependentRequestSnapshots(t *testing.T) {
@@ -1809,6 +1987,39 @@ export function parseTaskResult(){return {status:"SUCCESS"};}
 	assert.JSONEq(t, `{"units":3,"nested":{"label":"built"}}`, string(encoded))
 	assert.Equal(t, int64(2), request["units"])
 	assert.Equal(t, "original", request["nested"].(map[string]any)["label"])
+}
+
+func TestTaskUsageValidationLeavesReturnedHostRequestUnchanged(t *testing.T) {
+	// Returning ctx.requestBody hands back the host request map itself, so
+	// normalized facts must be built in a new map.
+	source := `
+export const meta={apiVersion:1,key:"request-usage",name:"Request usage",version:"1.0.0",author:{name:"Test"},models:["usage"],fetchMode:"per_task",usageSchema:{units:{type:"number",unit:"count"}}};
+export function buildSubmitRequest(ctx){return {url:ctx.baseUrl+"/submit",body:ctx.requestBody};}
+export function extractUsage(ctx){return ctx.requestBody;}
+export function parseSubmitResponse(){return {taskId:"usage"};}
+export function buildQueryRequest(ctx){return {url:ctx.baseUrl+"/query"};}
+export function parseTaskResult(){return {status:"SUCCESS"};}
+`
+	plugin, err := pluginruntime.CompilePlugin(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	request := map[string]any{"units": int64(2)}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/submit", nil)
+	c.Set("task_request", request)
+	info := &relaycommon.RelayInfo{OriginModelName: "usage", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "usage", ChannelBaseUrl: "https://provider.example"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+	adaptor := New(plugin)
+	adaptor.Init(info)
+	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+	facts, err := adaptor.ExtractUsageFactsValidated(c, info)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"units": float64(2)}, facts)
+	assert.Equal(t, int64(2), request["units"])
+	estimateRequest := map[string]any{"units": int64(2)}
+	c.Set("task_request", estimateRequest)
+	ratios, err := adaptor.EstimateBillingValidated(c, info)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{"units": 2}, ratios)
+	assert.Equal(t, int64(2), estimateRequest["units"])
 }
 
 func TestTaskSubmitDeltaStreamContract(t *testing.T) {

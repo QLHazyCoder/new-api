@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
@@ -31,7 +32,7 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	require.NoError(t, i18n.Init())
 	previousDB, previousLogDB := model.DB, model.LOG_DB
-	previousRedisEnabled := common.RedisEnabled
+	previousRedisEnabled, previousSecret := common.RedisEnabled, common.SessionSecret
 	previousMainDatabaseType, previousLogDatabaseType := common.MainDatabaseType(), common.LogDatabaseType()
 	dialect := os.Getenv("TEST_MANAGE_USER_DIALECT")
 	if dialect == "" {
@@ -49,11 +50,12 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 	}
 	model.DB, model.LOG_DB = db, logDB
 	common.RedisEnabled = false
+	common.SessionSecret = "manage-user-test-secret"
 	common.SetDatabaseTypes(databaseTypes[dialect], databaseTypes[dialect])
 
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = previousDB, previousLogDB
-		common.RedisEnabled = previousRedisEnabled
+		common.RedisEnabled, common.SessionSecret = previousRedisEnabled, previousSecret
 		common.SetDatabaseTypes(previousMainDatabaseType, previousLogDatabaseType)
 		sqlDB, err := db.DB()
 		if err == nil {
@@ -66,7 +68,7 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 			}
 		}
 	})
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CasbinRule{}, &model.AuthzRole{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.CasbinRule{}, &model.AuthzRole{}, &model.AuthFlow{}, &model.TwoFA{}, &model.PasskeyCredential{}, &model.UserAccessToken{}))
 	require.NoError(t, logDB.AutoMigrate(&model.Log{}, &model.AuditLog{}))
 	versionQuery := "SELECT version()"
 	if dialect == "sqlite" {
@@ -80,14 +82,27 @@ func setupManageUserTestDB(t *testing.T) *gorm.DB {
 
 func performManageUserRequest(t *testing.T, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	return performVerifiedManageUserRequest(t, body, service.AuthIdentity{UserID: 9999}, "")
+}
+
+// performVerifiedManageUserRequest drives ManageUser as the root operator from
+// a dashboard login session, carrying the step-up proof status or role changes need.
+func performVerifiedManageUserRequest(t *testing.T, body string, identity service.AuthIdentity, proof string) *httptest.ResponseRecorder {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/api/user/manage", strings.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
-	c.Set("id", 9999)
+	if proof != "" {
+		c.Request.Header.Set("X-Security-Proof", proof)
+	}
+	c.Set("id", identity.UserID)
 	c.Set("role", common.RoleRootUser)
 	c.Set("username", "root-operator")
+	c.Set("session_id", identity.SessionID)
+	c.Set("auth_version", identity.UserAuthVersion)
+	c.Set("session_version", identity.SessionVersion)
 	c.Set(common.RequestIdKey, "quota-test-request")
 	ManageUser(c)
 	return recorder
@@ -137,6 +152,23 @@ func TestUpdateUserSensitiveWordFieldsRequireExplicitPayload(t *testing.T) {
 	assert.EqualValues(t, 900, stored.UsedQuota)
 }
 
+// manageUserProof signs the root operator in and issues a password-method proof
+// bound to one ManageUser operation.
+func manageUserProof(t *testing.T, db *gorm.DB, operation service.VerificationOperation) (service.AuthIdentity, string) {
+	t.Helper()
+	operator := createQuotaTestOperator(t, db, common.RoleRootUser)
+	require.NoError(t, model.PublishUserAuthCache(operator.Id))
+	bundle, err := service.CreateLoginSession(operator.Id, "password", "127.0.0.1", "manage-user-test")
+	require.NoError(t, err)
+	identity, err := service.ParseAccessToken(bundle.AccessToken)
+	require.NoError(t, err)
+	binding, err := service.BindVerificationOperation(operation)
+	require.NoError(t, err)
+	proof, _, err := service.IssueSecurityProof(identity, service.VerificationMethodPassword, binding)
+	require.NoError(t, err)
+	return identity, proof
+}
+
 func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T) {
 	db := setupManageUserTestDB(t)
 	now := time.Now().Unix()
@@ -151,7 +183,8 @@ func TestManageUserDisableAdvancesAuthVersionOnceAndRevokesSession(t *testing.T)
 		LastActiveAt: now, ExpiresAt: now + 3600,
 	}).Error)
 
-	recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"disable"}`, user.Id))
+	identity, proof := manageUserProof(t, db, service.VerificationOperation{Scope: service.VerificationScopeAdminUserManage, Context: []byte(fmt.Sprintf(`{"user_id":%d,"action":"disable"}`, user.Id))})
+	recorder := performVerifiedManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"disable"}`, user.Id), identity, proof)
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
 
@@ -180,6 +213,13 @@ func TestManageUserEnableResetsSensitiveWordStateAndPreservesResponseShape(t *te
 	}).Error)
 
 	recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"enable"}`, user.Id))
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	var unchanged model.User
+	require.NoError(t, db.First(&unchanged, user.Id).Error)
+	assert.Equal(t, common.UserStatusDisabled, unchanged.Status)
+	assert.Equal(t, 7, unchanged.SensitiveWordViolationCount)
+	identity, proof := manageUserProof(t, db, service.VerificationOperation{Scope: service.VerificationScopeAdminUserManage, Context: []byte(fmt.Sprintf(`{"user_id":%d,"action":"enable"}`, user.Id))})
+	recorder = performVerifiedManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"enable"}`, user.Id), identity, proof)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var response struct {
 		Success bool `json:"success"`
@@ -236,7 +276,8 @@ func TestManageUserDemoteAdvancesAuthVersionAndRevokesSessionsOnce(t *testing.T)
 		}
 	}))
 
-	recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"demote"}`, user.Id))
+	identity, proof := manageUserProof(t, db, service.VerificationOperation{Scope: service.VerificationScopeAdminUserManage, Context: []byte(fmt.Sprintf(`{"user_id":%d,"action":"demote"}`, user.Id))})
+	recorder := performVerifiedManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"demote"}`, user.Id), identity, proof)
 	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
 
@@ -262,7 +303,8 @@ func TestManageUserDeleteReturnsImmediatelyAndUnknownActionFails(t *testing.T) {
 	}
 	require.NoError(t, db.Create(&deleted).Error)
 
-	recorder := performManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"delete"}`, deleted.Id))
+	identity, proof := manageUserProof(t, db, service.VerificationOperation{Scope: service.VerificationScopeAdminUserDelete, Context: []byte(fmt.Sprintf(`{"user_id":%d}`, deleted.Id))})
+	recorder := performVerifiedManageUserRequest(t, fmt.Sprintf(`{"id":%d,"action":"delete"}`, deleted.Id), identity, proof)
 	assert.Contains(t, recorder.Body.String(), `"success":true`)
 	var deletedCount int64
 	require.NoError(t, db.Unscoped().Model(&model.User{}).Where("id = ? AND deleted_at IS NOT NULL", deleted.Id).Count(&deletedCount).Error)
@@ -311,11 +353,17 @@ func TestDeleteUserHardDeletesSoftDeletedUser(t *testing.T) {
 	require.NoError(t, db.Create(&user).Error)
 	require.NoError(t, db.Delete(&user).Error)
 
+	identity, proof := manageUserProof(t, db, service.VerificationOperation{Scope: service.VerificationScopeAdminUserDelete, Context: []byte(fmt.Sprintf(`{"user_id":%d}`, user.Id))})
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodDelete, "/api/user/"+strconv.Itoa(user.Id), nil)
 	c.Params = gin.Params{{Key: "id", Value: strconv.Itoa(user.Id)}}
+	c.Request.Header.Set("X-Security-Proof", proof)
+	c.Set("id", identity.UserID)
+	c.Set("session_id", identity.SessionID)
+	c.Set("auth_version", identity.UserAuthVersion)
+	c.Set("session_version", identity.SessionVersion)
 	c.Set("role", common.RoleRootUser)
 	DeleteUser(c)
 
@@ -331,7 +379,7 @@ func createQuotaTestOperator(t *testing.T, db *gorm.DB, role int) model.User {
 	if role == 0 {
 		role = common.RoleRootUser
 	}
-	operator := model.User{Id: 9999, Username: "root-operator", Role: role, Status: common.UserStatusEnabled, AuthVersion: 1, AffCode: "root-operator-aff"}
+	operator := model.User{Id: 9999, Username: "root-operator", Password: "root-operator-hash", Role: role, Status: common.UserStatusEnabled, AuthVersion: 1, AffCode: "root-operator-aff"}
 	require.NoError(t, db.Create(&operator).Error)
 	return operator
 }

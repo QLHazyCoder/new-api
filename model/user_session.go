@@ -747,7 +747,9 @@ func revokeUserSessions(userID int, excludedSID, reason string) (int64, error) {
 		}
 		var affected int64
 		var revoked []UserSession
-		err := DB.Transaction(func(tx *gorm.DB) error {
+		err := withRetryableDatabaseTransaction(context.Background(), func(tx *gorm.DB) error {
+			affected = 0
+			revoked = nil
 			if err := lockForUpdate(tx).Where("sid IN ? AND status = ?", sids, UserSessionStatusActive).Find(&revoked).Error; err != nil {
 				return err
 			}

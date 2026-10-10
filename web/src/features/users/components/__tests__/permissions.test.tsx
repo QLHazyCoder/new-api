@@ -56,7 +56,7 @@ function renderPermissions(
   useAuthStore
     .getState()
     .auth.setUser({ id: 1, username: 'operator', role: viewerRole })
-  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+  const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/authz/catalog') {
       return {
         data: {
@@ -83,6 +83,19 @@ function renderPermissions(
     if (url === '/api/group/') {
       return { data: { success: true, data: ['default'] } }
     }
+    if (url === '/api/verify/methods') {
+      return {
+        data: {
+          success: true,
+          data: {
+            scope: 'admin.user.update',
+            methods: [{ method: '2fa', available: true }],
+            oauth_providers: [],
+            password_encryption_enabled: false,
+          },
+        },
+      }
+    }
     return {
       data: {
         success: true,
@@ -98,7 +111,7 @@ function renderPermissions(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  render(
     <QueryClientProvider client={client}>
       <UsersProvider>
         <UsersMutateDrawer
@@ -109,6 +122,7 @@ function renderPermissions(
       </UsersProvider>
     </QueryClientProvider>
   )
+  return get
 }
 
 afterEach(() => {
@@ -118,31 +132,51 @@ afterEach(() => {
 })
 
 it.each([undefined, true])(
-  'root can save an audit grant or revocation from the existing editor (previous=%s)',
+  'root can save an audit grant or revocation after step-up verification (previous=%s)',
   async (allowed) => {
     const put = vi
       .spyOn(api, 'put')
       .mockResolvedValue({ data: { success: true } })
+    vi.spyOn(api, 'post').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          proof_token: 'update-proof',
+          method: '2fa',
+          scope: 'admin.user.update',
+          expires_at: Math.floor(Date.now() / 1000) + 60,
+        },
+      },
+    })
     renderPermissions(100, allowed, {
       sensitive_word_violation_count: 7,
       sensitive_word_whitelist: true,
     })
     await screen.findByDisplayValue('Managed admin')
-    const checkbox = await screen.findByRole('checkbox', {
-      name: new RegExp(label),
-    })
+    const toggle = await screen.findByRole('button', { name: label })
     await waitFor(() =>
-      expect(checkbox).toHaveAttribute('aria-checked', String(!!allowed))
+      expect(toggle).toHaveAttribute('aria-pressed', String(!!allowed))
     )
-    expect(screen.getByText(description)).toBeVisible()
-    await userEvent.click(checkbox)
+    expect(toggle).toHaveAccessibleDescription(description)
+    await userEvent.click(toggle)
     await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    // The permission matrix changed, so the save waits for verification.
+    expect(put).not.toHaveBeenCalled()
+    await userEvent.type(
+      await screen.findByLabelText('Authenticator code or backup code'),
+      '123456'
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Verify' }))
     await waitFor(() =>
       expect(put).toHaveBeenCalledWith(
         '/api/user/',
         expect.objectContaining({
           id: 2,
           admin_permissions: { audit: { read: !allowed } },
+        }),
+        expect.objectContaining({
+          headers: { 'X-Security-Proof': 'update-proof' },
+          singleUseAuthorization: true,
         })
       )
     )
@@ -168,12 +202,33 @@ it('sends a sensitive-word field only after an administrator changes it', async 
       expect.objectContaining({
         id: 2,
         sensitive_word_whitelist: true,
-      })
+      }),
+      {}
     )
   )
   expect(put.mock.calls[0]?.[1]).not.toHaveProperty(
     'sensitive_word_violation_count'
   )
+})
+
+it('root saving an administrator without changing permissions or password does not verify', async () => {
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const get = renderPermissions(100, true)
+  const displayName = await screen.findByDisplayValue('Managed admin')
+  await userEvent.clear(displayName)
+  await userEvent.type(displayName, 'Renamed admin')
+  await userEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith(
+      '/api/user/',
+      expect.objectContaining({ id: 2, display_name: 'Renamed admin' }),
+      {}
+    )
+  )
+  expect(put.mock.calls[0][1]).not.toHaveProperty('admin_permissions')
+  expect(get).not.toHaveBeenCalledWith('/api/verify/methods', expect.anything())
 })
 
 it('sends zero only when the violation count is explicitly cleared', async () => {
@@ -190,7 +245,8 @@ it('sends zero only when the violation count is explicitly cleared', async () =>
   await waitFor(() =>
     expect(put).toHaveBeenCalledWith(
       '/api/user/',
-      expect.objectContaining({ id: 2, sensitive_word_violation_count: 0 })
+      expect.objectContaining({ id: 2, sensitive_word_violation_count: 0 }),
+      {}
     )
   )
   expect(put.mock.calls[0]?.[1]).not.toHaveProperty('sensitive_word_whitelist')
@@ -212,7 +268,8 @@ it('sends false only when the whitelist is explicitly turned off', async () => {
   await waitFor(() =>
     expect(put).toHaveBeenCalledWith(
       '/api/user/',
-      expect.objectContaining({ id: 2, sensitive_word_whitelist: false })
+      expect.objectContaining({ id: 2, sensitive_word_whitelist: false }),
+      {}
     )
   )
   expect(put.mock.calls[0]?.[1]).not.toHaveProperty(
@@ -223,7 +280,5 @@ it('sends false only when the whitelist is explicitly turned off', async () => {
 it('admin cannot edit the audit permission even when the catalog is available', async () => {
   renderPermissions(10)
   await screen.findByDisplayValue('Managed admin')
-  expect(
-    screen.queryByRole('checkbox', { name: new RegExp(label) })
-  ).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: label })).not.toBeInTheDocument()
 })

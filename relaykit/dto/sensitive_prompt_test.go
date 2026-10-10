@@ -2,6 +2,7 @@ package dto
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,7 +71,9 @@ func TestSensitivePromptExtractionAcrossRelayProtocols(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			require.Contains(t, test.text(), test.marker)
+			text := test.text()
+			require.Contains(t, text, test.marker)
+			require.Equal(t, 1, strings.Count(text, test.marker))
 		})
 	}
 }
@@ -84,7 +87,7 @@ func TestResponsesFunctionOutputExtractionPreservesWireShape(t *testing.T) {
 	require.JSONEq(t, string(raw), string(encoded))
 }
 
-func TestResponsesFunctionOutputDoesNotExpandOrdinaryContentParsing(t *testing.T) {
+func TestResponsesFunctionOutputKeepsObjectsScopedAndCountsAssistantText(t *testing.T) {
 	request := &OpenAIResponsesRequest{Input: json.RawMessage(`[
   {"type":"message","content":{"ordinary":"content-object-marker"}},
   {"type":"message","content":[{"type":"output_text","text":"ordinary-output-text-marker"}]},
@@ -92,7 +95,7 @@ func TestResponsesFunctionOutputDoesNotExpandOrdinaryContentParsing(t *testing.T
 ]`)}
 	text := request.GetTokenCountMeta().CombineText
 	require.NotContains(t, text, "content-object-marker")
-	require.NotContains(t, text, "ordinary-output-text-marker")
+	require.Contains(t, text, "ordinary-output-text-marker")
 	require.Contains(t, text, "function-output-object-marker")
 }
 

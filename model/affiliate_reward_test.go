@@ -314,7 +314,9 @@ func TestHardDeleteReconcilesInviterCount(t *testing.T) {
 	require.NoError(t, DB.Create(&inviter).Error)
 	require.NoError(t, DB.Create(&invitee).Error)
 
-	require.NoError(t, HardDeleteUserById(invitee.Id))
+	revoked, err := HardDeleteUserById(invitee.Id)
+	require.NoError(t, err)
+	assert.Zero(t, revoked)
 	var storedInviter User
 	require.NoError(t, DB.First(&storedInviter, inviter.Id).Error)
 	assert.Zero(t, storedInviter.AffCount)

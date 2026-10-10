@@ -44,6 +44,9 @@ func isSignedBigIntType(databaseType string) bool {
 	if strings.Contains(databaseType, "unsigned") {
 		return false
 	}
+	if DB != nil && DB.Dialector != nil && DB.Dialector.Name() == string(common.DatabaseTypePostgreSQL) && databaseType == "int8" {
+		return true
+	}
 	if DB != nil && DB.Dialector != nil && DB.Dialector.Name() == string(common.DatabaseTypeSQLite) {
 		// SQLite uses dynamic affinity. INTEGER and BIGINT both store the full
 		// signed 64-bit range, so accept either spelling here.

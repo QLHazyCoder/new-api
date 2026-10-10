@@ -456,6 +456,31 @@ func TestListActiveUserSessionsKeepsCurrentAndBoundsOtherSessions(t *testing.T) 
 	assert.Len(t, sessionsWithoutCurrent, userSessionListLimit, "a missing current SID must not reduce the total list limit")
 }
 
+func TestRevokeUserSessionsRetriesTransientTransactionFailure(t *testing.T) {
+	setupUserSessionTest(t)
+	now := time.Now().Unix()
+	createUserSessionTestUser(t, 1008, 1)
+	require.NoError(t, DB.Create(newTestUserSession("retry-revoke", 1008, now)).Error)
+	const callback = "test:transient_user_session_revoke"
+	attempts := 0
+	require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "user_sessions" {
+			attempts++
+			if attempts == 1 {
+				_ = tx.AddError(errors.New("database is locked"))
+			}
+		}
+	}))
+	t.Cleanup(func() { _ = DB.Callback().Update().Remove(callback) })
+	affected, err := RevokeAllUserSessions(1008, "transient-lock")
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), affected)
+	assert.Equal(t, 2, attempts)
+	active, err := CountActiveUserSessions(1008, now)
+	require.NoError(t, err)
+	assert.Zero(t, active)
+}
+
 func TestRevokeUserSessionsReturnsCumulativeProgressAndSupportsRetry(t *testing.T) {
 	setupUserSessionTest(t)
 	now := time.Now().Unix()

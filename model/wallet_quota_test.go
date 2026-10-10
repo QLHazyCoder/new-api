@@ -4,7 +4,11 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func TestWalletQuotaSupportsLargeBalancesAndInt64Boundary(t *testing.T) {
@@ -46,4 +50,28 @@ func TestWalletQuotaSchemaUsesSigned64Columns(t *testing.T) {
 		&AffiliateRewardEvent{}, &SensitiveWordAuditEvent{},
 	))
 	require.NoError(t, validateWalletQuotaSchema())
+}
+
+func TestWalletQuotaSchemaRecognizesDialectTypeNames(t *testing.T) {
+	previous := DB
+	t.Cleanup(func() { DB = previous })
+	for _, test := range []struct {
+		dialect gorm.Dialector
+		valid   []string
+		invalid []string
+	}{
+		{postgres.New(postgres.Config{}), []string{"bigint", "int8", " INT8 "}, []string{"int4", "integer", "numeric", "bigint unsigned"}},
+		{mysql.New(mysql.Config{SkipInitializeWithVersion: true}), []string{"bigint", "bigint(20)"}, []string{"int8", "int", "bigint unsigned"}},
+		{sqlite.Open(":memory:"), []string{"integer", "bigint"}, []string{"real", "text", "bigint unsigned"}},
+	} {
+		t.Run(test.dialect.Name(), func(t *testing.T) {
+			DB = &gorm.DB{Config: &gorm.Config{Dialector: test.dialect}}
+			for _, name := range test.valid {
+				require.True(t, isSignedBigIntType(name), name)
+			}
+			for _, name := range test.invalid {
+				require.False(t, isSignedBigIntType(name), name)
+			}
+		})
+	}
 }

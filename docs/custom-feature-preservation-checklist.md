@@ -9,10 +9,13 @@
 
 ## 1. 覆盖范围与基线
 
-- 当前代码盘点快照：本地 `main@54da177f7617d0e7bf34cba43437afe1650cf97b`（本次复核日期
-  2026-09-28）。作者正式标签仍为 `v1.0.0-rc.40@0aec08fee811ec6136828fda790551b49e410301`；
-  当前滚动主线为 `upstream/main@c2b7a9a9e0b548c2051a949fceabb59029adcb49`，只作旁证，
-  不替代固定正式标签，也未合入当前 `main`。
+- 当前合并前快照：本地 `main@dece225fb4203ff7b2cfe7e4043a26f73a38fe10`，复核日期
+  2026-10-10。合并目标固定为作者最新正式标签
+  `v1.0.0-rc.42@6370b29424168039e94d40d610191e7d2e65dbf4`；滚动主线
+  `upstream/main@1d4328e97417a043a161a0dd30a5b129be3ace49` 仅作版本旁证，不纳入合并。
+  本轮逐项保护和验证记录见第 11 节。
+- 上次盘点快照为 `main@54da177f7617d0e7bf34cba43437afe1650cf97b`（2026-09-28）；
+  第 8、9 节仍是 2026-09-23 的历史审计，不能当作本轮代码或线上状态。
 - 2026-09-23 的 RC-40 对照以 `main@6fb2358525cf762fa81a4c59ec3751275493bf71` 为历史快照，
   直接比较得到 541 个不同路径（114 个新增、422 个修改、5 个删除）；它们包含本项目差异、
   作者版本演进、测试/文档/工具文件，不能把路径数或提交数直接当成功能数，逐项分类仍保留在
@@ -23,9 +26,8 @@
   仅保留仍独有的子契约，其上游等价子行为移入历史归档。另将 P-02/P-26 两项治理条目和
   已退休的 P-33 移出；历史编号及来源仍可追溯。另识别 1 组作者历史实现残留，不计入 QLH
   自研项。上述数字按保护项/行为组统计，不是原子用户功能数量。
-- `v1.0.0-rc.40` 与当前 `main` 尚未合并；两者的提交图存在分叉。因此“已吸收”只表示
-  作者 RC-40 中可见等价行为，不表示当前本地代码已包含 RC-40；不得将两侧不共享的提交对象
-  误算成本地功能数量。
+- 在第 8、9 节的历史审计时点，RC-40 尚未合并；当时“已吸收”仅指作者侧语义等价。
+  当前合并前 `main` 已包含 RC-40 及后续维护提交，不能再把两侧历史差异重复计成功能。
 
 - 历史自研基线：从上一个上游基线 `v1.0.0-rc.21` 到原 `main@6a978443` 的
   93 个非合并提交。
@@ -57,6 +59,11 @@
 - `54da177f7` 的 P-30 用户编辑修复要求接口对 `sensitive_word_violation_count` 和
   `sensitive_word_whitelist` 保持显式 patch 语义：常规资料/权限编辑不能携带安全字段，
   只有对应控件实际变更才提交，避免陈旧表单值覆盖并发违规计数或白名单状态。
+- 2026-09-28 后的 9 个非合并提交已核销：`a14834157` 为 P-30 文档映射，
+  `0f3c4e67c`、`ec2641d93` 为 P-32 持久账务和跨表锁序，`f17fc83a7` 为 P-13
+  模型端点/媒体能力，`b084a8a65` 为 P-30 界面本地化，`a19e8704b` 为 P-18 缺省 IP
+  日志，`8f639edbd` 为 P-06/P-28 观测能力状态，`dece225fb` 为 P-15/P-16 图片生命周期；
+  `8067b3e40` 仅为模型广场重构交接文档，不表示已实施该重构。
 - P-13/P-16 的后续 Playground 提交包括 `889436b78`、`734b60163` 和 `4cd9c9460`；
   前者保护图片历史清理的查询边界，后两者把图片能力配置外置并统一 GPT 图片模型能力。
 - 清单上次更新后新增的独立自研功能提交为 `b2e905185`（CC Switch 多来源导入）和
@@ -405,7 +412,8 @@
   `translation` 而不覆盖现有值，避免同步丢弃本地翻译或键。
 - 当前位置：`web/scripts/sync-i18n.mjs`。
 - 合并检查：对比同步前后的各 locale 键和值；标准 BCP-47 语言码和 `Intl` 归一化属于
-  RC-40 已有的上游行为，不是本项的保护内容。
+  RC-40 已有的上游行为，不是本项的保护内容。保护对象是本地同步规则与自研功能翻译，
+  不要求恢复上游随退休界面一并删除、且没有自研调用的翻译键。
 - 来源/保留提交：`ec15c8e23`。
 
 ### P-24 排行榜的本地自然日与管理员访问边界
@@ -935,3 +943,196 @@ RC-40 相对 RC-39 的 14 个作者提交逐组核销如下；全部排除在 QL
 | 当前上游差异 | 待后续批准 | `upstream/main@c2b7a9a9e` 已领先 RC-40，尚未合入；下一次上游更新必须重新执行第 2、3 节保护项核对。 |
 
 本次维护提交为 `25e5f87a4`，已推送 `origin/main`；未部署、未重启服务，也未修改生产数据库。
+
+## 11. 2026-10-10 RC-42 合并与自研保护审查
+
+### 项目整体分析
+
+- 业务边界保持 `controller/router/middleware -> service/relay -> model/setting`，前端仍是
+  `web/src` 单入口。独立模块为 `relaykit` 和新增的 `tokenkit`；不恢复 Classic 前端。
+- 合并前工作树干净。共同祖先为 `d04c118c8803f49e0c9bab74dcf5b5efeab9464a`；标签侧
+  新增 40 个提交，包含 RC-41/42 的安全验证、范围令牌、token 计数、协议转换、工具用量和插件更新。
+- 风险集中在自研接口被新令牌规则拒绝、启用账号跳过上游安全验证、int64 财务字段迁移、
+  Responses 工具输出提取、图片任务状态及多语言合并。按实际调用链和数据契约核对，
+  不以 Git 无冲突或提交仍在历史中代替行为证明。
+- 合并前相对 RC-40 的 579 个本地差异路径中，50 个与本轮上游改动交叉；其他路径保持
+  原样。下表逐项核销 29 项现行保护契约，没有批准或执行任何自研功能退休。
+
+### 合并方案
+
+1. 固定正式标签做三方合并，逐段解决 21 个文件冲突，保留双方有效测试。
+2. 保留自研账务、图片、分组、日志和安全字段契约；在原模块补充与上游范围令牌及安全
+   验证的兼容，不另造平行框架。界面按仓库 shadcn-ui 技能复用现有 Base UI 验证流程。
+   上游自身的正常更新照常接受，包括替换旧令牌界面及删除其无调用的翻译键；不将自研
+   保护范围扩大为冻结上游实现。
+3. 数据库只走应用已有追加式迁移，不清表、不重算生产额度、不回填历史任务或日志。
+   SQLite、隔离 MySQL 8.2.0 和 PostgreSQL 15.19 同时验证新库、旧版升级和重复启动。
+4. 在测试、构建和差异审查后才提交主线。镜像由 Fork Actions 构建，不用本机 Docker 构建
+   替代发布验收；运行时按稳定代理、备用槽位先启动的既有流程执行。
+
+### 29 项功能逐项核对
+
+表中“原样保留”指原有本地契约仍在；必要的上游 API/类型兼容与原实现并存，不表示整个文件
+逐字节不变。验证入口均随本轮全套测试运行，界面内容和迁移还按下方阶段记录单独检查。
+
+| 编号 | 状态 | 最终位置、语义核对与回归证据 |
+| --- | --- | --- |
+| P-01 | 原样保留 | `.github/workflows/docker-build.yml` 未改；仍发布 Fork GHCR、main 短 SHA、latest、amd64/arm64 及 manifest。 |
+| P-03 | 原样保留 | `payment_setting.go`、`controller/topup.go`、钱包 `lib/payment.ts` 的默认金额和最小额校验未被替换。 |
+| P-04 | 原样保留 | 两层 `return_path.go`、钱包 `payment-return.ts` 保留支付标记；上游 Waffo 回跳测试改为断言本地 `pay/scope/show_history` 契约。 |
+| P-05 | 原样保留 | 钱包/订阅结构未改；账单历史仅合入状态翻译，未移除本地充值、订阅和奖励卡。 |
+| P-06 | 原样保留 | `pkg/perf_metrics`、`controller/perf_metrics.go` 保留分组过滤、原始图片 400 排除及能力状态；相关 Go/前端回归保留。 |
+| P-07 | 原样保留 | 公共 Chat-to-Responses 禁用、cache creation/write、旧音频倍率仍在；Responses 输出结合上游 agent 回放计数与本地对象字符串提取，每段仅一次。 |
+| P-08 | 原样保留 | `service/group.go`、分组倍率设置和可视化编辑器未改；GroupDescriptions 与特殊可见配置不清零。 |
+| P-11 | 原样保留 | 定价接口和分组过滤生产代码未改；`pricing_test.go` 继续覆盖副本过滤与普通用户/管理员边界。 |
+| P-12 | 原样保留 | `model/log.go`、日志清理任务和成本展示未改；`model/option.go` 仅新增上游旧令牌截止键只读规则。 |
+| P-13 | 原样保留 | `pkg/imagecapability`、渠道图片识别及实际模型映射仍在；`common/model.go` 的本地文本模型集合保留，新令牌允许读取 image-models。 |
+| P-14 | 原样保留 | 图片 DTO、请求构造、参考图、默认尺寸、4K 和 auto 校验未改；有效图片请求及 payload 测试保留。 |
+| P-15 | 原样保留 | 持久任务/批次、required option、全局并发、租约和生命周期锁未改；标准迁移加入新令牌表时仍保留图片表和必需 option。 |
+| P-16 | 原样保留 | 50 条上限、500 条清理批次、幂等硬删除、前端 tombstone 未改；异步读写接口新增 playground:read/write 范围，旧令牌过渡期仍可访问。 |
+| P-17 | 原样保留 | 邀请账本、订单奖励快照、raw 字符串和硬删除 aff_count 事务均保留；硬删除测试只适配新增的令牌撤销计数返回值。 |
+| P-18 | 原样保留 | `RecordIPLog` presence/default-on 与设置合并逻辑未改；controller、日志和前端隐私回归仍覆盖显式 false。 |
+| P-19 | 原样保留 | 两级 `ApplicableGroup`、计划校验和抽屉仍在；订阅表格仅合入 Enabled/Disabled 翻译。 |
+| P-20 | 原样保留 | 订阅优先、混合资金分摊、差额退款及任务资金来源未改；账务矩阵保留所有持久恢复与幂等断言。 |
+| P-21 | 原样保留 | 自助字段白名单、int64 额度、认证缓存、软/硬删除与邀请计数保持；合入上游安全证明、新范围令牌撤销，并修复事务锁冲突。 |
+| P-22 | 原样保留 | `registration_group_policy.go` 及注册入口保留；微信绑定仅改为上游统一 step-up identity，不改来源分组。 |
+| P-23 | 原样保留 | `sync-i18n.mjs` 固定英文、全语言键并集逻辑未改；7 语言各 7064 键，自研翻译保留，上游退休界面的 18 个旧键照常删除。 |
+| P-24 | 原样保留 | 本地自然日半开区间、零点缓存和管理员入口未改；排行榜 Go/前端回归保留。 |
+| P-27 | 原样保留 | `controller/usedata.go` 两个个人接口仍共用 31 天上限；图表仅合入按真实时间戳排序。 |
+| P-28 | 原样保留 | `text_quota.go` 最终结果、外层单样本和 request_outcome 未变；上游工具计数接入仍通过持久计费路径结算，不回填历史数据。 |
+| P-29 | 原样保留 | 分组折扣、Epay 固定快照及 credited_quota 未改；两条折扣接口补充 option:read/write 范围，原 RootAuth 不变。 |
+| P-30 | 原样保留 | 类型 8 隔离、AuditRead 详情、行锁违规控制、UTF-8 提示词、观察降级、显式安全字段 patch 全部保留；启用清零先验证绑定 user/action 的证明，余额与历史不变。 |
+| P-31 | 原样保留 | CC Switch 七来源注册表、字段、endpoint 和深链规则未改；来源/弹窗测试保留。 |
+| P-32 | 原样保留 | int64/BIGINT、SQL 授信、持久账务、跨表锁序及未知结果保留未改；修正 PostgreSQL int8 类型别名误判，不改额度或费用域。 |
+| P-34 | 原样保留 | 所选 API Key 的 `/v1/models`、skipSessionAuthorization、加载失败隔离和 Portal/键盘交互未改。 |
+| P-35 | 原样保留 | admin_info 模型诊断、普通用户脱敏及显式日志迁移工具未改；本轮未执行历史日志 apply。 |
+
+### 文件结构设计与新增职责
+
+没有本地目录重组。下列新增文件均来自固定上游标签，在已有职责边界内落位；本轮额外回归
+补在已有测试文件，审查文档也更新本文件，不新建无调用关系的产品模块。
+
+| 新增路径 | 职责 |
+| --- | --- |
+| `middleware/access_token_routes.go` | 每个面板接口的范围/会话规则；额外登记本地图片、支付和敏感词接口。 |
+| `middleware/frontend_static.go` | 静态资源独立限流及条件响应，不共用动态网页预算。 |
+| `middleware/frontend_static_test.go` | 静态资源限流/缓存回归。 |
+| `model/user_access_token.go` | 新范围令牌的哈希存储、额度无关的授权/过期/撤销、30 天旧令牌迁移截止。 |
+| `service/access_token_scope.go` | 权限目录、范围规范化与验证；加入本地 playground 和 sensitive_word 资源。 |
+| `router/access_token_scope_test.go` | 全面板路由恰好一次登记、授权目录及自研接口行为覆盖。 |
+| `controller/admin_user_verification_test.go` | 管理员操作证明的用户/动作绑定、单次消费与权限检查。 |
+| `plugins/tasks/xai/plugin.js` | 上游 xAI Responses 视频任务插件实现，不改变本地图片路由。 |
+| `plugins/xai_responses_test.go` | xAI 插件协议回归。 |
+| `relay/channel/ali/web_search.go` | Alibaba 原生搜索工具转换与用量。 |
+| `relay/channel/openai/web_search.go` | OpenAI/Azure 搜索用量与计费键。 |
+| `relay/channel/xai/web_search.go` | xAI Responses 原生工具用量。 |
+| `relay/channel/zhipu_4v/web_search.go` | Zhipu 搜索工具转换。 |
+| `relaykit/dto/token_count_meta_test.go` | agent 回放、工具调用和多协议输入计数回归。 |
+| `relaykit/relayconvert/convmeta/websearch.go` | 协议转换共享搜索状态。 |
+| `relaykit/relayconvert/internal/shared/claude/media.go` | 共享 Claude 多媒体转换，不丢弃响应/工具媒体。 |
+| `tokenkit/go.mod` | 独立 token 计数模块及 Go 版本。 |
+| `tokenkit/go.sum` | 独立模块依赖校验。 |
+| `tokenkit/tokenkit.go` | 统一计数 API。 |
+| `tokenkit/tokenizer.go` | tokenizer 初始化/使用。 |
+| `tokenkit/image.go` | 模型相关图片 token 算法。 |
+| `tokenkit/tokenkit_test.go` | 文本/模块 API 回归。 |
+| `tokenkit/image_test.go` | 图片尺寸/detail/model 回归。 |
+| `tokenkit/README.md` | 独立模块使用契约。 |
+| `web/src/components/permission-matrix.tsx` | 用户权限和范围令牌复用的权限矩阵。 |
+| `web/src/features/security/components/access-token-item.tsx` | 单个令牌的安全摘要和操作。 |
+| `web/src/features/security/components/access-tokens-card.tsx` | 多令牌列表/旧令牌迁移状态。 |
+| `web/src/features/security/components/dialogs/access-token-create-dialog.tsx` | 范围、过期时间与单次明文显示。 |
+| `web/src/features/security/components/dialogs/access-token-edit-dialog.tsx` | 重命名/权限修改和安全验证。 |
+| `web/src/features/security/hooks/use-access-tokens.ts` | 令牌列表与变更数据交互。 |
+| `web/src/features/security/lib/access-token-catalog.ts` | 目录分组/展示转换。 |
+| `web/src/features/security/lib/access-token-schema.ts` | 创建/编辑输入校验。 |
+| `web/src/features/security/components/__tests__/access-token-create-dialog.test.tsx` | 单次明文、授权与过期验证。 |
+| `web/src/features/security/components/__tests__/access-tokens-card.test.tsx` | 列表、修改与旧令牌状态。 |
+| `web/src/features/channels/components/__tests__/channels-columns-status-tooltip-content.test.tsx` | 渠道状态提示信息。 |
+| `web/src/features/channels/components/__tests__/param-override-editor.test.tsx` | 参数覆盖编辑输入安全。 |
+| `web/src/features/channels/components/__tests__/table-refresh.test.tsx` | 表格刷新状态。 |
+| `web/src/features/dashboard/lib/__tests__/charts.test.ts` | 时间戳排序和分桶展示。 |
+| `web/src/features/users/components/__tests__/group-filter.test.tsx` | 用户分组筛选。 |
+| `web/src/features/users/components/__tests__/step-up-verification.test.tsx` | 管理操作及本地启用清零的证明、取消和弹窗隔离。 |
+| `web/src/features/wallet/__tests__/copy.test.tsx` | 钱包文案语义。 |
+| `web/src/i18n/languages.test.ts` | 现行 BCP-47 与旧缓存语言码兼容、Intl 安全。 |
+| `assets/screenshots/dashboard.en.jpg` | 上游英文仪表盘文档截图。 |
+| `assets/screenshots/dashboard.zh-CN.jpg` | 上游中文仪表盘文档截图。 |
+| `assets/screenshots/models.en.jpg` | 上游英文模型页文档截图。 |
+| `assets/screenshots/models.zh-CN.jpg` | 上游中文模型页文档截图。 |
+| `assets/screenshots/plugin-marketplace.en.jpg` | 上游英文插件页文档截图。 |
+| `assets/screenshots/plugin-marketplace.zh-CN.jpg` | 上游中文插件页文档截图。 |
+| `assets/screenshots/usage-logs.en.jpg` | 上游英文日志页文档截图。 |
+| `assets/screenshots/usage-logs.zh-CN.jpg` | 上游中文日志页文档截图。 |
+
+### 删除/替换逆向审查
+
+6 个删除文件逐一与 RC-40 基线核对，合并前内容均与该正式标签一致，不含本地独有差异；
+保留上游替换后的调用链和测试，没有删除图片、财务、分组或敏感词自研文件。
+
+| 删除路径 | 接替位置与原因 |
+| --- | --- |
+| `service/token_estimator.go` | `service/token_counter.go` 调用独立 `tokenkit`，统一计数。 |
+| `service/tokenizer.go` | `tokenkit/tokenizer.go` 接替初始化和 tokenizer。 |
+| `relaykit/relayconvert/internal/oai_responses/to_gemini_chat_req_preprocess.go` | 转换注册与 shared Gemini/media 逻辑统一接替旧预处理。 |
+| `web/src/features/security/components/access-token-card.tsx` | 多范围令牌列表 `access-tokens-card.tsx` 接替单令牌卡。 |
+| `web/src/features/security/hooks/use-access-token.ts` | `use-access-tokens.ts` 接替单令牌请求。 |
+| `web/src/features/security/components/__tests__/access-token-card.test.tsx` | 新列表及创建弹窗测试接替旧单令牌断言。 |
+
+### 开发清单与阶段自检
+
+| 阶段 | 状态 | 问题、处理与证据 |
+| --- | --- | --- |
+| 全局理解/基线 | 完成 | 核对 remotes、正式标签、共同祖先、29 项契约及 9 个后续本地提交。 |
+| 三方合并 | 完成 | 21 个冲突文件逐段合并；删除文件逆向审查；未整文件选择 ours/theirs。 |
+| 自研路由兼容 | 完成 | 新范围规则会拒绝未登记接口；补齐图片/折扣/敏感词/审计规则，测试范围授予、缺少范围及不可提升普通用户角色。 |
+| 账号安全兼容 | 完成 | 本地 enable 提前返回会绕过上游证明；证明前置，保留行锁清零、余额不变和单次 auth_version；界面验证期间隐藏确认框，取消不请求。 |
+| 锁冲突复核 | 完成 | 独立重复测试复现 SQLite 删除与提交后会话撤销锁错误；复用完整事务重试，故障注入和 50 轮并发/重试通过，不重用安全证明。 |
+| 协议提取 | 完成 | 本地 function output 与新上游计数叠加导致重复文本；每段仅提取一次，保留嵌套对象解码和 assistant output_text；relaykit 全套通过。 |
+| 数据库兼容 | 完成 | 新建/升级 SQLite、MySQL、PostgreSQL 各运行迁移两次；修复 PostgreSQL int8 别名误判，账户、额度、旧/新令牌、哈希唯一性及日志数据保留。 |
+| 自研财务/敏感词 | 完成 | 三种真实方言矩阵通过；包含旧表升级、持久退款/结算、混合分摊和敏感词提示词/违规状态，不用生产 DB。 |
+| 本地化 | 完成 | 自研同步规则、功能键和值保留；7 语言各 7064 键。撤回对上游已退休的 18 个旧键的恢复，包括并集同步带回的键；上游更新的翻译值全部接受，不干预上游自身更新。 |
+| 后端门禁 | 完成 | 根模块 vet/build/test 全部通过，4981 个通过测试、54 个明确跳过；独立 relaykit/tokenkit 全套通过。另在真实 MySQL/PostgreSQL 各运行 75 个账号安全测试，全通过。 |
+| 前端门禁 | 完成（已记录波动） | 全量 193 文件、2238 测试，2237 通过；未改动的上游模型映射测试有一次异步焦点断言失败，单独 9/9 及最终相关 24/24 复跑通过。typecheck/lint/build 通过；lint 58 个非阻断警告，format 仅有合并前已存在且未改的 prompt-input.tsx/privacy-card.tsx 格式差异，不扩大本轮修改。 |
+| 发布/现场验收 | 待执行 | 推送 main 后按 head SHA 等待 amd64/arm64/manifest，核验 OCI revision；仅重建备用槽位，切流后观测至少 5 分钟，失败保留旧槽位回退。 |
+
+安全复核参考 [OWASP Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html)
+和 [Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)；
+PostgreSQL 类型别名参考 [官方数值类型说明](https://www.postgresql.org/docs/15/datatype-numeric.html)。
+这些参考不表示执行了完整合规认证。ClickHouse 无隔离实例，本轮未验证该日志后端，不以
+SQLite/MySQL/PostgreSQL 的通过结果冒充其结果。
+
+验证环境与实际命令：Go 1.26.1 linux/arm64，SQLite 3.50.4、MySQL 8.2.0、
+PostgreSQL 15.19。外部数据库仅使用隔离实例的 loopback 端口与独立测试库；
+DSN 不写入文档或终端输出。日志位于本机 `/tmp/new-api-rc42-*`，不是永久 CI 制品。
+
+```bash
+# 根模块与独立模块分别执行，GOWORK=off。
+go vet ./...
+go build ./...
+go test -json ./...
+# 三方言新建/已发布版升级，以及独立 MySQL/PostgreSQL 日志库。
+go test ./controller -run '^(TestAuditDatabaseMatrix|TestIndependentAuditLogStores)$' -count=1
+go test ./model -run '^(TestBillingOperationDatabaseMatrix|TestSensitiveWordDatabaseMigrationMatrix)$' -count=1
+go test ./model -run '^(TestMigrationSchemaStability|TestWalletQuotaSchemaRecognizesDialectTypeNames)$' -count=1
+# 外部 TEST_MYSQL_DSN/TEST_POSTGRES_DSN 已私下设置为隔离实例。
+# 分别设置 TEST_MANAGE_USER_DIALECT、TEST_SECURITY_DIALECT 为 mysql/postgres，日志库独立。
+go test ./controller -run '^(TestManageUser|TestUpdateUserSensitive|TestDeleteUserHard|TestSecurityAccountDeletion|TestAdminUserVerification)' -count=1
+go test ./controller -run '^(TestSecurityAccountDeletionConcurrentRequestsHaveOneWinner|TestSecurityAccountDeletionRetriesTransactionWithoutRepeatingRevocation)$' -count=50
+# 以下在 web/ 执行。
+bun run i18n:sync
+bun run typecheck
+bun run lint
+bun run build:check
+bun run test -- --maxWorkers=2 --reporter=default --reporter=json --outputFile.json=/tmp/new-api-rc42-web-tests.json
+bun run test -- src/features/channels/components/__tests__/model-mapping-editor.test.tsx src/features/users/components/__tests__/permissions.test.tsx src/features/users/components/__tests__/step-up-verification.test.tsx src/i18n/languages.test.ts --maxWorkers=1 --retry=2
+```
+
+### 最终审查边界
+
+- 源码保护结论：29 项现行契约全部保留，没有本轮自研退休或数据库数据删除。
+- 上游新增范围令牌和管理员 step-up 属明确版本行为变化，不伪称所有上游行为逐字不变。
+  旧面板令牌在首次升级后有 30 天过渡截止；新令牌只存哈希，令牌管理需浏览器登录。
+  外部自动化需在过渡期内自行迁移，本轮不擅自轮换生产凭据。
+- 本文件记录源码与提交前门禁。Actions、镜像身份及生产 5 分钟观测必须取本轮实时结果，
+  不能从历史发布记录推断或把预定步骤写成已完成。
