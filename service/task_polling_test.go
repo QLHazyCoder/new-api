@@ -773,8 +773,8 @@ func TestSweepTimedOutTasksHoldsUnknownBillingForReview(t *testing.T) {
 	assert.Zero(t, reloadedLegacy.Quota)
 	assert.Equal(t, modernTaskQuota, reloadedModern.Quota)
 	assert.True(t, reloadedModern.BillingReviewPending)
-	assert.Contains(t, reloadedLegacy.FailReason, "旧系统遗留任务")
-	assert.Contains(t, reloadedModern.FailReason, "任务超时")
+	assert.Contains(t, reloadedLegacy.FailReason, "old system")
+	assert.Contains(t, reloadedModern.FailReason, "Task timed out")
 	assert.EqualValues(t, initialQuota-legacyTaskQuota-modernTaskQuota, getUserQuota(t, userID))
 	assert.EqualValues(t, int64(0), countLogs(t))
 	pendingRefunds, err := model.ListConfirmedFailedTasksWithPendingRefund(10)
@@ -968,7 +968,7 @@ func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {
 				assert.Empty(t, persisted.FailReason)
 			}
 			if testCase.wantReason != "" {
-				assert.Contains(t, persisted.FailReason, testCase.wantReason)
+				assert.Equal(t, testCase.wantReason, persisted.FailReason)
 			}
 			if testCase.wantState != "" {
 				assert.JSONEq(t, testCase.wantState, string(persisted.PrivateData.PluginState))
@@ -1058,7 +1058,7 @@ func TestUpdateBatchTasksPollClassification(t *testing.T) {
 			assert.Equal(t, testCase.wantFailures, persisted.PrivateData.PollFailures)
 			assert.Equal(t, testCase.wantReview, persisted.BillingReviewPending)
 			if testCase.wantReason != "" {
-				assert.Contains(t, persisted.FailReason, testCase.wantReason)
+				assert.Equal(t, testCase.wantReason, persisted.FailReason)
 			}
 			if testCase.wantRefund {
 				assert.Equal(t, initialQuota+preConsumed, getUserQuota(t, userID))

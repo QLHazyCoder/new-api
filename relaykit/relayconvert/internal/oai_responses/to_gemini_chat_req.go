@@ -48,7 +48,7 @@ func OpenAIResponsesRequestToGeminiChat(c context.Context, req *dto.OpenAIRespon
 	if opts.Gemini.SupportsImagineModel(upstreamModelName) {
 		geminiRequest.GenerationConfig.ResponseModalities = []string{"TEXT", "IMAGE"}
 	}
-	if err := applyResponsesTextToGemini(req.Text, geminiRequest); err != nil {
+	if err := applyResponsesTextToGemini(c, req.Text, geminiRequest, opts.Gemini.SupportsJSONSchemaModel(upstreamModelName)); err != nil {
 		return nil, err
 	}
 	reasoningIntent, diagnostics, err := reasoning.FromOpenAIResponses(req)
@@ -172,6 +172,11 @@ func OpenAIResponsesRequestToGeminiChat(c context.Context, req *dto.OpenAIRespon
 			}
 		}
 	}
+	geminiRequest.Contents = omitTrailingAssistantText(c, geminiRequest.Contents,
+		func(content dto.GeminiChatContent) bool { return content.Role == "user" },
+		func(content dto.GeminiChatContent) bool {
+			return content.Role == "model" && !slices.ContainsFunc(content.Parts, func(part dto.GeminiPart) bool { return part.FunctionCall != nil })
+		})
 
 	if len(systemTexts) > 0 {
 		geminiRequest.SystemInstructions = &dto.GeminiChatContent{
@@ -182,7 +187,7 @@ func OpenAIResponsesRequestToGeminiChat(c context.Context, req *dto.OpenAIRespon
 	return geminiRequest, nil
 }
 
-func applyResponsesTextToGemini(raw []byte, geminiRequest *dto.GeminiChatRequest) error {
+func applyResponsesTextToGemini(c context.Context, raw []byte, geminiRequest *dto.GeminiChatRequest, jsonSchema bool) error {
 	responseFormat, err := RequestTextToChatResponseFormat(raw)
 	if err != nil {
 		return err
@@ -196,11 +201,7 @@ func applyResponsesTextToGemini(raw []byte, geminiRequest *dto.GeminiChatRequest
 		return nil
 	}
 
-	var jsonSchema dto.FormatJsonSchema
-	if err := kitutil.Unmarshal(responseFormat.JsonSchema, &jsonSchema); err != nil {
-		return nil
-	}
-	geminiRequest.GenerationConfig.ResponseSchema = sharedgemini.RemoveAdditionalProperties(jsonSchema.Schema, 0)
+	sharedgemini.ApplyResponseSchema(c, &geminiRequest.GenerationConfig, responseFormat.JsonSchema, "text.format.schema", jsonSchema)
 	return nil
 }
 

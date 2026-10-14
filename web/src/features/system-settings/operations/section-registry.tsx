@@ -100,6 +100,10 @@ const OPERATIONS_SECTIONS = [
         defaultValues={{
           LogConsumeEnabled: Boolean(settings.LogConsumeEnabled),
           LogRetentionDays: settings.LogRetentionDays ?? 30,
+          'log_setting.user_export_enabled':
+            settings['log_setting.user_export_enabled'] ?? true,
+          'log_setting.max_range_days':
+            settings['log_setting.max_range_days'] ?? 365,
         }}
       />
     ),

@@ -86,6 +86,7 @@ var auditContentTemplates = map[string]string{
 	"sensitive_word.violations_update": "Updated sensitive-word violations for user ${target_user_id} from ${before} to ${after}",
 	"sensitive_word.violations_clear":  "Cleared sensitive-word violations for user ${target_user_id} (${before} to ${after})",
 	"sensitive_word.whitelist_update":  "Updated sensitive-word whitelist for user ${target_user_id} from ${before} to ${after}",
+	"subscription.user_quota_reset":    "Administrator reset the quota of subscription plan ${plan_title} (ID: ${plan_id})",
 }
 
 func recordPasskeyDomainAudit(c *gin.Context, change *model.PasskeyDomainChange, confirmed bool, err error) {

@@ -25,10 +25,10 @@ import (
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model.Task) {
 	tokenName := c.GetString("token_name")
-	logContent := fmt.Sprintf("操作 %s", info.Action)
+	logContent := []*common.Message{common.NewMessage("Action {{action}}", map[string]any{"action": info.Action})}
 	// 支持任务仅按次计费
 	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
-		logContent = fmt.Sprintf("%s，按次计费", logContent)
+		logContent = append(logContent, common.NewMessage("Billed per request"))
 	} else {
 		var contents []string
 		if otherRatios := info.PriceData.OtherRatios(); len(otherRatios) > 0 {
@@ -44,7 +44,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 			}
 		}
 		if len(contents) > 0 {
-			logContent = fmt.Sprintf("%s, 计算参数：%s", logContent, strings.Join(contents, ", "))
+			logContent = append(logContent, common.NewMessage("Billing parameters: {{params}}", map[string]any{"params": strings.Join(contents, ", ")}))
 		}
 	}
 	other := model.NewLogOther()
@@ -97,6 +97,8 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 // taskBillingOther 从 task 的 BillingContext 构建日志 Other 字段。
 func taskBillingOther(task *model.Task) *model.LogOther {
 	other := model.NewLogOther()
+	// 前端列表按 is_task 选择任务档位渲染分支,缺失会把差额/退款日志误判成普通 relay 动态计费
+	other.SetPublic("is_task", true)
 	if bc := task.PrivateData.BillingContext; bc != nil {
 		other.SetPublic("model_price", bc.ModelPrice)
 		if bc.ModelRatio > 0 {
@@ -106,7 +108,7 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 		if priceData := taskBillingContextPriceData(bc); priceData != nil {
 			for k, v := range priceData.OtherRatios() {
 				if !other.SetPublic(k, v) {
-					common.SysError("task billing other ratio key rejected: " + k)
+					common.SysError(common.LogText("task billing other ratio key rejected: %s", k))
 				}
 			}
 		}
@@ -303,7 +305,6 @@ func logTaskBillingRefund(task *model.Task, quota int, allocations []model.Billi
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
-		Content:   "",
 		ChannelId: task.ChannelId,
 		ModelName: taskModelName(task),
 		Quota:     quota,
@@ -313,7 +314,7 @@ func logTaskBillingRefund(task *model.Task, quota int, allocations []model.Billi
 	})
 }
 
-func logTaskBillingAdjustment(task *model.Task, before, actual int, reason string, clamps []*common.QuotaClamp) {
+func logTaskBillingAdjustment(task *model.Task, before, actual int, reason *common.Message, clamps []*common.QuotaClamp) {
 	delta := actual - before
 	if delta == 0 {
 		return
@@ -334,7 +335,7 @@ func logTaskBillingAdjustment(task *model.Task, before, actual int, reason strin
 		attachQuotaSaturationToOther(other, clamp)
 	}
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-		UserId: task.UserId, LogType: logType, Content: reason, ChannelId: task.ChannelId,
+		UserId: task.UserId, LogType: logType, Content: []*common.Message{reason}, ChannelId: task.ChannelId,
 		ModelName: taskModelName(task), Quota: logQuota, TokenId: task.PrivateData.TokenId,
 		Group: task.Group, Other: other, NodeName: task.PrivateData.NodeName,
 	})
@@ -351,9 +352,9 @@ func cloneTaskBillingAllocations(allocations []model.BillingAllocation) []model.
 
 // RecalculateTaskQuota 通用的异步差额结算。
 // actualQuota 是任务完成后的实际应扣额度，与预扣额度 (task.Quota) 做差额结算。
-// reason 用于日志记录（例如 "token重算" 或 "adaptor调整"）。
+// reason 写入日志内容（例如按 token 重算或 adaptor 调整）。
 // clamps 可选：若计算 actualQuota 时发生额度饱和，将其记入日志 admin_info（仅管理员可见）。
-func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason string, clamps ...*common.QuotaClamp) {
+func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int, reason *common.Message, clamps ...*common.QuotaClamp) {
 	if actualQuota < 0 {
 		return
 	}
@@ -361,17 +362,17 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	quotaDelta := actualQuota - preConsumedQuota
 
 	if quotaDelta == 0 {
-		logger.LogInfo(ctx, fmt.Sprintf("任务 %s 预扣费准确（%s，%s）",
-			task.TaskID, logger.LogQuota(actualQuota), reason))
+		logger.LogInfo(ctx, common.LogText("task %s pre-consumed quota matches the actual quota (%s, %s)",
+			task.TaskID, logger.LogQuota(actualQuota), reason.Error()))
 		return
 	}
 
-	logger.LogInfo(ctx, fmt.Sprintf("任务 %s 差额结算：delta=%s（实际：%s，预扣：%s，%s）",
+	logger.LogInfo(ctx, common.LogText("task %s settles the difference: delta=%s (actual %s, pre-consumed %s, %s)",
 		task.TaskID,
 		logger.LogQuota(quotaDelta),
 		logger.LogQuota(actualQuota),
 		logger.LogQuota(preConsumedQuota),
-		reason,
+		reason.Error(),
 	))
 
 	changed, err := model.FinalizeTaskBilling(task, actualQuota, false)
@@ -402,7 +403,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   logType,
-		Content:   reason,
+		Content:   []*common.Message{reason},
 		ChannelId: task.ChannelId,
 		ModelName: taskModelName(task),
 		Quota:     logQuota,
@@ -425,9 +426,9 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	return true
 }
 
-func calculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) (int, string, *common.QuotaClamp, bool) {
+func calculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) (int, *common.Message, *common.QuotaClamp, bool) {
 	if totalTokens <= 0 {
-		return 0, "", nil, false
+		return 0, nil, nil, false
 	}
 
 	modelName := taskModelName(task)
@@ -436,7 +437,7 @@ func calculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalToke
 	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
 	// 只有配置了倍率(非固定价格)时才按 token 重新计费
 	if !hasRatioSetting || modelRatio <= 0 {
-		return 0, "", nil, false
+		return 0, nil, nil, false
 	}
 
 	// 获取用户和组的倍率信息
@@ -448,7 +449,7 @@ func calculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalToke
 		}
 	}
 	if group == "" {
-		return 0, "", nil, false
+		return 0, nil, nil, false
 	}
 
 	groupRatio := ratio_setting.GetGroupRatio(group)
@@ -470,7 +471,12 @@ func calculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalToke
 	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio * otherMultiplier（饱和转换，防止溢出成负数）
 	actualQuota, clamp := common.QuotaFromFloatChecked(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
 
-	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
+	reason := common.NewMessage("Recalculated from tokens: tokens {{tokens}}, model ratio {{model_ratio}}, group ratio {{group_ratio}}, other multiplier {{other_multiplier}}", map[string]any{
+		"tokens":           totalTokens,
+		"model_ratio":      fmt.Sprintf("%.2f", modelRatio),
+		"group_ratio":      fmt.Sprintf("%.2f", finalGroupRatio),
+		"other_multiplier": fmt.Sprintf("%.4f", otherMultiplier),
+	})
 	return actualQuota, reason, clamp, true
 }
 

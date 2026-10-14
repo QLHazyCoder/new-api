@@ -2,7 +2,6 @@ package model
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -72,7 +71,7 @@ func AdjustUserQuota(userID, operatorRole int, mode string, value int64) (*UserQ
 	}
 
 	if err := invalidateUserCache(userID); err != nil {
-		common.SysError(fmt.Sprintf("failed to invalidate user cache after manual quota adjustment for user %d: %s", userID, err))
+		common.SysError(common.LogText("failed to invalidate user cache after manual quota adjustment for user %d: %s", userID, err))
 	}
 	return &adjustment, nil
 }

@@ -96,7 +96,6 @@
 | P-24 | 排行榜本地自然日和管理员边界 | `service/rankings.go`、排行榜前端 | 必须保留 |
 | P-25 | 可伸缩数据表列宽 | `web/src/components/data-table` | 必须保留 |
 | P-26 | 自研测试隔离与前置条件 | 亲和性/Relay 测试初始化 | 必须保留 |
-| P-27 | 个人数据看板 31 天查询窗口 | `controller/usedata.go` | 必须保留 |
 | P-28 | 文本请求最终结果与成功率 | `service/text_quota.go`、性能/日志前端 | 必须保留 |
 
 ## 阶段记录
@@ -139,9 +138,9 @@
   邀请人数维护、`TransferAffQuotaToQuota` 行锁/原子更新/账本事件、`UpdateWithTx`
   账务字段白名单、`UpdateUserAccessToken` 单列更新，以及密码/OAuth/微信注册分组入口。
   现有生产数据和 `affiliate_reward_events` 未执行 SQL 改写。
-- P-12/P-15/P-16/P-18/P-19/P-20/P-24/P-27/P-28：逐路径确认日志期限下沉到异步清理、
+- P-12/P-15/P-16/P-18/P-19/P-20/P-24/P-28：逐路径确认日志期限下沉到异步清理、
   `PlaygroundImageMaxConcurrency` 缺失时仅在有队列任务时明确报错且迁移只补缺失值、
-  图片删除重复请求幂等、额度预警/订阅混合扣费/排行榜边界/31 天窗口/最终结果统计均
+  图片删除重复请求幂等、额度预警/订阅混合扣费/排行榜边界/最终结果统计均
   仍在原路径；本次 rc.24 没有触及这些模块。
 - 上游 Relay 请求体改造已覆盖 JSON、透传、multipart 和任务请求的独立重放 reader，
   `Request.GetBody` 与 `ContentLength` 由原始 body 元数据恢复；保留本地缓存写入计费和
@@ -163,8 +162,8 @@
 - P-13/P-14/P-15/P-16：Playground 多供应商图片、规格/编辑、异步历史与删除竞态保护
   仍位于原有图片组件和 hook；前端重复删除由任务 ID 锁和删除墓碑阻断，不依赖服务器
   返回 `image task not found` 来决定界面状态。
-- P-06/P-19/P-20/P-24/P-25/P-27/P-28：性能指标、订阅/混合扣费、排行榜、表格列宽、
-  31 天看板窗口和文本成功率路径均未出现在 rc.24 的前端变更列表中，逐项反查后仍存在。
+- P-06/P-19/P-20/P-24/P-25/P-28：性能指标、订阅/混合扣费、排行榜、表格列宽和文本
+  成功率路径均未出现在 rc.24 的前端变更列表中，逐项反查后仍存在。
 - 鉴权：`web/src` 未发现 `New-Api-User` 或旧 Session 前端请求头；请求继续通过上游
   鉴权客户端。未发现旧 `web/default` 或已跟踪的 Classic 源文件。
 - 翻译：全部 `web/src/i18n/locales/*.json` 可由 JSON 解析器读取，所有 locale 的标量键
@@ -209,7 +208,6 @@
 | P-24 | 原样保留 | rankings service/model/UI/route | 本地自然日边界与管理员访问路径仍在 |
 | P-25 | 原样保留 | data-table colgroup/table sizing | 可用宽度填充和固定列边界路径仍在 |
 | P-26 | 原样保留 | affinity 与 Relay 测试初始化 | 测试隔离文件未删除；Gin mode 恢复路径仍在 |
-| P-27 | 原样保留 | `controller/usedata.go` | 两个个人接口共用 31 天秒数上限 |
 | P-28 | 原样保留 | text quota、perf metrics、usage logs | `request_outcome`、无可计费用量和最终结果口径仍在 |
 
 - `git diff --name-status` 的最终变更未删除受保护源码；未跟踪的本地

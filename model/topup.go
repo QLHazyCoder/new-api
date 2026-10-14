@@ -55,15 +55,16 @@ const (
 )
 
 var (
-	ErrPaymentMethodMismatch    = errors.New("payment method mismatch")
-	ErrTopUpNotFound            = errors.New("topup not found")
-	ErrTopUpStatusInvalid       = errors.New("topup status invalid")
-	ErrInvalidTopUpQuota        = errors.New("invalid top-up quota")
-	ErrTopUpQuotaLimitExceeded  = errors.New("top-up quota limit exceeded")
-	ErrTopUpPricingRequired     = errors.New("top-up pricing snapshot required")
-	ErrTopUpPricingMismatch     = errors.New("top-up pricing snapshot mismatch")
-	ErrTopUpPaymentMismatch     = errors.New("top-up callback payment amount mismatch")
-	ErrWalletQuotaLimitExceeded = errors.New("wallet quota limit exceeded")
+	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
+	ErrTopUpNotFound         = errors.New("topup not found")
+	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
+	// The quota errors reach the web console, so they carry message keys.
+	ErrInvalidTopUpQuota        error = common.NewMessage("Invalid top-up quota")
+	ErrTopUpQuotaLimitExceeded  error = common.NewMessage("Top-up quota limit exceeded")
+	ErrWalletQuotaLimitExceeded error = common.NewMessage("Wallet quota limit exceeded")
+	ErrTopUpPricingRequired           = errors.New("top-up pricing snapshot required")
+	ErrTopUpPricingMismatch           = errors.New("top-up pricing snapshot mismatch")
+	ErrTopUpPaymentMismatch           = errors.New("top-up callback payment amount mismatch")
 )
 
 // TopUpCompletionResult is shared by every payment callback.  Keeping the
@@ -171,7 +172,7 @@ func GetTopUpByTradeNo(tradeNo string) *TopUp {
 
 func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, targetStatus string) error {
 	if tradeNo == "" {
-		return errors.New("未提供支付单号")
+		return errors.New("payment order number not provided")
 	}
 
 	refCol := "`trade_no`"
@@ -496,7 +497,7 @@ func CompleteTopUp(opts CompleteTopUpOptions) (*TopUpCompletionResult, error) {
 		RecordLog(
 			completion.InviteRewardUserId,
 			LogTypeSystem,
-			fmt.Sprintf("Referral topup reward %s (topup_user_id=%d, trade_no=%s)", logger.LogQuota64(completion.InviteRewardQuota), completion.UserId, completion.TradeNo),
+			common.NewMessage("Referral topup reward {{quota}} (topup_user_id={{user_id}}, trade_no={{trade_no}})", map[string]any{"quota": logger.FormatQuota64(completion.InviteRewardQuota), "user_id": completion.UserId, "trade_no": completion.TradeNo}),
 		)
 	}
 	return completion, nil
@@ -526,7 +527,7 @@ func rechargeEpay(tradeNo string, actualPaymentMethod string, callbackMoney stri
 	})
 	if err != nil {
 		if !errors.Is(err, ErrTopUpNotFound) && !errors.Is(err, ErrPaymentMethodMismatch) && !errors.Is(err, ErrTopUpStatusInvalid) {
-			common.SysError("epay topup failed: " + err.Error())
+			common.SysError(common.LogText("epay topup failed: %s", err.Error()))
 		}
 		return false, err
 	}
@@ -534,8 +535,8 @@ func rechargeEpay(tradeNo string, actualPaymentMethod string, callbackMoney stri
 		return true, nil
 	}
 
-	common.SysLog(fmt.Sprintf("易支付充值成功 trade_no=%s user_id=%d quota_to_add=%d money=%.2f", result.TradeNo, result.UserId, result.QuotaToAdd, result.PayMoney))
-	RecordTopupLog(result.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota64(result.QuotaToAdd), result.PayMoney), callerIp, result.PaymentMethod, PaymentProviderEpay)
+	common.SysLog(common.LogText("Epay top-up succeeded trade_no=%s user_id=%d quota_to_add=%d money=%.2f", result.TradeNo, result.UserId, result.QuotaToAdd, result.PayMoney))
+	RecordTopupLog(result.UserId, common.NewMessage("Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"quota": logger.FormatQuota64(result.QuotaToAdd), "amount": fmt.Sprintf("%f", result.PayMoney)}), callerIp, result.PaymentMethod, PaymentProviderEpay)
 	return false, nil
 }
 
@@ -547,12 +548,12 @@ func Recharge(referenceId string, customerId string, callerIp string) error {
 		StripeCustomer:          customerId,
 	})
 	if err != nil {
-		common.SysError("topup failed: " + err.Error())
+		common.SysError(common.LogText("topup failed: %s", err.Error()))
 		// Preserve the upstream public error surface for the browser return path.
-		return errors.New("充值失败，请稍后重试")
+		return errors.New("top-up failed")
 	}
 	if !result.AlreadyCompleted {
-		RecordTopupLog(result.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota64(result.QuotaToAdd), result.Amount), callerIp, result.PaymentMethod, PaymentMethodStripe)
+		RecordTopupLog(result.UserId, common.NewMessage("Online top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"quota": logger.FormatQuota64(result.QuotaToAdd), "amount": result.Amount}), callerIp, result.PaymentMethod, PaymentMethodStripe)
 	}
 	return nil
 }
@@ -658,14 +659,14 @@ func SearchUserTopUps(userId int, keyword string, pageInfo *common.PageInfo) (to
 
 	if err = query.Limit(searchTopUpCountHardLimit).Count(&total).Error; err != nil {
 		tx.Rollback()
-		common.SysError("failed to count search topups: " + err.Error())
-		return nil, 0, errors.New("搜索充值记录失败")
+		common.SysError(common.LogText("failed to count search topups: %s", err.Error()))
+		return nil, 0, common.NewMessage("Failed to search top-up records")
 	}
 
 	if err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
 		tx.Rollback()
-		common.SysError("failed to search topups: " + err.Error())
-		return nil, 0, errors.New("搜索充值记录失败")
+		common.SysError(common.LogText("failed to search topups: %s", err.Error()))
+		return nil, 0, common.NewMessage("Failed to search top-up records")
 	}
 
 	if err = tx.Commit().Error; err != nil {
@@ -698,14 +699,14 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 
 	if err = query.Limit(searchTopUpCountHardLimit).Count(&total).Error; err != nil {
 		tx.Rollback()
-		common.SysError("failed to count search topups: " + err.Error())
-		return nil, 0, errors.New("搜索充值记录失败")
+		common.SysError(common.LogText("failed to count search topups: %s", err.Error()))
+		return nil, 0, common.NewMessage("Failed to search top-up records")
 	}
 
 	if err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
 		tx.Rollback()
-		common.SysError("failed to search topups: " + err.Error())
-		return nil, 0, errors.New("搜索充值记录失败")
+		common.SysError(common.LogText("failed to search topups: %s", err.Error()))
+		return nil, 0, common.NewMessage("Failed to search top-up records")
 	}
 
 	if err = tx.Commit().Error; err != nil {
@@ -716,6 +717,9 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 
 // ManualCompleteTopUp 管理员手动完成订单并给用户充值
 func ManualCompleteTopUp(tradeNo string, callerIp string) error {
+	if tradeNo == "" {
+		return common.NewMessage("Order number not provided")
+	}
 	result, err := CompleteTopUp(CompleteTopUpOptions{
 		TradeNo:            tradeNo,
 		CallerIp:           callerIp,
@@ -725,7 +729,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		return err
 	}
 	if !result.AlreadyCompleted {
-		RecordTopupLog(result.UserId, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota64(result.QuotaToAdd), result.PayMoney), callerIp, result.PaymentMethod, "admin")
+		RecordTopupLog(result.UserId, common.NewMessage("Administrator completed the order, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"quota": logger.FormatQuota64(result.QuotaToAdd), "amount": fmt.Sprintf("%f", result.PayMoney)}), callerIp, result.PaymentMethod, "admin")
 	}
 	return nil
 }
@@ -738,11 +742,11 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		CustomerEmail:           customerEmail,
 	})
 	if err != nil {
-		common.SysError("creem topup failed: " + err.Error())
-		return errors.New("充值失败，请稍后重试")
+		common.SysError(common.LogText("creem topup failed: %s", err.Error()))
+		return errors.New("top-up failed")
 	}
 	if !result.AlreadyCompleted {
-		RecordTopupLog(result.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", logger.FormatQuota64(result.QuotaToAdd), result.PayMoney), callerIp, result.PaymentMethod, PaymentMethodCreem)
+		RecordTopupLog(result.UserId, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"provider": "Creem", "quota": logger.FormatQuota64(result.QuotaToAdd), "amount": fmt.Sprintf("%.2f", result.PayMoney)}), callerIp, result.PaymentMethod, PaymentMethodCreem)
 	}
 	return nil
 }
@@ -754,11 +758,11 @@ func RechargeWaffo(tradeNo string, callerIp string) error {
 		CallerIp:                callerIp,
 	})
 	if err != nil {
-		common.SysError("waffo topup failed: " + err.Error())
-		return errors.New("充值失败，请稍后重试")
+		common.SysError(common.LogText("waffo topup failed: %s", err.Error()))
+		return errors.New("top-up failed")
 	}
 	if !result.AlreadyCompleted {
-		RecordTopupLog(result.UserId, fmt.Sprintf("Waffo充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota64(result.QuotaToAdd), result.PayMoney), callerIp, result.PaymentMethod, PaymentMethodWaffo)
+		RecordTopupLog(result.UserId, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"provider": "Waffo", "quota": logger.FormatQuota64(result.QuotaToAdd), "amount": fmt.Sprintf("%.2f", result.PayMoney)}), callerIp, result.PaymentMethod, PaymentMethodWaffo)
 	}
 	return nil
 }
@@ -769,11 +773,11 @@ func RechargeWaffoPancake(tradeNo string) error {
 		ExpectedPaymentProvider: PaymentProviderWaffoPancake,
 	})
 	if err != nil {
-		common.SysError("waffo pancake topup failed: " + err.Error())
-		return errors.New("充值失败，请稍后重试")
+		common.SysError(common.LogText("waffo pancake topup failed: %s", err.Error()))
+		return errors.New("top-up failed")
 	}
 	if !result.AlreadyCompleted {
-		RecordLog(result.UserId, LogTypeTopup, fmt.Sprintf("Waffo Pancake充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota64(result.QuotaToAdd), result.PayMoney))
+		RecordLog(result.UserId, LogTypeTopup, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}", map[string]any{"provider": "Waffo Pancake", "quota": logger.FormatQuota64(result.QuotaToAdd), "amount": fmt.Sprintf("%.2f", result.PayMoney)}))
 	}
 	return nil
 }

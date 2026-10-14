@@ -84,7 +84,7 @@ func TryReserveTokenQuotaTx(tx *gorm.DB, id int, quota int64, unlimited bool) (b
 // A cache outage, stale hash, or obsolete batch flag must not grant credit.
 func TryReserveUserQuota(id int, quota int) (bool, error) {
 	if quota < 0 {
-		return false, errors.New("quota 不能为负数！")
+		return false, errors.New("quota cannot be negative")
 	}
 	if quota == 0 {
 		return true, nil
@@ -95,7 +95,7 @@ func TryReserveUserQuota(id int, quota int) (bool, error) {
 // Unlimited tokens may go into debt, but their paired counters still must fit int64.
 func TryReserveTokenQuota(id int, key string, quota int, unlimited bool) (bool, error) {
 	if quota < 0 {
-		return false, errors.New("quota 不能为负数！")
+		return false, errors.New("quota cannot be negative")
 	}
 	if quota == 0 {
 		return true, nil

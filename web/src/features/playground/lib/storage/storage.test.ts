@@ -16,13 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { assert, test } from 'vitest'
+import { afterEach, assert, beforeEach, test } from 'vitest'
+
+import { useAuthStore } from '@/stores/auth-store'
 
 import {
   loadImageDeleteConfirmationDisabled,
   removeDeprecatedImageTaskStorage,
   saveImageDeleteConfirmationDisabled,
 } from './storage'
+
+beforeEach(() => {
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'A', role: 1 })
+})
+
+afterEach(() => {
+  useAuthStore.getState().auth.reset()
+})
 
 test('removes only deprecated browser image task history', () => {
   const originalLocalStorage = Object.getOwnPropertyDescriptor(

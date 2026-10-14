@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useAuthStore } from '@/stores/auth-store'
+
 import { MESSAGE_STATUS, STORAGE_KEYS } from '../../constants'
 import type {
   ImageGenerationConfig,
@@ -53,7 +55,18 @@ const MIN_REPEATED_SECTION_COUNT = 3
 const SECTION_HEADING_LINE_PATTERN = /^#{2,6}\s+\d+\.\s+.+$/gm
 const DEPRECATED_IMAGE_TASKS_STORAGE_KEY = 'playground_image_tasks'
 
-function readStoredValue(key: string): unknown | null {
+function getUserStorageKey(key: string): string | null {
+  // Legacy data has no owner; never assign it to the next signed-in account.
+  for (const legacyKey of Object.values(STORAGE_KEYS)) {
+    localStorage.removeItem(legacyKey)
+  }
+  const userId = useAuthStore.getState().auth.user?.id
+  return userId == null ? null : `${key}:${userId}`
+}
+
+function readStoredValue(baseKey: string): unknown | null {
+  const key = getUserStorageKey(baseKey)
+  if (!key) return null
   const saved = localStorage.getItem(key)
   if (!saved) return null
 
@@ -61,11 +74,13 @@ function readStoredValue(key: string): unknown | null {
 }
 
 function readStoredMessagesValue(): unknown | null {
-  const saved = localStorage.getItem(STORAGE_KEYS.MESSAGES)
+  const key = getUserStorageKey(STORAGE_KEYS.MESSAGES)
+  if (!key) return null
+  const saved = localStorage.getItem(key)
   if (!saved) return null
 
   if (saved.length > MAX_STORED_MESSAGES_BYTES) {
-    localStorage.removeItem(STORAGE_KEYS.MESSAGES)
+    localStorage.removeItem(key)
     return null
   }
 
@@ -84,7 +99,9 @@ function unwrapStoredValue(value: unknown): unknown {
   return value
 }
 
-function writeStoredValue<T>(key: string, data: T): void {
+function writeStoredValue<T>(baseKey: string, data: T): void {
+  const key = getUserStorageKey(baseKey)
+  if (!key) return
   const payload: StoredEnvelope<T> = {
     version: STORAGE_VERSION,
     data,
@@ -391,17 +408,15 @@ export function saveMessages(messages: Message[]): void {
 }
 
 /**
- * Clear all playground data
+ * Clear the signed-in user's playground data
  */
 export function clearPlaygroundData(): void {
   try {
-    localStorage.removeItem(STORAGE_KEYS.CONFIG)
-    localStorage.removeItem(STORAGE_KEYS.IMAGE_DELETE_CONFIRMATION_DISABLED)
-    localStorage.removeItem(STORAGE_KEYS.IMAGE_CONFIG)
+    for (const baseKey of Object.values(STORAGE_KEYS)) {
+      const key = getUserStorageKey(baseKey)
+      if (key) localStorage.removeItem(key)
+    }
     removeDeprecatedImageTaskStorage()
-    localStorage.removeItem(STORAGE_KEYS.MODE)
-    localStorage.removeItem(STORAGE_KEYS.PARAMETER_ENABLED)
-    localStorage.removeItem(STORAGE_KEYS.MESSAGES)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to clear playground data:', error)
@@ -420,10 +435,10 @@ export function removeDeprecatedImageTaskStorage(): void {
 
 export function loadImageDeleteConfirmationDisabled(): boolean {
   try {
-    return (
-      localStorage.getItem(STORAGE_KEYS.IMAGE_DELETE_CONFIRMATION_DISABLED) ===
-      'true'
+    const key = getUserStorageKey(
+      STORAGE_KEYS.IMAGE_DELETE_CONFIRMATION_DISABLED
     )
+    return key !== null && localStorage.getItem(key) === 'true'
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to load image delete confirmation preference:', error)
@@ -433,14 +448,15 @@ export function loadImageDeleteConfirmationDisabled(): boolean {
 
 export function saveImageDeleteConfirmationDisabled(disabled: boolean): void {
   try {
+    const key = getUserStorageKey(
+      STORAGE_KEYS.IMAGE_DELETE_CONFIRMATION_DISABLED
+    )
+    if (!key) return
     if (disabled) {
-      localStorage.setItem(
-        STORAGE_KEYS.IMAGE_DELETE_CONFIRMATION_DISABLED,
-        'true'
-      )
+      localStorage.setItem(key, 'true')
       return
     }
-    localStorage.removeItem(STORAGE_KEYS.IMAGE_DELETE_CONFIRMATION_DISABLED)
+    localStorage.removeItem(key)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save image delete confirmation preference:', error)
@@ -449,7 +465,8 @@ export function saveImageDeleteConfirmationDisabled(disabled: boolean): void {
 
 export function loadPlaygroundMode(): PlaygroundMode {
   try {
-    const saved = localStorage.getItem(STORAGE_KEYS.MODE)
+    const key = getUserStorageKey(STORAGE_KEYS.MODE)
+    const saved = key ? localStorage.getItem(key) : null
     if (saved === 'chat' || saved === 'image') return saved
   } catch (error) {
     // eslint-disable-next-line no-console
@@ -460,7 +477,8 @@ export function loadPlaygroundMode(): PlaygroundMode {
 
 export function savePlaygroundMode(mode: PlaygroundMode): void {
   try {
-    localStorage.setItem(STORAGE_KEYS.MODE, mode)
+    const key = getUserStorageKey(STORAGE_KEYS.MODE)
+    if (key) localStorage.setItem(key, mode)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save playground mode:', error)

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -36,7 +37,7 @@ func TestSensitiveWordLogVisibilityIsEnforcedBeforePagination(t *testing.T) {
 
 	read := func(role, logType, offset, size int, requestID string) ([]*Log, int64) {
 		t.Helper()
-		logs, total, err := GetUserLogsForRole(7, role, logType, 0, 0, "", "", offset, size, "", requestID, "")
+		logs, total, err := GetUserLogsForRole(7, role, LogFilter{Type: logType, RequestId: requestID}, offset, size)
 		require.NoError(t, err)
 		return logs, total
 	}
@@ -64,7 +65,7 @@ func TestSensitiveWordLogVisibilityIsEnforcedBeforePagination(t *testing.T) {
 		require.Len(t, logs, 1)
 		require.Contains(t, logs[0].Other, `"audit_id":42`)
 	}
-	logs, total, err := GetUserLogs(7, LogTypeUnknown, 0, 0, "", "", 0, 10, "", "", "")
+	logs, total, err := GetUserLogs(7, LogFilter{}, 0, 10)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, total)
 	require.Len(t, logs, 2)
@@ -74,5 +75,26 @@ func TestSensitiveWordLogVisibilityIsEnforcedBeforePagination(t *testing.T) {
 	require.Len(t, tokenLogs, 2)
 	for _, entry := range tokenLogs {
 		require.NotEqual(t, LogTypeSensitiveWordBlock, entry.Type)
+	}
+
+	for _, test := range []struct {
+		role   int
+		filter LogFilter
+		count  int
+	}{
+		{common.RoleCommonUser, LogFilter{}, 2},
+		{common.RoleCommonUser, LogFilter{Type: LogTypeSensitiveWordBlock}, 0},
+		{common.RoleAdminUser, LogFilter{Type: LogTypeSensitiveWordBlock}, 1},
+	} {
+		var exported []*Log
+		err := StreamUserLogsForRole(context.Background(), 7, test.role, test.filter, func(entry *Log) error {
+			exported = append(exported, entry)
+			return nil
+		})
+		require.NoError(t, err)
+		require.Len(t, exported, test.count)
+		if test.role >= common.RoleAdminUser {
+			require.Contains(t, exported[0].Other, `"audit_id":42`)
+		}
 	}
 }

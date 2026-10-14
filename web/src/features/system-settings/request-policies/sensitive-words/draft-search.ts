@@ -32,7 +32,7 @@ function normalizeWithOffsets(text: string): NormalizedText {
   const starts: number[] = []
   const ends: number[] = []
 
-  for (let offset = 0; offset < text.length; ) {
+  for (let offset = 0; offset < text.length;) {
     const codePoint = text.codePointAt(offset)
     if (codePoint === undefined) break
 

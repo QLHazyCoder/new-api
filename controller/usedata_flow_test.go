@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -19,8 +20,9 @@ type flowQuotaResponse struct {
 }
 
 type userQuotaResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
+	Success    bool   `json:"success"`
+	Message    string `json:"message"`
+	MessageKey string `json:"message_key"`
 }
 
 func setupFlowControllerTestDB(t *testing.T) {
@@ -140,11 +142,15 @@ func TestGetUserFlowQuotaDatesRejectsInvalidTimeRange(t *testing.T) {
 	require.Equal(t, "invalid start_timestamp", payload.Message)
 }
 
-func TestUserQuotaEndpointsAllowThirtyOneDayRange(t *testing.T) {
+func TestUserQuotaEndpointsAllowConfiguredRange(t *testing.T) {
 	setupFlowControllerTestDB(t)
+	logSetting := operation_setting.GetLogSetting()
+	previousDays := logSetting.MaxRangeDays
+	logSetting.MaxRangeDays = 40
+	t.Cleanup(func() { logSetting.MaxRangeDays = previousDays })
 
 	const startTimestamp int64 = 1719792000
-	endTimestamp := startTimestamp + 31*24*60*60
+	endTimestamp := startTimestamp + 40*24*60*60
 	endpoints := []struct {
 		name    string
 		path    string
@@ -175,9 +181,13 @@ func TestUserQuotaEndpointsAllowThirtyOneDayRange(t *testing.T) {
 	}
 }
 
-func TestUserQuotaEndpointsRejectRangeLongerThanThirtyOneDays(t *testing.T) {
+func TestUserQuotaEndpointsRejectRangeLongerThanConfiguredLimit(t *testing.T) {
+	logSetting := operation_setting.GetLogSetting()
+	previousDays := logSetting.MaxRangeDays
+	logSetting.MaxRangeDays = 40
+	t.Cleanup(func() { logSetting.MaxRangeDays = previousDays })
 	const startTimestamp int64 = 1719792000
-	endTimestamp := startTimestamp + 31*24*60*60 + 1
+	endTimestamp := startTimestamp + 40*24*60*60 + 1
 	endpoints := []struct {
 		name    string
 		path    string
@@ -204,7 +214,7 @@ func TestUserQuotaEndpointsRejectRangeLongerThanThirtyOneDays(t *testing.T) {
 			var payload userQuotaResponse
 			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
 			require.False(t, payload.Success)
-			require.Equal(t, "时间跨度不能超过 1 个月", payload.Message)
+			require.Equal(t, "The time range cannot exceed {{days}} days", payload.MessageKey)
 		})
 	}
 }

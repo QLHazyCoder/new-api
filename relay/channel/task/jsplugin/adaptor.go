@@ -262,12 +262,17 @@ func (a *TaskAdaptor) BuildRequestURL(info *relaycommon.RelayInfo) (string, erro
 	return a.submit.URL, pluginruntime.ValidateRequestURL(a.submit.URL, info.ChannelBaseUrl, a.plugin.Meta.AllowedHosts)
 }
 
-func (a *TaskAdaptor) BuildRequestHeader(_ *gin.Context, req *http.Request, _ *relaycommon.RelayInfo) error {
+func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, _ *relaycommon.RelayInfo) error {
 	if a.submit == nil {
 		return fmt.Errorf("plugin submit request was not built")
 	}
 	for name, value := range a.submit.Headers {
 		req.Header.Set(name, value)
+	}
+	// BuildRequestBody rebuilt the multipart body with a new boundary and put its
+	// Content-Type on the client request; a plugin's own Content-Type cannot match it.
+	if a.submit.BodyType == "multipart" {
+		req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 	}
 	return nil
 }
@@ -578,7 +583,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 	}
 	pluginState, _ := encodeReturnedPluginState(value)
 	if len(pluginState) > maxTaskPluginPersistedJSONBytes {
-		logger.LogWarn(c, fmt.Sprintf("task plugin %s rejected oversized submit state (%d bytes)", a.plugin.Meta.Key, len(pluginState)))
+		logger.LogWarn(c, common.LogText("task plugin %s rejected oversized submit state (%d bytes)", a.plugin.Meta.Key, len(pluginState)))
 		pluginState = nil
 	}
 	response := &channel.TaskSubmitResponse{
@@ -608,16 +613,16 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 	task.PrivateData.PluginState = pluginState
 	ctx, err := a.queryContext(task, info.ApiKey, info.ChannelBaseUrl, info.ChannelSetting.Proxy)
 	if err != nil {
-		logger.LogWarn(c, fmt.Sprintf("task plugin %s completion context failed; retaining reserved quota: %v", a.plugin.Meta.Key, err))
+		logger.LogWarn(c, common.LogText("task plugin %s completion context failed; retaining reserved quota: %v", a.plugin.Meta.Key, err))
 		return response, nil
 	}
 	facts, err := a.plugin.Engine.Call(c.Request.Context(), "extractUsageOnComplete", ctx, jsonValue(immediate), parsed.TaskData)
 	if err != nil {
-		logger.LogWarn(c, fmt.Sprintf("task plugin %s completion usage failed; retaining reserved quota: %v", a.plugin.Meta.Key, err))
+		logger.LogWarn(c, common.LogText("task plugin %s completion usage failed; retaining reserved quota: %v", a.plugin.Meta.Key, err))
 		return response, nil
 	}
 	if err := a.applyCompletionUsageFacts(immediate, facts, info.UpstreamModelName, info.OriginModelName); err != nil {
-		logger.LogWarn(c, fmt.Sprintf("task plugin %s completion usage rejected; retaining reserved quota: %v", a.plugin.Meta.Key, err))
+		logger.LogWarn(c, common.LogText("task plugin %s completion usage rejected; retaining reserved quota: %v", a.plugin.Meta.Key, err))
 	}
 	return response, nil
 }
@@ -639,7 +644,7 @@ func (a *TaskAdaptor) FetchBatchTasks(baseURL, key string, tasks []*model.Task, 
 	if err != nil {
 		return nil, err
 	}
-	descriptor, err := a.requestDescriptor(context.Background(), "buildBatchQueryRequest", ctx, taskContexts)
+	descriptor, err := a.requestDescriptor(pluginruntime.WithFetcher(context.Background(), a.hookFetcher(baseURL, proxy)), "buildBatchQueryRequest", ctx, taskContexts)
 	if err != nil {
 		return nil, err
 	}
@@ -651,11 +656,57 @@ func (a *TaskAdaptor) FetchTask(baseURL, key string, task *model.Task, proxy str
 	if err != nil {
 		return nil, err
 	}
-	descriptor, err := a.requestDescriptor(context.Background(), "buildQueryRequest", ctx)
+	descriptor, err := a.requestDescriptor(pluginruntime.WithFetcher(context.Background(), a.hookFetcher(baseURL, proxy)), "buildQueryRequest", ctx)
 	if err != nil {
 		return nil, err
 	}
 	return a.doFetchDescriptor(baseURL, proxy, descriptor)
+}
+
+// hookFetcher sends a driver hook's utils.fetch requests to the hosts its
+// request descriptors may use, through the channel's proxy like poll requests.
+func (a *TaskAdaptor) hookFetcher(baseURL, proxy string) pluginruntime.Fetcher {
+	return func(ctx context.Context, request pluginruntime.FetchRequest) (pluginruntime.FetchResponse, error) {
+		if err := pluginruntime.ValidateRequestURL(request.URL, baseURL, a.plugin.Meta.AllowedHosts); err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		client, err := service.GetHttpClientWithProxySettings(proxy, a.channelSetting())
+		if err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		// A redirect reaches the plugin as it is; fetching its location is a
+		// new request, checked and counted again.
+		noRedirects := *client
+		noRedirects.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		req, err := http.NewRequestWithContext(ctx, request.Method, request.URL, nil)
+		if err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		for name, value := range request.Headers {
+			req.Header.Set(name, value)
+		}
+		started := time.Now()
+		resp, err := noRedirects.Do(req)
+		if err != nil {
+			logger.LogDebug(ctx, "task_plugin subsystem=fetch event=failed plugin=%q hook=%q method=%q host=%q reason=transport_error elapsed_ms=%d",
+				a.plugin.Meta.Key, request.Hook, request.Method, req.URL.Host, time.Since(started).Milliseconds())
+			return pluginruntime.FetchResponse{}, err
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(io.LimitReader(resp.Body, pluginruntime.MaxFetchBodyBytes+1))
+		if err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		headers := make(map[string]string, len(resp.Header))
+		for name, values := range resp.Header {
+			if len(values) > 0 {
+				headers[name] = values[0]
+			}
+		}
+		logger.LogDebug(ctx, "task_plugin subsystem=fetch event=done plugin=%q hook=%q method=%q host=%q status=%d bytes=%d elapsed_ms=%d",
+			a.plugin.Meta.Key, request.Hook, request.Method, req.URL.Host, resp.StatusCode, len(body), time.Since(started).Milliseconds())
+		return pluginruntime.FetchResponse{Status: resp.StatusCode, Headers: headers, Body: body}, nil
+	}
 }
 
 func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, descriptor requestDescriptor) (*http.Response, error) {
@@ -687,7 +738,7 @@ func (a *TaskAdaptor) doFetchDescriptor(baseURL, proxy string, descriptor reques
 	for name, value := range descriptor.Headers {
 		req.Header.Set(name, value)
 	}
-	client, err := service.GetHttpClientWithProxy(proxy)
+	client, err := service.GetHttpClientWithProxySettings(proxy, a.channelSetting())
 	if err != nil {
 		return nil, err
 	}
@@ -747,7 +798,7 @@ func (a *TaskAdaptor) ParseBatchResult(tasks []*model.Task, resp *http.Response,
 		Data       any    `json:"data"`
 		State      any    `json:"state"`
 	}
-	if err = a.plugin.Engine.CallInto(context.Background(), &parsed, "parseBatchResult", ctx, input, hookHTTPResponse(resp)); err != nil {
+	if err = a.plugin.Engine.CallInto(pluginruntime.WithFetcher(context.Background(), a.hookFetcher(baseURL, proxy)), &parsed, "parseBatchResult", ctx, input, hookHTTPResponse(resp)); err != nil {
 		reason := "hook_failed"
 		var invalid *pluginruntime.ResultError
 		if errors.As(err, &invalid) {
@@ -766,7 +817,7 @@ func (a *TaskAdaptor) ParseBatchResult(tasks []*model.Task, resp *http.Response,
 		if item.State != nil {
 			pluginState, marshalErr := common.Marshal(item.State)
 			if marshalErr != nil || len(pluginState) > maxTaskPluginPersistedJSONBytes {
-				logger.LogWarn(context.Background(), fmt.Sprintf("task plugin %s rejected invalid or oversized poll state", a.plugin.Meta.Key))
+				logger.LogWarn(context.Background(), common.LogText("task plugin %s rejected invalid or oversized poll state", a.plugin.Meta.Key))
 			} else {
 				info.PluginState = pluginState
 			}
@@ -819,7 +870,7 @@ func (a *TaskAdaptor) ParseTaskResult(task *model.Task, resp *http.Response, bod
 	if err != nil {
 		return nil, err
 	}
-	value, err := a.plugin.Engine.Call(context.Background(), "parseTaskResult", ctx, input, hookHTTPResponse(resp))
+	value, err := a.plugin.Engine.Call(pluginruntime.WithFetcher(context.Background(), a.hookFetcher(baseURL, proxy)), "parseTaskResult", ctx, input, hookHTTPResponse(resp))
 	if err != nil {
 		logger.LogDebug(context.Background(), "task_plugin subsystem=adaptor event=parse_task_failed plugin=%q reason=hook_failed body_bytes=%d elapsed_ms=%d", a.plugin.Meta.Key, len(body), time.Since(started).Milliseconds())
 		return nil, err
@@ -842,7 +893,7 @@ func (a *TaskAdaptor) ParseTaskResult(task *model.Task, resp *http.Response, bod
 	}
 	if pluginState, present := encodeReturnedPluginState(value); present {
 		if len(pluginState) > maxTaskPluginPersistedJSONBytes {
-			logger.LogWarn(context.Background(), fmt.Sprintf("task plugin %s rejected oversized poll state (%d bytes)", a.plugin.Meta.Key, len(pluginState)))
+			logger.LogWarn(context.Background(), common.LogText("task plugin %s rejected oversized poll state (%d bytes)", a.plugin.Meta.Key, len(pluginState)))
 		} else {
 			result.PluginState = pluginState
 		}
@@ -955,7 +1006,7 @@ func (a *TaskAdaptor) ListArtifacts(task *model.Task) ([]channel.TaskArtifact, e
 	return validateTaskArtifacts(value)
 }
 
-func (a *TaskAdaptor) BuildContentRequest(task *model.Task, artifactKey string, clientRequest channel.TaskArtifactClientRequest) (*channel.TaskContentRequest, error) {
+func (a *TaskAdaptor) BuildContentRequest(ctx context.Context, task *model.Task, artifactKey string, clientRequest channel.TaskArtifactClientRequest) (*channel.TaskContentRequest, error) {
 	if !a.hasHook(context.Background(), "buildContentRequest") {
 		return nil, nil
 	}
@@ -965,18 +1016,19 @@ func (a *TaskAdaptor) BuildContentRequest(task *model.Task, artifactKey string, 
 	if !taskArtifactKeyPattern.MatchString(artifactKey) {
 		return nil, fmt.Errorf("invalid artifact key")
 	}
-	ctx, err := taskArtifactContext(task)
+	hookContext, err := taskArtifactContext(task)
 	if err != nil {
 		return nil, err
 	}
-	ctx["upstreamTaskId"] = task.GetUpstreamTaskID()
-	ctx["artifactKey"] = artifactKey
-	ctx["baseUrl"] = a.info.ChannelBaseUrl
-	ctx["clientRequest"] = jsonValue(clientRequest)
-	if err = a.applyUpstreamCredentials(ctx, a.info.ChannelType, a.info.ApiKey, a.info.ChannelSetting.Proxy); err != nil {
+	hookContext["upstreamTaskId"] = task.GetUpstreamTaskID()
+	hookContext["artifactKey"] = artifactKey
+	hookContext["baseUrl"] = a.info.ChannelBaseUrl
+	hookContext["clientRequest"] = jsonValue(clientRequest)
+	if err = a.applyUpstreamCredentials(hookContext, a.info.ChannelType, a.info.ApiKey, a.info.ChannelSetting.Proxy); err != nil {
 		return nil, err
 	}
-	descriptor, err := a.requestDescriptor(context.Background(), "buildContentRequest", ctx)
+	fetchContext := pluginruntime.WithFetcher(ctx, a.hookFetcher(a.info.ChannelBaseUrl, a.info.ChannelSetting.Proxy))
+	descriptor, err := a.requestDescriptor(fetchContext, "buildContentRequest", hookContext)
 	if err != nil {
 		return nil, err
 	}
@@ -1124,6 +1176,15 @@ func (a *TaskAdaptor) channelType() int {
 		return 0
 	}
 	return a.info.ChannelType
+}
+
+// channelSetting is the executing channel's settings when the adaptor runs
+// with channel metadata; zero otherwise.
+func (a *TaskAdaptor) channelSetting() kitdto.ChannelSettings {
+	if a.info == nil || !a.info.HasChannelMeta() {
+		return kitdto.ChannelSettings{}
+	}
+	return a.info.ChannelSetting
 }
 
 // applyUpstreamCredentials sets ctx.upstream together with the credentials
@@ -1277,7 +1338,13 @@ func (a *TaskAdaptor) buildSubmit(c *gin.Context, info *relaycommon.RelayInfo) (
 		return a.submit, nil
 	}
 	started := time.Now()
-	descriptor, err := a.requestDescriptor(c.Request.Context(), "buildSubmitRequest", a.submitContext(c, info))
+	// buildSubmitRequest runs before quota is reserved, so a failed fetch
+	// costs nothing; requests that start vendor work stay the descriptor.
+	fetchContext := c.Request.Context()
+	if info.HasChannelMeta() {
+		fetchContext = pluginruntime.WithFetcher(fetchContext, a.hookFetcher(info.ChannelBaseUrl, info.ChannelSetting.Proxy))
+	}
+	descriptor, err := a.requestDescriptor(fetchContext, "buildSubmitRequest", a.submitContext(c, info))
 	if err != nil {
 		reason := "hook_failed"
 		var invalid *pluginruntime.ResultError
@@ -1516,11 +1583,21 @@ func (a *TaskAdaptor) validateResolvedUsageValue(value any, usageSchema map[stri
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, item := range typed {
+			limit, canonical := canonicalUsageLimit(key)
+			// A duration of -1 asks the vendor to pick the length. Plugins that
+			// declare duration-auto@1 reserve the longest duration for it and
+			// settle on the usage the vendor reports; usage facts stay
+			// non-negative.
+			if canonical && limit == relaycommon.MaxTaskDurationSeconds && a.plugin.Meta.AcceptsAutoDuration() {
+				if number, _ := usageNumber(item, true); number == -1 {
+					continue
+				}
+			}
 			if schema, declared := usageSchema[key]; declared {
 				if _, err := validateUsageValue(item, schema, true); err != nil {
 					return err
 				}
-			} else if limit, canonical := canonicalUsageLimit(key); canonical {
+			} else if canonical {
 				if err := validateUsageLimit(item, limit, true); err != nil {
 					return err
 				}
@@ -1728,7 +1805,7 @@ func canonicalUsageLimit(key string) (int, bool) {
 }
 
 func (a *TaskAdaptor) logRejectedUsage(hook string, _ error) {
-	common.SysError(fmt.Sprintf("task plugin %s rejected invalid %s billing facts", a.plugin.Meta.Key, hook))
+	common.SysError(common.LogText("task plugin %s rejected invalid %s billing facts", a.plugin.Meta.Key, hook))
 }
 
 func (a *TaskAdaptor) hasHook(_ context.Context, hook string) bool {

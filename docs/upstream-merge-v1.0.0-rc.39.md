@@ -437,7 +437,6 @@
 | dd95ab67762a | docs: add custom feature preservation checklist | 合并/审计维护 |
 | 88ff1c7cd976 | fix(users): restore upstream group assignment options | P-21 |
 | 7d8eeb44d9e8 | merge: sync upstream v1.0.0-rc.23 | 作者正式 RC-23 上游合并；不是独立自研功能提交 |
-| 571b38f0370a | fix: allow 31-day user dashboard ranges | P-27 |
 | 3707af0c4740 | fix(user): isolate self updates from billing fields | P-21 |
 | b44e6971e06e | fix(logs): align text request success rate | P-28 |
 | 9f0ad7c08837 | docs: complete custom feature preservation map | 合并/审计维护 |

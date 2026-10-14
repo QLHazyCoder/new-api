@@ -39,8 +39,8 @@ type PrivacyCardProps = {
 
 export function PrivacyCard(props: PrivacyCardProps) {
   const { t } = useTranslation()
-  const [recordIpLog, setRecordIpLog] = useState(() =>
-    normalizeUserSettings(props.profile.setting).record_ip_log
+  const [recordIpLog, setRecordIpLog] = useState(
+    () => normalizeUserSettings(props.profile.setting).record_ip_log
   )
   useEffect(() => {
     setRecordIpLog(normalizeUserSettings(props.profile.setting).record_ip_log)
