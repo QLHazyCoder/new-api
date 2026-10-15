@@ -7465,6 +7465,10 @@
     "Unbanned sensitive-word user {{user_id}}": "Unbanned sensitive-word user {{user_id}}",
     "Updated sensitive-word policy (mode {{mode}}, threshold {{ban_threshold}})": "Updated sensitive-word policy (mode {{mode}}, threshold {{ban_threshold}})",
     "Updated sensitive-word violations for user {{target_user_id}} from {{before}} to {{after}}": "Updated sensitive-word violations for user {{target_user_id}} from {{before}} to {{after}}",
-    "Updated sensitive-word whitelist for user {{target_user_id}} from {{before}} to {{after}}": "Updated sensitive-word whitelist for user {{target_user_id}} from {{before}} to {{after}}"
+    "Updated sensitive-word whitelist for user {{target_user_id}} from {{before}} to {{after}}": "Updated sensitive-word whitelist for user {{target_user_id}} from {{before}} to {{after}}",
+    "Don't show again": "今後表示しない",
+    "Got it": "了解しました",
+    "Image storage and retention notice": "画像の保存と保持期間のお知らせ",
+    "Images generated in the playground are stored on the server for a limited time: at most 200 images are kept per account and they are automatically deleted after 1 day. Please download important images in time.": "プレイグラウンドで生成した画像はサーバー上に短期間のみ保存されます。アカウントごとに最大 200 枚まで保持され、1 日後に自動的に削除されます。重要な画像はお早めにダウンロードしてください。"
   }
 }

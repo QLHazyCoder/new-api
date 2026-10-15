@@ -7465,6 +7465,10 @@
     "Unbanned sensitive-word user {{user_id}}": "Unbanned sensitive-word user {{user_id}}",
     "Updated sensitive-word policy (mode {{mode}}, threshold {{ban_threshold}})": "Updated sensitive-word policy (mode {{mode}}, threshold {{ban_threshold}})",
     "Updated sensitive-word violations for user {{target_user_id}} from {{before}} to {{after}}": "Updated sensitive-word violations for user {{target_user_id}} from {{before}} to {{after}}",
-    "Updated sensitive-word whitelist for user {{target_user_id}} from {{before}} to {{after}}": "Updated sensitive-word whitelist for user {{target_user_id}} from {{before}} to {{after}}"
+    "Updated sensitive-word whitelist for user {{target_user_id}} from {{before}} to {{after}}": "Updated sensitive-word whitelist for user {{target_user_id}} from {{before}} to {{after}}",
+    "Don't show again": "Don't show again",
+    "Got it": "Got it",
+    "Image storage and retention notice": "Image storage and retention notice",
+    "Images generated in the playground are stored on the server for a limited time: at most 200 images are kept per account and they are automatically deleted after 1 day. Please download important images in time.": "Images generated in the playground are stored on the server for a limited time: at most 200 images are kept per account and they are automatically deleted after 1 day. Please download important images in time."
   }
 }

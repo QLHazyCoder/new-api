@@ -7465,6 +7465,10 @@
     "Unbanned sensitive-word user {{user_id}}": "解除用戶 {{user_id}} 的敏感詞封禁",
     "Updated sensitive-word policy (mode {{mode}}, threshold {{ban_threshold}})": "更新敏感詞策略（模式 {{mode}}，閾值 {{ban_threshold}}）",
     "Updated sensitive-word violations for user {{target_user_id}} from {{before}} to {{after}}": "修改用戶 {{target_user_id}} 的敏感詞違規次數：{{before}} 到 {{after}}",
-    "Updated sensitive-word whitelist for user {{target_user_id}} from {{before}} to {{after}}": "修改用戶 {{target_user_id}} 的敏感詞白名單：{{before}} 到 {{after}}"
+    "Updated sensitive-word whitelist for user {{target_user_id}} from {{before}} to {{after}}": "修改用戶 {{target_user_id}} 的敏感詞白名單：{{before}} 到 {{after}}",
+    "Don't show again": "不再提醒",
+    "Got it": "我知道了",
+    "Image storage and retention notice": "圖片儲存與保留期提示",
+    "Images generated in the playground are stored on the server for a limited time: at most 200 images are kept per account and they are automatically deleted after 1 day. Please download important images in time.": "遊樂場產生的圖片會在伺服器上短期保存：每個帳戶最多保留 200 張，且將在 1 天後自動刪除。請及時下載重要圖片。"
   }
 }

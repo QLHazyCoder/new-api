@@ -98,25 +98,28 @@ func TestCreatePlaygroundImageBatchRejectsCountAboveMaximum(t *testing.T) {
 
 func TestExcessPlaygroundImageResultsArePreparedAndHardDeleted(t *testing.T) {
 	truncateTables(t)
+	fullBatches := (PlaygroundImageMaxStoredResultsPerUser + 1) / PlaygroundImageMaxBatchCount
+	for index := 0; index < fullBatches; index++ {
+		_, created, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
+			UserID:         1,
+			ClientBatchID:  fmt.Sprintf("result-retention-full-%d", index),
+			Mode:           PlaygroundImageModeGenerate,
+			Prompt:         "draw many images",
+			Model:          "gpt-image-2",
+			RequestPayload: `{"model":"gpt-image-2","n":1}`,
+			Count:          PlaygroundImageMaxBatchCount,
+		})
+		require.NoError(t, err)
+		require.True(t, created)
+	}
 	_, created, err := CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
 		UserID:         1,
-		ClientBatchID:  "result-retention-first",
+		ClientBatchID:  "result-retention-remainder",
 		Mode:           PlaygroundImageModeGenerate,
-		Prompt:         "draw many images",
+		Prompt:         "draw more images",
 		Model:          "gpt-image-2",
 		RequestPayload: `{"model":"gpt-image-2","n":1}`,
-		Count:          PlaygroundImageMaxBatchCount,
-	})
-	require.NoError(t, err)
-	require.True(t, created)
-	_, created, err = CreatePlaygroundImageBatch(CreatePlaygroundImageBatchParams{
-		UserID:         1,
-		ClientBatchID:  "result-retention-second",
-		Mode:           PlaygroundImageModeGenerate,
-		Prompt:         "draw two more images",
-		Model:          "gpt-image-2",
-		RequestPayload: `{"model":"gpt-image-2","n":1}`,
-		Count:          2,
+		Count:          PlaygroundImageMaxStoredResultsPerUser + 2 - fullBatches*PlaygroundImageMaxBatchCount,
 	})
 	require.NoError(t, err)
 	require.True(t, created)

@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { PlaygroundChat } from './components/chat/playground-chat'
 import { PlaygroundInput } from './components/input/playground-input'
 import { PlaygroundImageInput } from './components/playground-image-input'
+import { PlaygroundImageRetentionNotice } from './components/playground-image-retention-notice'
 import { PlaygroundImageTaskGrid } from './components/playground-image-task-grid'
 import { PlaygroundModeToggle } from './components/playground-mode-toggle'
 import {
@@ -266,6 +267,8 @@ export function Playground() {
           />
         )}
       </div>
+
+      <PlaygroundImageRetentionNotice open={mode === 'image'} />
     </div>
   )
 }

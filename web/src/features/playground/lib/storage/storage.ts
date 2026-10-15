@@ -463,6 +463,36 @@ export function saveImageDeleteConfirmationDisabled(disabled: boolean): void {
   }
 }
 
+// Browser-scoped (not user-scoped) on purpose: the retention notice is
+// dismissed per browser so signing in from another browser shows it again.
+// Must NOT be added to STORAGE_KEYS — getUserStorageKey wipes bare legacy
+// keys on every read, which would reset the dismissal.
+const IMAGE_RETENTION_NOTICE_DISMISSED_KEY =
+  'playground_image_retention_notice_dismissed'
+
+export function loadImageRetentionNoticeDismissed(): boolean {
+  try {
+    return localStorage.getItem(IMAGE_RETENTION_NOTICE_DISMISSED_KEY) === 'true'
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to load image retention notice preference:', error)
+    return false
+  }
+}
+
+export function saveImageRetentionNoticeDismissed(dismissed: boolean): void {
+  try {
+    if (dismissed) {
+      localStorage.setItem(IMAGE_RETENTION_NOTICE_DISMISSED_KEY, 'true')
+      return
+    }
+    localStorage.removeItem(IMAGE_RETENTION_NOTICE_DISMISSED_KEY)
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to save image retention notice preference:', error)
+  }
+}
+
 export function loadPlaygroundMode(): PlaygroundMode {
   try {
     const key = getUserStorageKey(STORAGE_KEYS.MODE)

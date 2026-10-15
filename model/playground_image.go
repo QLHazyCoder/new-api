@@ -34,7 +34,12 @@ const (
 
 	// PlaygroundImageMaxStoredResultsPerUser limits retained successful images,
 	// without restricting queued or running generation tasks.
-	PlaygroundImageMaxStoredResultsPerUser = 50
+	PlaygroundImageMaxStoredResultsPerUser = 200
+
+	// PlaygroundImageResultRetention controls how long playground image
+	// results (including terminal task records) are kept before the cleanup
+	// worker deletes them.
+	PlaygroundImageResultRetention = 24 * time.Hour
 
 	// playgroundImageResultRetentionBatchSize keeps each retention cleanup
 	// transaction bounded and gives offset queries an explicit SQL LIMIT.
@@ -157,7 +162,7 @@ func CreatePlaygroundImageBatch(params CreatePlaygroundImageBatchParams) (*Playg
 		params.BatchID = newPlaygroundImageID("imgbatch_")
 	}
 	if params.ExpiresAt <= now {
-		params.ExpiresAt = now + int64((7 * 24 * time.Hour).Seconds())
+		params.ExpiresAt = now + int64(PlaygroundImageResultRetention.Seconds())
 	}
 	batch := &PlaygroundImageBatch{
 		BatchID:        params.BatchID,
@@ -453,7 +458,7 @@ func recoverExpiredPlaygroundImageLeases(tx *gorm.DB, now int64) error {
 		"lease_until":   0,
 		"finished_at":   now,
 		"updated_at":    now,
-		"expires_at":    now + int64((7 * 24 * time.Hour).Seconds()),
+		"expires_at":    now + int64(PlaygroundImageResultRetention.Seconds()),
 	}
 	if err := updatePlaygroundImageTasksByPrimaryKey(tx,
 		"status IN ? AND lease_until > 0 AND lease_until < ? AND upstream_started_at > 0",
@@ -472,7 +477,7 @@ func recoverExpiredPlaygroundImageLeases(tx *gorm.DB, now int64) error {
 			"lease_until":   0,
 			"finished_at":   now,
 			"updated_at":    now,
-			"expires_at":    now + int64((7 * 24 * time.Hour).Seconds()),
+			"expires_at":    now + int64(PlaygroundImageResultRetention.Seconds()),
 		}); err != nil {
 		return err
 	}
@@ -745,7 +750,7 @@ func CompletePlaygroundImageTask(taskID, owner, resultPath, mimeType string, res
 			"lease_until": 0,
 			"finished_at": now,
 			"updated_at":  now,
-			"expires_at":  now + int64((7 * 24 * time.Hour).Seconds()),
+			"expires_at":  now + int64(PlaygroundImageResultRetention.Seconds()),
 		}
 		if discard {
 			updates["status"] = PlaygroundImageTaskCancelled
@@ -780,7 +785,7 @@ func InterruptPlaygroundImageTask(taskID, owner, message, code string, now int64
 			"lease_until":   0,
 			"finished_at":   now,
 			"updated_at":    now,
-			"expires_at":    now + int64((7 * 24 * time.Hour).Seconds()),
+			"expires_at":    now + int64(PlaygroundImageResultRetention.Seconds()),
 		}).Error
 	})
 	return batchRecordID, err
@@ -807,7 +812,7 @@ func FailPlaygroundImageTask(taskID, owner, message, code string, now int64) (in
 			"lease_until":   0,
 			"finished_at":   now,
 			"updated_at":    now,
-			"expires_at":    now + int64((7 * 24 * time.Hour).Seconds()),
+			"expires_at":    now + int64(PlaygroundImageResultRetention.Seconds()),
 		}).Error
 	})
 	return batchRecordID, err
