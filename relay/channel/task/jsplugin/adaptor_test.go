@@ -749,6 +749,13 @@ func TestTaskAdaptorPreservesSoraVideoResponseFields(t *testing.T) {
 					"error":{"code":"provider_error","message":"provider rejected request","detail":{"retryable":false}}
 				}`),
 			}
+			if tc.status == model.TaskStatusSuccess {
+				task.PrivateData.BillingContext = &model.TaskBillingContext{
+					TieredSnapshot: &billingexpr.BillingSnapshot{
+						UsageFacts: map[string]any{"tokens": float64(123456), "video_input": "none"},
+					},
+				}
+			}
 			rendered, err := adaptor.ConvertToOpenAIVideo(task)
 			require.NoError(t, err)
 
@@ -763,8 +770,10 @@ func TestTaskAdaptorPreservesSoraVideoResponseFields(t *testing.T) {
 			assert.Equal(t, float64(100), fields["created_at"])
 			if tc.status == model.TaskStatusSuccess {
 				assert.Equal(t, float64(200), fields["completed_at"])
+				assert.Equal(t, map[string]any{"total_tokens": float64(123456)}, fields["usage"])
 			} else {
 				assert.NotContains(t, fields, "completed_at")
+				assert.NotContains(t, fields, "usage")
 			}
 			assert.Equal(t, "https://cdn.example/video.mp4", fields["url"])
 			assert.Equal(t, map[string]any{
@@ -783,6 +792,39 @@ func TestTaskAdaptorPreservesSoraVideoResponseFields(t *testing.T) {
 				"code": "provider_error", "message": "provider rejected request",
 				"detail": map[string]any{"retryable": false},
 			}, fields["error"])
+		})
+	}
+}
+
+func TestTaskAdaptorOnlyProjectsBoundedVideoTokenUsage(t *testing.T) {
+	source, err := plugins.Source("sora")
+	require.NoError(t, err)
+	plugin, err := pluginruntime.NewRegistry().Register(source, pluginruntime.Options{})
+	require.NoError(t, err)
+	adaptor := New(plugin)
+
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{name: "over int32 boundary", value: float64(math.MaxInt32 + 1)},
+		{name: "fractional count", value: float64(1.5)},
+		{name: "negative count", value: float64(-1)},
+		{name: "non-numeric count", value: "42"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &model.Task{
+				TaskID: "task_public", Status: model.TaskStatusSuccess,
+				PrivateData: model.TaskPrivateData{BillingContext: &model.TaskBillingContext{
+					TieredSnapshot: &billingexpr.BillingSnapshot{UsageFacts: map[string]any{"tokens": tc.value}},
+				}},
+			}
+			rendered, err := adaptor.ConvertToOpenAIVideo(task)
+			require.NoError(t, err)
+
+			var response map[string]any
+			require.NoError(t, common.Unmarshal(rendered, &response))
+			assert.NotContains(t, response, "usage")
 		})
 	}
 }

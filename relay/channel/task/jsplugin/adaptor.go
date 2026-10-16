@@ -988,6 +988,9 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	} else {
 		delete(rendered, "completed_at")
 	}
+	if host.Usage != nil {
+		rendered["usage"] = host.Usage
+	}
 	return common.Marshal(rendered)
 }
 

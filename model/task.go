@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -710,6 +711,44 @@ func (t *Task) ToOpenAIVideo() *dto.OpenAIVideo {
 		} else {
 			openAIVideo.CompletedAt = t.UpdatedAt
 		}
+		openAIVideo.Usage = t.openAIVideoUsage()
 	}
 	return openAIVideo
+}
+
+func (t *Task) openAIVideoUsage() *dto.OpenAIVideoUsage {
+	if t.PrivateData.BillingContext == nil || t.PrivateData.BillingContext.TieredSnapshot == nil {
+		return nil
+	}
+	value, exists := t.PrivateData.BillingContext.TieredSnapshot.UsageFacts["tokens"]
+	if !exists {
+		return nil
+	}
+
+	var tokens int64
+	switch number := value.(type) {
+	case int:
+		tokens = int64(number)
+	case int32:
+		tokens = int64(number)
+	case int64:
+		tokens = number
+	case float64:
+		if math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number || number < 0 || number > math.MaxInt32 {
+			return nil
+		}
+		tokens = int64(number)
+	case json.Number:
+		parsed, err := number.Int64()
+		if err != nil {
+			return nil
+		}
+		tokens = parsed
+	default:
+		return nil
+	}
+	if tokens < 0 || tokens > math.MaxInt32 {
+		return nil
+	}
+	return &dto.OpenAIVideoUsage{TotalTokens: tokens}
 }
