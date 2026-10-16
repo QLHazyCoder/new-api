@@ -33,6 +33,18 @@ const (
 	ResponseOutcomeCancelled  ResponseOutcome = "cancelled"
 )
 
+type StreamDrainResult string
+
+const (
+	StreamDrainResultNone         StreamDrainResult = ""
+	StreamDrainResultDraining     StreamDrainResult = "draining"
+	StreamDrainResultEnded        StreamDrainResult = "ended"
+	StreamDrainResultTimeout      StreamDrainResult = "timeout"
+	StreamDrainResultIdleTimeout  StreamDrainResult = "idle_timeout"
+	StreamDrainResultLimitReached StreamDrainResult = "limit_reached"
+	StreamDrainResultDisabled     StreamDrainResult = "disabled"
+)
+
 const maxStreamErrorEntries = 20
 
 type StreamErrorEntry struct {
@@ -55,6 +67,7 @@ type StreamStatus struct {
 	errorStatus      int
 	incompleteReason string
 	expectsTerminal  bool
+	drainResult      StreamDrainResult
 }
 
 // StreamOutcome holds classification facts only; upstream messages never
@@ -68,6 +81,7 @@ type StreamOutcome struct {
 	ErrorType        string
 	ErrorStatus      int
 	IncompleteReason string
+	DrainResult      StreamDrainResult
 }
 
 func NewStreamStatus() *StreamStatus {
@@ -108,6 +122,24 @@ func (s *StreamStatus) RequireTerminal() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expectsTerminal = true
+}
+
+func (s *StreamStatus) SetDrainResult(result StreamDrainResult) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.drainResult = result
+}
+
+func (s *StreamStatus) DrainResult() StreamDrainResult {
+	if s == nil {
+		return StreamDrainResultNone
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.drainResult
 }
 
 // MarkCompleted, MarkIncomplete and MarkCancelled keep the first terminal seen;
@@ -185,6 +217,7 @@ func (s *StreamStatus) OutcomeSnapshot() StreamOutcome {
 		ErrorType:        s.errorType,
 		ErrorStatus:      s.errorStatus,
 		IncompleteReason: s.incompleteReason,
+		DrainResult:      s.drainResult,
 	}
 }
 

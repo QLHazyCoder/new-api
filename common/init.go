@@ -186,6 +186,24 @@ func initConstantEnv() {
 	constant.DifyDebug = GetEnvOrDefaultBool("DIFY_DEBUG", true)
 	constant.MaxFileDownloadMB = GetEnvOrDefault("MAX_FILE_DOWNLOAD_MB", 64)
 	constant.StreamScannerMaxBufferMB = GetEnvOrDefault("STREAM_SCANNER_MAX_BUFFER_MB", 128)
+	constant.ResponsesClientGoneDrainTimeoutSeconds = GetEnvOrDefault("RESPONSES_CLIENT_GONE_DRAIN_TIMEOUT_SECONDS", 120)
+	if constant.ResponsesClientGoneDrainTimeoutSeconds < 0 {
+		SysError(LogText("RESPONSES_CLIENT_GONE_DRAIN_TIMEOUT_SECONDS must be at least 0; using default 120"))
+		constant.ResponsesClientGoneDrainTimeoutSeconds = 120
+	}
+	if constant.ResponsesClientGoneDrainTimeoutSeconds > 300 {
+		SysError(LogText("RESPONSES_CLIENT_GONE_DRAIN_TIMEOUT_SECONDS exceeds 300; clamping to 300"))
+		constant.ResponsesClientGoneDrainTimeoutSeconds = 300
+	}
+	constant.ResponsesClientGoneDrainMaxConcurrency = GetEnvOrDefault("RESPONSES_CLIENT_GONE_DRAIN_MAX_CONCURRENCY", 32)
+	if constant.ResponsesClientGoneDrainMaxConcurrency < 0 {
+		SysError(LogText("RESPONSES_CLIENT_GONE_DRAIN_MAX_CONCURRENCY must be at least 0; using default 32"))
+		constant.ResponsesClientGoneDrainMaxConcurrency = 32
+	}
+	if constant.ResponsesClientGoneDrainMaxConcurrency > 256 {
+		SysError(LogText("RESPONSES_CLIENT_GONE_DRAIN_MAX_CONCURRENCY exceeds 256; clamping to 256"))
+		constant.ResponsesClientGoneDrainMaxConcurrency = 256
+	}
 	// MaxRequestBodyMB 请求体最大大小（解压后），用于防止超大请求/zip bomb导致内存暴涨
 	constant.MaxRequestBodyMB = GetEnvOrDefault("MAX_REQUEST_BODY_MB", 128)
 	constant.AnonymousRequestBodyLimitKB = GetEnvOrDefault("ANONYMOUS_REQUEST_BODY_LIMIT_KB", 512)

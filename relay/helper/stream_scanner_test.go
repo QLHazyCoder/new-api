@@ -283,6 +283,115 @@ func TestStreamScannerHandler_ClientCancelAbortsUpstreamAndReturns(t *testing.T)
 	assert.NotContains(t, body, "second")
 }
 
+func TestStreamScannerHandler_DrainCompletesAfterClientCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pr, pw := io.Pipe()
+	t.Cleanup(func() {
+		_ = pr.Close()
+		_ = pw.Close()
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+	info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	var received []string
+	var receivedMu sync.Mutex
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandlerWithOptions(c, &http.Response{Body: pr}, info, func(data string, sr *StreamResult) {
+			receivedMu.Lock()
+			received = append(received, data)
+			receivedMu.Unlock()
+		}, StreamScannerOptions{
+			ClientGoneDrainEnabled:        true,
+			ClientGoneDrainTimeout:        time.Second,
+			MaxConcurrentClientGoneDrains: 1,
+		})
+		close(done)
+	}()
+
+	_, err := fmt.Fprintln(pw, "data: first")
+	require.NoError(t, err)
+	cancel()
+	require.Eventually(t, func() bool {
+		return info.StreamStatus.DrainResult() == relaycommon.StreamDrainResultDraining
+	}, time.Second, time.Millisecond)
+	_, err = fmt.Fprintln(pw, "data: terminal")
+	require.NoError(t, err, "upstream body should remain readable during the bounded drain")
+	_, err = fmt.Fprintln(pw, "data: [DONE]")
+	require.NoError(t, err)
+	require.NoError(t, pw.Close())
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not finish after the upstream stream ended")
+	}
+
+	receivedMu.Lock()
+	defer receivedMu.Unlock()
+	assert.Equal(t, []string{"first", "terminal"}, received)
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	assert.Equal(t, relaycommon.StreamDrainResultEnded, info.StreamStatus.OutcomeSnapshot().DrainResult)
+}
+
+func TestStreamScannerHandler_DrainStopsAtTimeoutOrConcurrencyLimit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		maxActive  int
+		occupySlot bool
+		timeout    time.Duration
+		wantResult relaycommon.StreamDrainResult
+	}{
+		{name: "absolute timeout", maxActive: 1, timeout: 25 * time.Millisecond, wantResult: relaycommon.StreamDrainResultTimeout},
+		{name: "concurrency limit", maxActive: 1, occupySlot: true, timeout: time.Second, wantResult: relaycommon.StreamDrainResultLimitReached},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.occupySlot {
+				release, ok := acquireClientGoneDrain(tc.maxActive)
+				require.True(t, ok)
+				defer release()
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			defer cancel()
+			pr, pw := io.Pipe()
+			t.Cleanup(func() {
+				_ = pr.Close()
+				_ = pw.Close()
+			})
+
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+			info := &relaycommon.RelayInfo{DisablePing: true, ChannelMeta: &relaycommon.ChannelMeta{}}
+			done := make(chan struct{})
+			go func() {
+				StreamScannerHandlerWithOptions(c, &http.Response{Body: pr}, info, func(data string, sr *StreamResult) {}, StreamScannerOptions{
+					ClientGoneDrainEnabled:        true,
+					ClientGoneDrainTimeout:        tc.timeout,
+					MaxConcurrentClientGoneDrains: tc.maxActive,
+				})
+				close(done)
+			}()
+
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("handler did not clean up after drain was bounded")
+			}
+			require.NotNil(t, info.StreamStatus)
+			assert.Equal(t, tc.wantResult, info.StreamStatus.OutcomeSnapshot().DrainResult)
+		})
+	}
+}
+
 // ---------- Ping tests ----------
 
 func TestStreamScannerHandler_PingSentDuringSlowUpstream(t *testing.T) {

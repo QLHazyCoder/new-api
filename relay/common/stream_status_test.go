@@ -37,6 +37,14 @@ func TestStreamStatus_SetEndReason_NilSafe(t *testing.T) {
 	s.SetEndReason(StreamEndReasonDone, nil)
 }
 
+func TestStreamStatus_DrainResultIncludedInSnapshot(t *testing.T) {
+	t.Parallel()
+	s := NewStreamStatus()
+	s.SetDrainResult(StreamDrainResultTimeout)
+
+	assert.Equal(t, StreamDrainResultTimeout, s.OutcomeSnapshot().DrainResult)
+}
+
 func TestStreamStatus_SetEndReason_Concurrent(t *testing.T) {
 	t.Parallel()
 	s := NewStreamStatus()

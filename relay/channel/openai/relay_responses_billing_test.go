@@ -2,12 +2,16 @@ package openai
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -20,6 +24,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type responseWriteNotifier struct {
+	*httptest.ResponseRecorder
+	wrote chan struct{}
+	once  sync.Once
+}
+
+func (w *responseWriteNotifier) Write(p []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(p)
+	w.once.Do(func() { close(w.wrote) })
+	return n, err
+}
 
 func TestOaiResponsesHandlerCountsOutputCallsNotDeclarations(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -269,6 +285,85 @@ func TestOaiResponsesStreamHandlerDoesNotCountPartialImageEvent(t *testing.T) {
 	)
 
 	assert.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
+}
+
+func TestOaiResponsesStreamHandlerSub2APIDrainsTerminalUsageAfterClientGone(t *testing.T) {
+	oldStreamingTimeout := constant.StreamingTimeout
+	oldTimeout := constant.ResponsesClientGoneDrainTimeoutSeconds
+	oldConcurrency := constant.ResponsesClientGoneDrainMaxConcurrency
+	constant.StreamingTimeout = 30
+	constant.ResponsesClientGoneDrainTimeoutSeconds = 2
+	constant.ResponsesClientGoneDrainMaxConcurrency = 1
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldStreamingTimeout
+		constant.ResponsesClientGoneDrainTimeoutSeconds = oldTimeout
+		constant.ResponsesClientGoneDrainMaxConcurrency = oldConcurrency
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader, writer := io.Pipe()
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+
+	recorder := &responseWriteNotifier{ResponseRecorder: httptest.NewRecorder(), wrote: make(chan struct{})}
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
+	info := &relaycommon.RelayInfo{
+		IsStream:    true,
+		DisablePing: true,
+		ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeSub2API},
+	}
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       reader,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+	}
+	type result struct {
+		usage *dto.Usage
+		err   *types.NewAPIError
+	}
+	done := make(chan result, 1)
+	go func() {
+		usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
+		done <- result{usage: usage, err: apiErr}
+	}()
+
+	_, err := fmt.Fprintln(writer, `data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"}}`)
+	require.NoError(t, err)
+	select {
+	case <-recorder.wrote:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first Responses event was not delivered before cancellation")
+	}
+	cancel()
+	require.Eventually(t, func() bool {
+		return info.StreamStatus.DrainResult() == relaycommon.StreamDrainResultDraining
+	}, time.Second, time.Millisecond)
+	_, err = fmt.Fprintln(writer, `data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":112003,"output_tokens":232,"total_tokens":112235,"input_tokens_details":{"cached_tokens":110335}}}}`)
+	require.NoError(t, err, "scanner must keep reading the upstream body after client cancellation")
+	_, err = fmt.Fprintln(writer, "data: [DONE]")
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	var got result
+	select {
+	case got = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Responses handler did not finish after upstream terminal usage")
+	}
+	require.Nil(t, got.err)
+	require.NotNil(t, got.usage)
+	assert.Equal(t, 112003, got.usage.PromptTokens)
+	assert.Equal(t, 232, got.usage.CompletionTokens)
+	assert.Equal(t, 112235, got.usage.TotalTokens)
+	assert.Equal(t, 110335, got.usage.PromptTokensDetails.CachedTokens)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	assert.Equal(t, relaycommon.ResponseOutcomeCompleted, info.StreamStatus.OutcomeSnapshot().Response)
+	assert.Equal(t, relaycommon.StreamDrainResultEnded, info.StreamStatus.OutcomeSnapshot().DrainResult)
+	assert.NotContains(t, recorder.Body.String(), "response.completed", "terminal events read after disconnect must not be written downstream")
 }
 
 func TestOaiResponsesHandlerRewritesSGLangCreatedAtToInt(t *testing.T) {
