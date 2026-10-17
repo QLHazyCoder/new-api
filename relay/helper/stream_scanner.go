@@ -33,37 +33,6 @@ const (
 	streamWriteTimeout = 30 * time.Second
 )
 
-// StreamScannerOptions controls behavior that is intentionally opt-in for
-// shared stream users. Client-gone drain is enabled only by a protocol path
-// that can still account usage after downstream writes stop.
-type StreamScannerOptions struct {
-	ClientGoneDrainEnabled        bool
-	ClientGoneDrainTimeout        time.Duration
-	MaxConcurrentClientGoneDrains int
-}
-
-var clientGoneDrainState struct {
-	sync.Mutex
-	active int
-}
-
-func acquireClientGoneDrain(limit int) (func(), bool) {
-	if limit <= 0 {
-		return nil, false
-	}
-	clientGoneDrainState.Lock()
-	defer clientGoneDrainState.Unlock()
-	if clientGoneDrainState.active >= limit {
-		return nil, false
-	}
-	clientGoneDrainState.active++
-	return func() {
-		clientGoneDrainState.Lock()
-		clientGoneDrainState.active--
-		clientGoneDrainState.Unlock()
-	}, true
-}
-
 func getScannerBufferSize() int {
 	if constant.StreamScannerMaxBufferMB > 0 {
 		return constant.StreamScannerMaxBufferMB << 20
@@ -111,12 +80,51 @@ func ExtendWriteDeadline(c *gin.Context) {
 	_ = http.NewResponseController(c.Writer).SetWriteDeadline(time.Now().Add(streamWriteTimeout))
 }
 
-func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
-	StreamScannerHandlerWithOptions(c, resp, info, dataHandler, StreamScannerOptions{})
+// Saturate only at the largest representable timer duration, not an operator-configured cap.
+func clientGoneDrainDuration(timeoutSeconds int) time.Duration {
+	if timeoutSeconds <= 0 {
+		return 0
+	}
+	const maxDuration = time.Duration(1<<63 - 1)
+	const maxDurationSeconds = int64(maxDuration / time.Second)
+	if int64(timeoutSeconds) > maxDurationSeconds {
+		return maxDuration
+	}
+	return time.Duration(timeoutSeconds) * time.Second
 }
 
-func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult), options StreamScannerOptions) {
+func setDrainResultForScannerEnd(status *relaycommon.StreamStatus) {
+	switch status.TerminalReason() {
+	case relaycommon.StreamEndReasonScannerErr:
+		status.SetDrainResult(relaycommon.StreamDrainResultScannerError)
+	case relaycommon.StreamEndReasonHandlerStop, relaycommon.StreamEndReasonPanic, relaycommon.StreamEndReasonPingFail:
+		status.SetDrainResult(relaycommon.StreamDrainResultHandlerStop)
+	default:
+		status.SetDrainResult(relaycommon.StreamDrainResultEnded)
+	}
+}
 
+func finishTimedOutDrain(status *relaycommon.StreamStatus, scannerEndMu *sync.Mutex, scanDone <-chan struct{}, stopChan <-chan bool, requestErr error, result relaycommon.StreamDrainResult) {
+	// Scanner completion and timeout classification share a lock so a terminal
+	// event/read result wins when both become ready at the same time.
+	scannerEndMu.Lock()
+	defer scannerEndMu.Unlock()
+	select {
+	case <-scanDone:
+		setDrainResultForScannerEnd(status)
+	case <-stopChan:
+		setDrainResultForScannerEnd(status)
+	default:
+		status.SetEndReason(relaycommon.StreamEndReasonClientGone, requestErr)
+		if status.TerminalReason() != relaycommon.StreamEndReasonNone {
+			setDrainResultForScannerEnd(status)
+			return
+		}
+		status.SetDrainResult(result)
+	}
+}
+
+func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
 	if resp == nil || dataHandler == nil {
 		return
 	}
@@ -129,15 +137,35 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
 
 	var (
-		stopChan    = make(chan bool, 3) // 增加缓冲区避免阻塞
-		scanner     = NewStreamScanner(resp.Body)
-		ticker      = time.NewTicker(streamingTimeout)
-		pingTicker  *time.Ticker
-		writeMutex  sync.Mutex     // Mutex to protect concurrent writes
-		wg          sync.WaitGroup // 用于等待所有 goroutine 退出
-		cleanupOnce sync.Once
-		stopOnce    sync.Once
+		stopChan     = make(chan bool, 3) // 增加缓冲区避免阻塞
+		scanDone     = make(chan struct{})
+		scanner      = NewStreamScanner(resp.Body)
+		ticker       = time.NewTicker(streamingTimeout)
+		pingTicker   *time.Ticker
+		writeMutex   sync.Mutex     // Mutex to protect concurrent writes
+		wg           sync.WaitGroup // 用于等待所有 goroutine 退出
+		cleanupOnce  sync.Once
+		stopOnce     sync.Once
+		scanDoneOnce sync.Once
+		scannerEndMu sync.Mutex
 	)
+	signalScannerDone := func() {
+		scanDoneOnce.Do(func() { close(scanDone) })
+	}
+	setScannerEndReason := func(reason relaycommon.StreamEndReason, err error) {
+		scannerEndMu.Lock()
+		if requestContextDone(c) {
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+		}
+		info.StreamStatus.SetEndReason(reason, err)
+		signalScannerDone()
+		scannerEndMu.Unlock()
+	}
+	setClientGone := func() {
+		scannerEndMu.Lock()
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+		scannerEndMu.Unlock()
+	}
 
 	stop := func() {
 		stopOnce.Do(func() {
@@ -178,12 +206,6 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 			wg.Wait()
 		})
 	}
-	var releaseDrain func()
-	defer func() {
-		if releaseDrain != nil {
-			releaseDrain()
-		}
-	}()
 	// Ensure gin.Context is not returned to Gin's pool while any stream goroutine can still use it.
 	defer cleanup()
 
@@ -269,6 +291,12 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 			func() {
 				writeMutex.Lock()
 				defer writeMutex.Unlock()
+				if requestContextDone(c) {
+					// A queued frame may be processed after the client leaves;
+					// preserve that transport fact before protocol callbacks
+					// record a terminal response or stop the stream.
+					setClientGone()
+				}
 				if !requestContextDone(c) {
 					ExtendWriteDeadline(c)
 				}
@@ -284,11 +312,12 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 	wg.Add(1)
 	common.RelayCtxGo(ctx, func() {
 		defer func() {
-			close(dataChan)
 			if r := recover(); r != nil {
 				logger.LogError(c, common.LogText("scanner goroutine panic: %v", r))
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("scanner panic: %v", r))
+				setScannerEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("scanner panic: %v", r))
 			}
+			signalScannerDone()
+			close(dataChan)
 			stop()
 			logger.LogDebug(c, "scanner goroutine exited")
 			wg.Done()
@@ -331,7 +360,7 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 					return
 				}
 			} else {
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+				setScannerEndReason(relaycommon.StreamEndReasonDone, nil)
 				logger.LogDebug(c, "received [DONE], stopping scanner")
 				return
 			}
@@ -340,52 +369,82 @@ func StreamScannerHandlerWithOptions(c *gin.Context, resp *http.Response, info *
 		if err := scanner.Err(); err != nil {
 			if err != io.EOF {
 				logger.LogError(c, common.LogText("scanner error: %s", err.Error()))
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
+				setScannerEndReason(relaycommon.StreamEndReasonScannerErr, err)
+				return
 			}
 		}
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
+		setScannerEndReason(relaycommon.StreamEndReasonEOF, nil)
 	})
 
-	// 主循环等待完成或超时
+	// Client cancellation is recorded independently from the first scanner end
+	// reason. This preserves client_gone while drain_result describes what the
+	// scanner observed before cleanup.
+	clientGoneDrainTimeout := clientGoneDrainDuration(constant.ClientGoneDrainTimeout)
+
+	// Main loop waits for normal stream completion, idle timeout, or client
+	// cancellation. After cancellation the scanner and data handler remain in
+	// this request's lifetime until the upstream ends or the absolute drain
+	// timeout closes the body in cleanup.
 mainLoop:
 	select {
 	case <-ticker.C:
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
+		select {
+		case <-scanDone:
+			<-stopChan
+		default:
+			if requestContextDone(c) {
+				setClientGone()
+				if info.StreamStatus.TerminalReason() == relaycommon.StreamEndReasonNone {
+					info.StreamStatus.SetDrainResult(relaycommon.StreamDrainResultIdleTimeout)
+				} else {
+					setDrainResultForScannerEnd(info.StreamStatus)
+				}
+			} else {
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, nil)
+			}
+		}
 	case <-stopChan:
 		// EndReason already set by the goroutine that triggered stopChan
+		if requestContextDone(c) {
+			setClientGone()
+			setDrainResultForScannerEnd(info.StreamStatus)
+		}
 	case <-c.Request.Context().Done():
 		select {
-		case <-stopChan:
+		case <-scanDone:
+			<-stopChan
+			setClientGone()
+			setDrainResultForScannerEnd(info.StreamStatus)
 			break mainLoop
 		default:
 		}
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
-		if !options.ClientGoneDrainEnabled {
-			break
-		}
-		if options.ClientGoneDrainTimeout <= 0 {
-			info.StreamStatus.SetDrainResult(relaycommon.StreamDrainResultDisabled)
-			break
-		}
-		if options.MaxConcurrentClientGoneDrains <= 0 {
-			info.StreamStatus.SetDrainResult(relaycommon.StreamDrainResultDisabled)
-			break
-		}
-		release, acquired := acquireClientGoneDrain(options.MaxConcurrentClientGoneDrains)
-		if !acquired {
-			info.StreamStatus.SetDrainResult(relaycommon.StreamDrainResultLimitReached)
-			break
-		}
-		releaseDrain = release
-		info.StreamStatus.SetDrainResult(relaycommon.StreamDrainResultDraining)
-		drainTimer := time.NewTimer(options.ClientGoneDrainTimeout)
 		select {
 		case <-stopChan:
-			info.StreamStatus.SetDrainResult(relaycommon.StreamDrainResultEnded)
+			setClientGone()
+			setDrainResultForScannerEnd(info.StreamStatus)
+			break mainLoop
+		default:
+		}
+		setClientGone()
+		if clientGoneDrainTimeout <= 0 {
+			if info.StreamStatus.TerminalReason() == relaycommon.StreamEndReasonNone {
+				info.StreamStatus.SetDrainResult(relaycommon.StreamDrainResultDisabled)
+			} else {
+				setDrainResultForScannerEnd(info.StreamStatus)
+			}
+			break
+		}
+		drainTimer := time.NewTimer(clientGoneDrainTimeout)
+		select {
+		case <-stopChan:
+			setDrainResultForScannerEnd(info.StreamStatus)
+		case <-scanDone:
+			<-stopChan
+			setDrainResultForScannerEnd(info.StreamStatus)
 		case <-ticker.C:
-			info.StreamStatus.SetDrainResult(relaycommon.StreamDrainResultIdleTimeout)
+			finishTimedOutDrain(info.StreamStatus, &scannerEndMu, scanDone, stopChan, c.Request.Context().Err(), relaycommon.StreamDrainResultIdleTimeout)
 		case <-drainTimer.C:
-			info.StreamStatus.SetDrainResult(relaycommon.StreamDrainResultTimeout)
+			finishTimedOutDrain(info.StreamStatus, &scannerEndMu, scanDone, stopChan, c.Request.Context().Err(), relaycommon.StreamDrainResultTimeout)
 		}
 		drainTimer.Stop()
 	}

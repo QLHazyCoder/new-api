@@ -37,11 +37,11 @@ type StreamDrainResult string
 
 const (
 	StreamDrainResultNone         StreamDrainResult = ""
-	StreamDrainResultDraining     StreamDrainResult = "draining"
 	StreamDrainResultEnded        StreamDrainResult = "ended"
 	StreamDrainResultTimeout      StreamDrainResult = "timeout"
 	StreamDrainResultIdleTimeout  StreamDrainResult = "idle_timeout"
-	StreamDrainResultLimitReached StreamDrainResult = "limit_reached"
+	StreamDrainResultScannerError StreamDrainResult = "scanner_error"
+	StreamDrainResultHandlerStop  StreamDrainResult = "handler_stop"
 	StreamDrainResultDisabled     StreamDrainResult = "disabled"
 )
 
@@ -57,9 +57,10 @@ type StreamStatus struct {
 	EndError  error
 	endOnce   sync.Once
 
-	mu         sync.Mutex
-	Errors     []StreamErrorEntry
-	ErrorCount int
+	mu             sync.Mutex
+	terminalReason StreamEndReason
+	Errors         []StreamErrorEntry
+	ErrorCount     int
 
 	response         ResponseOutcome
 	errorCode        string
@@ -92,10 +93,29 @@ func (s *StreamStatus) SetEndReason(reason StreamEndReason, err error) {
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	if reason != StreamEndReasonClientGone {
+		if s.terminalReason == StreamEndReasonNone {
+			s.terminalReason = reason
+		}
+	}
 	s.endOnce.Do(func() {
 		s.EndReason = reason
 		s.EndError = err
 	})
+	s.mu.Unlock()
+}
+
+// TerminalReason returns the first upstream/protocol termination reason.
+// Client cancellation is tracked separately so a drain can preserve it as the
+// public transport end reason while still classifying the scanner outcome.
+func (s *StreamStatus) TerminalReason() StreamEndReason {
+	if s == nil {
+		return StreamEndReasonNone
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.terminalReason
 }
 
 func (s *StreamStatus) RecordError(msg string) {

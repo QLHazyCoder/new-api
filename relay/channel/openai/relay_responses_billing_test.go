@@ -287,17 +287,14 @@ func TestOaiResponsesStreamHandlerDoesNotCountPartialImageEvent(t *testing.T) {
 	assert.Equal(t, 0, info.ResponsesUsageInfo.BuiltInTools[dto.BuildInToolImageGeneration].CallCount)
 }
 
-func TestOaiResponsesStreamHandlerSub2APIDrainsTerminalUsageAfterClientGone(t *testing.T) {
+func TestOaiResponsesStreamHandlerDrainsTerminalUsageAfterClientGone(t *testing.T) {
 	oldStreamingTimeout := constant.StreamingTimeout
-	oldTimeout := constant.ResponsesClientGoneDrainTimeoutSeconds
-	oldConcurrency := constant.ResponsesClientGoneDrainMaxConcurrency
+	oldDrainTimeout := constant.ClientGoneDrainTimeout
 	constant.StreamingTimeout = 30
-	constant.ResponsesClientGoneDrainTimeoutSeconds = 2
-	constant.ResponsesClientGoneDrainMaxConcurrency = 1
+	constant.ClientGoneDrainTimeout = 2
 	t.Cleanup(func() {
 		constant.StreamingTimeout = oldStreamingTimeout
-		constant.ResponsesClientGoneDrainTimeoutSeconds = oldTimeout
-		constant.ResponsesClientGoneDrainMaxConcurrency = oldConcurrency
+		constant.ClientGoneDrainTimeout = oldDrainTimeout
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -340,7 +337,7 @@ func TestOaiResponsesStreamHandlerSub2APIDrainsTerminalUsageAfterClientGone(t *t
 	}
 	cancel()
 	require.Eventually(t, func() bool {
-		return info.StreamStatus.DrainResult() == relaycommon.StreamDrainResultDraining
+		return info.StreamStatus.OutcomeSnapshot().EndReason == relaycommon.StreamEndReasonClientGone
 	}, time.Second, time.Millisecond)
 	_, err = fmt.Fprintln(writer, `data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":112003,"output_tokens":232,"total_tokens":112235,"input_tokens_details":{"cached_tokens":110335}}}}`)
 	require.NoError(t, err, "scanner must keep reading the upstream body after client cancellation")
@@ -361,6 +358,7 @@ func TestOaiResponsesStreamHandlerSub2APIDrainsTerminalUsageAfterClientGone(t *t
 	assert.Equal(t, 112235, got.usage.TotalTokens)
 	assert.Equal(t, 110335, got.usage.PromptTokensDetails.CachedTokens)
 	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.TerminalReason())
 	assert.Equal(t, relaycommon.ResponseOutcomeCompleted, info.StreamStatus.OutcomeSnapshot().Response)
 	assert.Equal(t, relaycommon.StreamDrainResultEnded, info.StreamStatus.OutcomeSnapshot().DrainResult)
 	assert.NotContains(t, recorder.Body.String(), "response.completed", "terminal events read after disconnect must not be written downstream")

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -41,8 +42,13 @@ func newImageTestContext(t *testing.T, body, contentType string, isStream bool) 
 
 func TestImageExpressionUsesCompletedCountAndProtectsAbortedStreams(t *testing.T) {
 	oldTimeout := constant.StreamingTimeout
+	oldDrainTimeout := constant.ClientGoneDrainTimeout
 	constant.StreamingTimeout = 30
-	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	constant.ClientGoneDrainTimeout = 0
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+		constant.ClientGoneDrainTimeout = oldDrainTimeout
+	})
 	for _, tc := range []struct {
 		name, body      string
 		stream, abort   bool
@@ -336,8 +342,13 @@ func TestOpenaiImageStreamHandlerClientDisconnectKeepsRequestedCount(t *testing.
 	t.Cleanup(func() { gin.SetMode(oldMode) })
 
 	oldTimeout := constant.StreamingTimeout
+	oldDrainTimeout := constant.ClientGoneDrainTimeout
 	constant.StreamingTimeout = 30
-	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	constant.ClientGoneDrainTimeout = 1
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+		constant.ClientGoneDrainTimeout = oldDrainTimeout
+	})
 
 	body := "data: {\"type\":\"image_generation.completed\",\"b64_json\":\"first\"}\n\n"
 	c, recorder, resp, info := newDisconnectingImageStream(t, body, "first")
@@ -356,6 +367,7 @@ func TestOpenaiImageStreamHandlerClientDisconnectKeepsRequestedCount(t *testing.
 		info.StreamStatus.EndReason)
 	require.Contains(t, recorder.Body.String(), `"b64_json":"first"`)
 	require.Equal(t, 3.0, info.PriceData.OtherRatios()["n"], "client abort must not reduce the billed image count")
+	assert.Equal(t, relaycommon.StreamDrainResultTimeout, info.StreamStatus.OutcomeSnapshot().DrainResult)
 }
 
 // TestOpenaiImageStreamHandlerClientDisconnectRaisesCount covers the other
@@ -367,8 +379,13 @@ func TestOpenaiImageStreamHandlerClientDisconnectRaisesCount(t *testing.T) {
 	t.Cleanup(func() { gin.SetMode(oldMode) })
 
 	oldTimeout := constant.StreamingTimeout
+	oldDrainTimeout := constant.ClientGoneDrainTimeout
 	constant.StreamingTimeout = 30
-	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	constant.ClientGoneDrainTimeout = 0
+	t.Cleanup(func() {
+		constant.StreamingTimeout = oldTimeout
+		constant.ClientGoneDrainTimeout = oldDrainTimeout
+	})
 
 	body := strings.Join([]string{
 		`data: {"type":"image_generation.completed","b64_json":"first"}`,
@@ -390,6 +407,68 @@ func TestOpenaiImageStreamHandlerClientDisconnectRaisesCount(t *testing.T) {
 		[]relaycommon.StreamEndReason{relaycommon.StreamEndReasonClientGone, relaycommon.StreamEndReasonHandlerStop},
 		info.StreamStatus.EndReason)
 	require.Equal(t, 2.0, info.PriceData.OtherRatios()["n"], "completed events beyond the recorded n must raise the charge even on abort")
+}
+
+func TestOpenaiImageStreamHandlerDrainsCompletedCountAfterClientDisconnect(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	oldDrainTimeout := constant.ClientGoneDrainTimeout
+	oldStreamingTimeout := constant.StreamingTimeout
+	constant.ClientGoneDrainTimeout = 2
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() {
+		constant.ClientGoneDrainTimeout = oldDrainTimeout
+		constant.StreamingTimeout = oldStreamingTimeout
+	})
+
+	c, _, resp, info := newImageTestContext(t, "", "text/event-stream", true)
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	t.Cleanup(cancel)
+	c.Request = c.Request.WithContext(ctx)
+	c.Writer = &cancelAfterWriter{ResponseWriter: c.Writer, needle: "first", cancel: cancel}
+	reader, writer := io.Pipe()
+	resp.Body = reader
+	t.Cleanup(func() {
+		_ = reader.Close()
+		_ = writer.Close()
+	})
+	info.PriceData.UsePrice = true
+	info.PriceData.AddOtherRatio("n", 3)
+
+	type result struct {
+		usage *dto.Usage
+		err   error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		usage, apiErr := OpenaiImageStreamHandler(c, info, resp)
+		var err error
+		if apiErr != nil {
+			err = apiErr
+		}
+		resultCh <- result{usage: usage, err: err}
+	}()
+
+	_, err := fmt.Fprintln(writer, `data: {"type":"image_generation.completed","b64_json":"first"}`)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return c.Request.Context().Err() != nil }, time.Second, time.Millisecond)
+	_, err = fmt.Fprintln(writer, "data: [DONE]")
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	select {
+	case result := <-resultCh:
+		require.NoError(t, result.err)
+		require.NotNil(t, result.usage)
+	case <-time.After(3 * time.Second):
+		t.Fatal("image handler did not finish after upstream drain")
+	}
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.TerminalReason())
+	assert.Equal(t, 1.0, info.PriceData.OtherRatios()["n"], "a completed upstream image must use its actual count after drain")
 }
 
 // TestOpenaiImageStreamHandlerWrapsJSONResponse covers the non-SSE fallback:

@@ -45,6 +45,15 @@ func TestStreamStatus_DrainResultIncludedInSnapshot(t *testing.T) {
 	assert.Equal(t, StreamDrainResultTimeout, s.OutcomeSnapshot().DrainResult)
 }
 
+func TestStreamStatus_ClientGoneKeepsFirstScannerTerminalSeparate(t *testing.T) {
+	s := NewStreamStatus()
+	s.SetEndReason(StreamEndReasonClientGone, fmt.Errorf("context canceled"))
+	s.SetEndReason(StreamEndReasonDone, nil)
+
+	assert.Equal(t, StreamEndReasonClientGone, s.OutcomeSnapshot().EndReason)
+	assert.Equal(t, StreamEndReasonDone, s.TerminalReason())
+}
+
 func TestStreamStatus_SetEndReason_Concurrent(t *testing.T) {
 	t.Parallel()
 	s := NewStreamStatus()

@@ -4,8 +4,7 @@ var StreamingTimeout int
 var DifyDebug bool
 var MaxFileDownloadMB int
 var StreamScannerMaxBufferMB int
-var ResponsesClientGoneDrainTimeoutSeconds int
-var ResponsesClientGoneDrainMaxConcurrency int
+var ClientGoneDrainTimeout int
 var ForceStreamOption bool
 var CountToken bool
 var GetMediaToken bool

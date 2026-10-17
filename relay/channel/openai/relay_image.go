@@ -171,21 +171,27 @@ func OpenaiImageStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 
 	// StreamScannerHandler consumes the upstream [DONE]; re-emit it so the
 	// client still receives a terminal data: [DONE].
-	if info.StreamStatus != nil && info.StreamStatus.EndReason == relaycommon.StreamEndReasonDone {
+	terminalReason := relaycommon.StreamEndReasonNone
+	if info.StreamStatus != nil {
+		terminalReason = info.StreamStatus.TerminalReason()
+	}
+	if terminalReason == relaycommon.StreamEndReasonDone {
 		helper.Done(c)
 	}
 
 	applyUsagePostProcessing(info, usage, lastStreamData)
-	// Only trust completedImages when upstream finished the stream (done/eof).
-	// On client-side aborts (client_gone, or handler_stop from a failed client
-	// write) the counter undercounts what upstream actually generated and
-	// charged, so keep the requested n — otherwise a client could pay for one
-	// image by disconnecting right after the first completed event. The abort
-	// guard only blocks lowering the charge: if completed events already
-	// exceed the recorded n, bill the higher actual count regardless.
+	// A drained stream's upstream terminal proves the completed-image count is
+	// final even when the downstream client has gone away. Without an upstream
+	// terminal, keep the requested n to avoid lowering the charge based on an
+	// incomplete count; completed events above n still raise it.
 	if info.StreamStatus != nil {
-		upstreamFinished := info.StreamStatus.EndReason == relaycommon.StreamEndReasonDone ||
-			info.StreamStatus.EndReason == relaycommon.StreamEndReasonEOF
+		outcome := info.StreamStatus.OutcomeSnapshot()
+		upstreamFinished := outcome.EndReason == relaycommon.StreamEndReasonDone ||
+			outcome.EndReason == relaycommon.StreamEndReasonEOF
+		if outcome.EndReason == relaycommon.StreamEndReasonClientGone {
+			upstreamFinished = outcome.DrainResult == relaycommon.StreamDrainResultEnded &&
+				(terminalReason == relaycommon.StreamEndReasonDone || terminalReason == relaycommon.StreamEndReasonEOF)
+		}
 		if upstreamFinished || completedImages > int64(info.RequestedImageCount()) {
 			info.UpdateImageCount(completedImages)
 		}

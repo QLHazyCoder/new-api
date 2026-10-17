@@ -86,12 +86,18 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 
 func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data string) error {
 	if requestContextDone(c) {
-		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
+		// Keep protocol parsing and usage accumulation alive after downstream
+		// cancellation; the scanner owns the bounded drain lifetime.
+		return nil
 	}
 
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s", data)})
-	return FlushWriter(c)
+	err := FlushWriter(c)
+	if err != nil && requestContextDone(c) {
+		return nil
+	}
+	return err
 }
 
 func StringData(c *gin.Context, str string) error {
@@ -100,11 +106,17 @@ func StringData(c *gin.Context, str string) error {
 	}
 
 	if requestContextDone(c) {
-		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
+		// A disconnected client must not turn a downstream write into a scanner
+		// stop while the upstream stream is being drained.
+		return nil
 	}
 
 	c.Render(-1, common.CustomEvent{Data: "data: " + str})
-	return FlushWriter(c)
+	err := FlushWriter(c)
+	if err != nil && requestContextDone(c) {
+		return nil
+	}
+	return err
 }
 
 func PingData(c *gin.Context) error {
