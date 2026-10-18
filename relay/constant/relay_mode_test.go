@@ -13,6 +13,8 @@ func TestPath2RelayMode(t *testing.T) {
 	}{
 		{path: "/v1/alpha/search", want: RelayModeAlphaSearch},
 		{path: "/v1/alpha/search?foo=1", want: RelayModeAlphaSearch},
+		{path: "/v1/tools/search", want: RelayModeToolsSearch},
+		{path: "/v1/tools/fetch", want: RelayModeToolsFetch},
 		{path: "/pg/images/generations", want: RelayModeImagesGenerations},
 		{path: "/pg/images/edits", want: RelayModeImagesEdits},
 	}

@@ -295,10 +295,9 @@ func TestRealtimePreChargesOnlySettleRemainingDelta(t *testing.T) {
 	const userID, tokenID = 986, 986
 	seedUser(t, userID, 10000)
 	seedToken(t, tokenID, userID, "realtime-group-key", 10000)
-	zero := float64(0)
 	info := &relaycommon.RelayInfo{RequestId: "p32-realtime-986", UserId: userID, TokenId: tokenID,
 		TokenKey: "realtime-group-key", UserQuota: 10000, OriginModelName: "p32-realtime",
-		UsingGroup: "default", UserSetting: dto.UserSetting{QuotaWarningThreshold: &zero}}
+		UsingGroup: "default", UserSetting: dto.UserSetting{QuotaWarningEnabled: common.GetPointer(false)}}
 	usage := &dto.RealtimeUsage{TotalTokens: 10, InputTokens: 10,
 		InputTokenDetails: dto.InputTokenDetails{TextTokens: 10}}
 	ctx := newBillingTestContext(0)

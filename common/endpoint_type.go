@@ -4,10 +4,16 @@ import "github.com/QuantumNous/new-api/constant"
 
 // GetEndpointTypesByChannelType returns the endpoint types supported by a channel-model pair.
 func GetEndpointTypesByChannelType(channelType int, modelName string, modelMappings ...string) []constant.EndpointType {
+	// DeepSeek tool routing names serve only their corresponding endpoint.
+	switch modelName {
+	case constant.DeepSeekSearchModel:
+		return []constant.EndpointType{constant.EndpointTypeDeepSeekToolsSearch}
+	case constant.DeepSeekFetchModel:
+		return []constant.EndpointType{constant.EndpointTypeDeepSeekToolsFetch}
+	}
 	if IsChannelImageGenerationModel(channelType, modelName, modelMappings...) {
 		return []constant.EndpointType{constant.EndpointTypeImageGeneration}
 	}
-
 	var endpointTypes []constant.EndpointType
 	switch channelType {
 	case constant.ChannelTypeJina:

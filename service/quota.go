@@ -38,23 +38,6 @@ type QuotaInfo struct {
 	GroupRatio    float64
 }
 
-// userQuotaWarningThreshold keeps the upstream per-user nullable setting
-// semantics while preserving the local wallet's int64 domain. nil inherits
-// the system threshold; an explicit zero disables notifications.
-func userQuotaWarningThreshold(setting dto.UserSetting) (int64, bool) {
-	threshold := int64(common.QuotaRemindThreshold)
-	if configured := setting.QuotaWarningThreshold; configured != nil {
-		if math.IsNaN(*configured) || *configured <= 0 {
-			return 0, false
-		}
-		if math.IsInf(*configured, 1) || *configured >= float64(int64(common.MaxWalletQuota)) {
-			return int64(common.MaxWalletQuota), true
-		}
-		threshold = int64(*configured)
-	}
-	return threshold, threshold > 0
-}
-
 func hasCustomModelRatio(modelName string, currentRatio float64) bool {
 	defaultRatio, exists := ratio_setting.GetDefaultModelRatioMap()[modelName]
 	if !exists {
@@ -514,25 +497,18 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int) {
 	gopool.Go(func() {
 		userSetting := relayInfo.UserSetting
-		threshold, enabled := userQuotaWarningThreshold(userSetting)
-		if !enabled {
+		// UserQuota is the balance before this request; quota plus
+		// preConsumedQuota is what the request finally cost.
+		balanceAfter := relayInfo.UserQuota - int64(quota+preConsumedQuota)
+		if !quotaReminderDue(userSetting, relayInfo.UserQuota, balanceAfter) {
 			return
 		}
-
-		//noMoreQuota := userCache.Quota-(quota+preConsumedQuota) <= 0
-		quotaTooLow := false
-		consumeQuota := quota + preConsumedQuota
-		if relayInfo.UserQuota-int64(consumeQuota) < threshold {
-			quotaTooLow = true
-		}
-		if quotaTooLow {
-			lang := userSetting.Language
-			prompt := i18n.Translate(lang, i18n.MsgNotifyQuotaLowTitle)
-			content, values := quotaNotifyContent(lang, userSetting.NotifyType, prompt, logger.FormatQuota64(relayInfo.UserQuota))
-			err := NotifyUser(relayInfo.UserId, relayInfo.UserEmail, relayInfo.UserSetting, dto.NewNotify(dto.NotifyTypeQuotaExceed, prompt, content, values))
-			if err != nil {
-				common.SysError(common.LogText("failed to send quota notify to user %d: %s", relayInfo.UserId, err.Error()))
-			}
+		lang := userSetting.Language
+		prompt := i18n.Translate(lang, i18n.MsgNotifyQuotaLowTitle)
+		content, values := quotaNotifyContent(lang, userSetting.NotifyType, prompt, logger.FormatQuota64(balanceAfter))
+		err := NotifyUser(relayInfo.UserId, relayInfo.UserEmail, relayInfo.UserSetting, dto.NewNotify(dto.NotifyTypeQuotaExceed, prompt, content, values))
+		if err != nil {
+			common.SysError(common.LogText("failed to send quota notify to user %d: %s", relayInfo.UserId, err.Error()))
 		}
 	})
 }
@@ -547,14 +523,10 @@ func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 		}
 
 		userSetting := relayInfo.UserSetting
-		threshold, enabled := userQuotaWarningThreshold(userSetting)
-		if !enabled {
-			return
-		}
-
+		usedBefore := relayInfo.SubscriptionAmountUsedAfterPreConsume - relayInfo.SubscriptionPreConsumed
 		usedAfter := relayInfo.SubscriptionAmountUsedAfterPreConsume + relayInfo.SubscriptionPostDelta
 		remaining := relayInfo.SubscriptionAmountTotal - usedAfter
-		if remaining >= threshold {
+		if !quotaReminderDue(userSetting, relayInfo.SubscriptionAmountTotal-usedBefore, remaining) {
 			return
 		}
 
@@ -565,6 +537,26 @@ func checkAndSendSubscriptionQuotaNotify(relayInfo *relaycommon.RelayInfo) {
 			common.SysError(common.LogText("failed to send subscription quota notify to user %d: %s", relayInfo.UserId, err.Error()))
 		}
 	})
+}
+
+// quotaReminderDue reports whether a charge that moved a balance (wallet or
+// subscription) from before to after earns a low-balance reminder. The site
+// and the user must both have reminders on, and the charge must cross the
+// user's threshold, or the site default when the user set none. A balance
+// already below the threshold earns nothing more until a top-up lifts it back
+// above, so a user gets one reminder per drop.
+func quotaReminderDue(userSetting dto.UserSetting, before int64, after int64) bool {
+	if !common.QuotaRemindEnabled {
+		return false
+	}
+	if userSetting.QuotaWarningEnabled != nil && !*userSetting.QuotaWarningEnabled {
+		return false
+	}
+	threshold := float64(common.QuotaRemindThreshold)
+	if userSetting.QuotaWarningThreshold != 0 {
+		threshold = userSetting.QuotaWarningThreshold
+	}
+	return float64(before) >= threshold && float64(after) < threshold
 }
 
 // quotaNotifyContent renders a low-quota notice in the user's saved language.

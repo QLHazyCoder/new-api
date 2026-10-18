@@ -186,6 +186,7 @@ export interface SystemStatus {
   custom_oauth_providers?: CustomOAuthProviderInfo[]
   log_export_enabled?: boolean
   log_max_range_days?: number
+  quota_remind_enabled?: boolean
   [key: string]: unknown
 }
 
