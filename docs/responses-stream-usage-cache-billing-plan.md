@@ -1,7 +1,7 @@
-# Responses 流断连与缓存计费改造计划
+# Responses 流断连与异常终态计费改造计划
 
-> 状态：问题 1 已按 PR #7178 drain 方向完成本地实现和代码验证；加入最终状态审计、共享回调无写断连处理及终态优先检查。问题 2 保留运行态证据定位，未做猜测性字段补丁；未改线上服务或价格配置。
-> 编制日期：2026-10-17。改造前基线为当前 `main` 的 `d90827ab6`；报告中的部署版本为 `5d48973b0`（2026-10-14）。部署镜像修订、实际渠道路由和上游 SSE 尚未现场复核。其他 checkout 不是本方案的实施基线。
+> 当前状态（2026-10-20）：问题 1 的共享 drain 改造已在此前提交完成；本轮已完成问题 2 的明确失败估算修复。生产改动集中在 `service/responses_usage.go`；全量测试、定向 race、vet、构建、三数据库账务与 UTF-8 检查均已通过，尚未部署。具体方案及实施记录见本文末尾“2026-10-20：明确失败后的估算计费修复设计”。
+> 历史基线：2026-10-17 的 drain 方案以 `d90827ab6` 为改造前基线，当时报告部署版本为 `5d48973b0`。本轮源码分析基线为 `0a758e1d7`，运行态核查与早期结论的更正以末尾新增章节为准；下方早期验证记录保留原日期和范围，不代表本次设计已实现或测试通过。
 
 ## 项目整体分析
 
@@ -172,6 +172,165 @@
 
 ## 最终审查结论
 
-**当前结论：问题 1 已完成本地代码改造，待回归和线上镜像验证。** 所有共享 `StreamScannerHandler` 流式路径现在使用 `CLIENT_GONE_DRAIN_TIMEOUT`（默认 60 秒，0 立即关闭），无渠道/端点白名单、无并发上限、无硬编码最大值。成功读到终态时 usage 会在同一 handler 返回并进入既有结算链路；`drain_result` 只说明传输最终如何结束，不代表 usage 一定权威。部署后仍需核对 `end_reason`、`response_status`、`drain_result`、`usage_billing_path` 与实际消费日志。
+**2026-10-17 的审查结论：问题 1 已完成本地代码改造。** 所有共享 `StreamScannerHandler` 流式路径使用 `CLIENT_GONE_DRAIN_TIMEOUT`（默认 60 秒，0 立即关闭），无渠道/端点白名单、无并发上限、无硬编码最大值。成功读到终态时 usage 在同一 handler 返回并进入既有结算链路；`drain_result` 只说明传输最终如何结束，不代表 usage 一定权威。该结论及前面的命令结果属于此前 drain 实施阶段，本次不重复修改或验收 scanner。
 
-**问题 2 当前不宣布已修复或已定位。** 源码已有标准 `input_tokens_details.cached_tokens` DTO、Responses accumulator 复制和 `p/cr` 拆分逻辑；现有测试也覆盖标准字段。用户更新后需提供同一 request ID 的 new-api 日志、脱敏终态 SSE 或 sub2api 转发日志，再判断字段是在上游未发出、转换丢失还是账务快照/日志展示丢失。未拿到该证据前不改 sub2api 或全局计价表达式。
+**问题 2 的旧结论由下面的新设计取代。** 标准缓存字段解析和表达式拆分已存在；本轮确认需要优先修复的是明确失败流仍生成本地 token 估算。历史请求的跨站对应关系必须区分已核实 token/渠道对应与仅时间接近的候选，不能据早期对账推断每一条失败流都在上游成功出账。
+
+## 2026-10-20：明确失败后的估算计费修复设计
+
+### 项目整体分析与证据边界
+
+本节对应当前未处理的问题：上游明确返回失败且没有 usage，new-api 仍把输出片段估成非零 token，继而补入整段本地输入估算。`cache_tokens=0` 是这条本地估算分支缺少缓存事实的结果，不能据此断言缓存解析器缺失。此前查到的成功流已证明同类渠道可以正确记录缓存与输出。
+
+源码调用链已经完整核对：
+
+```text
+type 59 sub2api.Adaptor -> newapi.Adaptor -> openai.Adaptor
+  -> OaiResponsesStreamHandler -> ResponsesUsageAccumulator.Observe
+  -> ResponsesUsageAccumulator.Finish
+  -> ConsumeResponsesQuota -> PostTextConsumeQuota
+  -> effectiveBillingUsage -> BuildTieredTokenParams -> SettleBilling
+  -> BillingSession.Settle/settle -> 资金与令牌差额、消费日志
+
+Responses WebSocket 每轮请求也使用同一个 ResponsesUsageAccumulator。
+```
+
+资金处理沿用已有一次性结算，不需要另建退款路径。HTTP SSE 已发出失败终态时，handler 返回 `usage, nil` 是避免重复发送错误、重试已输出流的既有契约，不等于协议成功。日志失败状态来自 `StreamStatus`。
+
+当前缺陷及相邻边界：
+
+1. `ObserveResponsesOutcome()` 已识别 `response.failed`、`response.error`、`error` 和 `response.status=failed`，但只写 `StreamStatus`；没有 `StreamStatus` 的调用方无法通过它保留失败事实。
+2. `Finish()` 在判断失败之前，先对任何非空输出字符串调用 `tokenkit.Count()`。一个空格和一小段真实文本都可能得到 1；`completion_tokens=1` 本身不能用来判断失败或免单。
+3. `billsPrompt := completion != 0 || (started && !failed)` 的第一个条件绕过失败判断。估算输出只要为正，即使明确失败，也补入完整预估输入。
+4. `CloneBillingUsageWithEstimatedCompletion()` 还可能把真实 usage 中的零输出补成估算值。失败分支必须在它之前结束，而非只改 prompt 条件。
+5. `ApplyResponsesUsage()` 使用 `MergeUsageNonZero()`；其语义是累计非零上游快照，零值不覆盖更早的正值。共享 `BillingUsage` 构造和 canonical 层也故意拒绝全零 sidecar。不能为一个失败流补丁全局改变这些约定。
+6. `usage_billing_path` 位于 `other.admin_info`。没有 sidecar 且没有设置本地估算 context 标记时，它会显示 `upstream`；因此这个值目前不是“已获得真实 usage”的充分证据。
+7. 上次用来对照的若干 Seoyh token 数，在本地对应其他成功请求，不能继续作为该失败请求真实出账的证明。跨服务缺少共同 request ID 时，同秒、模型和 key 的唯一候选只记作关联证据，不升级为严格同一请求证明。
+
+### 官方 issue / PR 核对
+
+截至本轮查询，GitHub 元数据、diff 和当前官方 `main` 的相关文件提交历史已核对：
+
+| 来源 | 状态 | 与本次设计的关系 |
+| --- | --- | --- |
+| [PR #7440](https://github.com/QuantumNous/new-api/pull/7440)，提交 `c00de89f8812866d56dec230949e97c6b9cd6c55` | 2026-09-18 关闭，`mergedAt=null`；无解释关闭原因的人类评论 | 直接描述本问题，提出明确失败后不再估算输入/输出，保留已累计的 provider usage，包括零值；不是已发布的官方修复 |
+| [PR #7427](https://github.com/QuantumNous/new-api/pull/7427)，合并提交 `55a6cd2a44eaf189bbd565dd2cdfa591d19b06d6` | 2026-09-18 已合并，本地已经包含 | 是当前截断流估算路径的来源；保留普通断连、incomplete 等没有明确失败时的既有估算 |
+| [PR #7419](https://github.com/QuantumNous/new-api/pull/7419) | 仍开放，未合并 | 描述 Responses 本地估算被标成 upstream 的可观测性缺口；可独立参考，不整体引入其 scanner/WebSocket/前端重写 |
+| [Issue #6594](https://github.com/QuantumNous/new-api/issues/6594) | 仍开放 | 讨论失败终态、EOF 与状态分类；维护者说明流已输出后的重试需由客户端执行，不能据此添加服务端透明重放 |
+| [PR #7242](https://github.com/QuantumNous/new-api/pull/7242) | 已关闭，未合并 | 强调 failed/incomplete/cancelled 终态也可能携带真实 usage；失败不能一律清空已收到的用量 |
+
+#7440 的作者不是维护者；关闭未合并不能解读为官方认可、官方已修复或已知被其他提交替代。本轮查到的官方 `service/responses_usage.go` 提交历史未出现该修复，当前本地代码也没有相应的失败估算短路。
+
+### 推荐修复方案
+
+采用 #7440 的明确失败规则，取代之前“仅过滤空白、真实部分文本仍估算”的初步建议。是否推算费用由明确失败事实决定，不引入“文本够不够有意义”的内容判断：
+
+| 请求事实 | 本次 token 处理 | 对当前场景的影响 |
+| --- | --- | --- |
+| 明确失败，没有 usage，输出为空、空格、文字、推理或函数参数 | 返回已累计的上游 token；没有累计值即 0/0，不新增估算 | 不再由一个空格触发整段输入收费；有部分真实文本也适用同一规则 |
+| 明确失败，usage 全零且此前没有正值上游快照 | 保留 0/0，跳过估算 | 不把明确零输出或零输入改成估算值 |
+| 明确失败，usage 仅输入或仅输出为正 | 只保留已报告部分，不估算另一侧 | input=20/output=0 保持 20/0；input=0/output=5 保持 0/5 |
+| 明确失败，完整 usage 含缓存 | 保留其输入、输出、缓存与原有 BillingUsage | 按已有价格与自动缓存拆分结算 |
+| 明确失败前已经累计正值上游 usage，末次 usage 缺失或为零 | 保留现有累计非零快照，不新增估算 | 延续共享 merge 契约，不用晚到的缺项抹除已报告用量 |
+| 普通 client gone、EOF、timeout，没有明确失败事件 | 沿用既有 drain 和估算规则 | 不将已修复的问题 1 改回提前取消或全额免单 |
+| completed/incomplete/cancelled，没有明确失败事件 | 本次维持已有规则 | 成功全零 usage 与缺字段区分属于后续独立事项，不能宣称本补丁一起解决 |
+| 请求失败，但已完成图片或已发生独立计价工具调用 | token 适用上面的失败规则，工具/图片计数按既有规则处理 | 零 token 不等于工具费用为零 |
+
+上表的零费用结论仅适用于本次核查的纯 token 定价且无独立工具费用的请求。`fixed()`/旧按次价格属于独立合同，尤其 `PostTextConsumeQuota()` 可对零 token 计算按次费用；本补丁不把所有定价的失败请求一律免单，也不更改表达式出错时保留预扣的既有约定。
+
+具体实现顺序：
+
+1. 在 `ResponsesUsageAccumulator` 增加单请求 `failed bool`。复用现有事件分类，`Observe` 每次以 OR 累计这个事实，不依赖 `StreamStatus` 是否已初始化；不使用 HTTP 状态、completion 是否为 1、渠道 type 或客户端类型作判定。
+2. 将现有失败判定提取成有稳定协议语义的内部函数/返回值，`ObserveResponsesOutcome` 的既有对外接口保留；日志与计费必须使用同一判定，避免两套条件漂移。
+3. `Observe` 继续解析 usage、工具和图片；不能在第一次看到失败时停止 scanner 或直接退出整个 handler。对识别为失败且 `event.Response.Usage != nil` 的事件，应确保 usage 进入累计：现有 switch 没有单独涵盖的 `response.error`/`error` 携带 response.usage、或仅 `status=failed` 的形态也要回归，不能判失败却漏掉其中的真实 usage。不猜测支持未核实的平铺 usage 别名。
+4. `Finish()` 先执行原有图片/工具提交，再在 token 估算之前检查 `failed`：失败时返回已累计 usage，跳过 `tokenkit.Count`、本地 prompt 回填和 `CloneBillingUsageWithEstimatedCompletion`。保持重复调用 `Finish` 的幂等性。
+5. HTTP Responses handler 保持失败帧单次透传和 `usage, nil` 返回契约，不追加 JSON 错误、不补成功终态、不触发透明重试。消费日志继续有 `response_status=failed`，`eof` 等传输原因独立保留。
+6. 对当前纯 token 表达式验证：零 usage 得到 quota=0，经现有 `SettleBilling(0)` 结算与预扣相减并返还；不另调用一次 `Refund()`。已有真实 usage 则照常计价，不能清零后再退款。价格、`cr` 自动拆分和资金事务代码保持原实现。
+
+实现示意（展示执行顺序，不是可直接替换的补丁）：
+
+```go
+// Observe: derive explicitFailure using the shared protocol classifier.
+a.failed = a.failed || explicitFailure
+// Continue accumulating provider usage, completed images and tool facts.
+
+// Finish: retain the existing finished guard and image/tool commit first.
+if a.failed {
+    return a.usage
+}
+// The existing missing-token estimation follows only for non-failed streams.
+```
+
+### 文件结构与覆盖范围
+
+| 文件 | 计划动作/职责 |
+| --- | --- |
+| `service/responses_usage.go` | 唯一改动的生产文件：累计明确失败事实，收齐失败事件已有 usage，在 Finish 跳过 token 推算 |
+| `service/responses_usage_test.go` | 在已有文件补表格回归；修改“failed/input-only usage 应补估输出”的旧断言 |
+| `relay/channel/openai/relay_responses_billing_test.go` | 在已有 HTTP SSE fixture 验证真实协议事件、失败帧单次透传、数值与 BillingUsage 保留 |
+| `relay/responses_websocket.go`、`relay/responses_websocket_test.go` | 已共用 accumulator；核对每轮重建状态和控制帧隔离，优先运行已有测试，不改变 WebSocket 断连生命周期 |
+| `controller/responses_websocket_test.go` | 更新已有 HTTP/WebSocket 端到端失败计费断言，补空白与显式零场景；独立初始化 i18n，保留连接复用、后续成功请求与限流回归 |
+| `service/text_quota.go`、`service/tiered_settle.go`、`service/text_quota_test.go` | 审查零 token 如何结算/保留工具费/固定价；复用已有计费 fixture，必要时在原测试文件追加少量端到端断言，不重构结算层 |
+| `relay/helper/stream_scanner.go`、`relay/common/stream_status.go` | 已完成的 drain 与协议分类能力，本次无实现调整 |
+| `relaykit/dto/usage_merge.go`、`relaykit/dto/billing_usage.go` | 维持已有累计/sidecar 规则，本次不全局改变显式零合并语义 |
+| `docs/responses-stream-usage-cache-billing-plan.md` | 保存最新设计、实施清单、复现证据与实际验证状态 |
+
+直接覆盖 type 59 原生 Responses 与其他共用原生 Responses handler 的渠道，以及使用同一 accumulator 的 Responses WebSocket 每轮 token 结算。Chat↔Responses 转换使用独立的 `chat_via_responses.go`/`responses_via_chat.go`，目前也有部分输出估算分支，但不因修改 accumulator 自动获得修复；若要统一它们的失败计费政策，应单独扩展范围和对应协议回归。Claude/Gemini 原生协议、自定义 SSE 同样不能宣称已经覆盖。
+
+### 开发清单与验收
+
+| 阶段 | 任务 | 状态 | 验收标准 |
+| --- | --- | --- | --- |
+| F0 | 阅读 AGENTS/billing/表达式规范；核对失败分类、sidecar、结算、预扣退款与上游 PR diff | 已完成（源码审查） | 有完整调用链，PR 的合并状态真实可查 |
+| F1 | 实现单请求失败事实及 Finish 估算短路，补齐有 response.usage 的失败形态 | 已完成 | 明确失败时不生成新 token 估算；有 StreamStatus 和无 StreamStatus 的用例结果一致 |
+| F2 | 扩展已有 accumulator/HTTP SSE 回归 | 已完成 | 缺失、null、全零、部分、完整 usage；空白、文字、reasoning、工具参数均覆盖；失败帧只发一次 |
+| F3 | 核对现有账务、WebSocket、drain、工具/图像计费回归 | 已通过 | 三种真实数据库覆盖预扣差额、零费用、真实缓存用量、工具费和固定价；service/OpenAI/relay 包及 controller 的 HTTP/WebSocket 入口用例已通过 |
+| F4 | 完整检查、更新文档、选择性提交 | 已完成，随本提交交付 | 全量测试、定向 race、vet、构建、diff/UTF-8 均通过，实际命令见下表；生产部署尚未执行 |
+
+关键回归向量：
+
+- `created -> delta(" ") -> failed(no usage)`：预估输入为 80,505 时返回 0/0。
+- `created -> delta("hello") -> failed(no usage)`：仍返回 0/0，防止修复退化为只 trim 空格。
+- failed 明确 `usage={input_tokens:0,output_tokens:0}`：0/0；input=20/output=0 不补输出，input=0/output=5 不补输入。
+- failed usage 含 `input_tokens_details.cached_tokens` 与正值 BillingUsage：计费层得到原缓存和数值，Estimated 不会被本地补算置真。
+- `response.failed`、`response.error`、平铺 `error`、`response.done` 携带 `status=failed`；有 response.usage 时均不遗漏。
+- 普通断连后 `completed` 带真实 usage：仍按 drain 收到的 usage；普通无终态且无明确失败：原估算保留。
+- failed 前已完成 image_generation/计价工具：计数保留且只提交一次；未完成图片不新计费。
+- 同一 accumulator 的二次 Finish 不重复提交；下一轮 WebSocket 创建新 accumulator，前一轮失败不污染下一轮。
+- 真实输出确实为 1 且上游 usage 正常的成功请求保持原计费，不能按 completion=1 批量退款或重标状态。
+
+验收执行 `go test ./service ./relay/channel/openai ./relay -count=1 -p=1`、相关用例定向 `go test -race`、`go test ./... -count=1 -p=1`、`go vet ./...`、`go build ./...`、`git diff --check` 及文档 UTF-8 检查，实际进展见下方实施记录。测试扩展集中到已有适合文件；若实际需要改事务/SQL/DB 配置，必须追加真实 SQLite/MySQL/PostgreSQL 矩阵，不能以 mock 代替。
+
+### 阶段自检与最终设计结论
+
+本轮已确认：失败分类已存在，缺口在估算准入；只改 prompt 条件或过滤空白不足；只在 handler 抛错误可能造成重复错误/重试；直接返回 nil usage 会触发结算层的输入回填，也不合适。应该保留非 nil 的已累计 usage，经原结算通道处理。
+
+本轮未加入新数据库字段、定价配置、渠道白名单、估算阈值或上游重试。#7440 需要按当前 `Observe(event, raw)`、tokenkit 和工具/图片去重接口手工适配，不直接套用旧 diff。
+
+需要单列的后续事项：
+
+1. 成功/incomplete/cancelled 的显式零 usage，以及终态零是否应覆盖更早正值快照，需要字段存在性与快照语义设计；本次只停止明确失败后的新估算，不重写共享 DTO 的零值语义。
+2. 原生 Responses 缺 usage 的普通估算当前可能被 `usage_billing_path` 标成 upstream。可参考 #7419 单独补准确来源标记；不能将它的多文件传输改造整体并入本次修复，也不能只靠当前该字段判定是否有权威 usage。
+3. 自建 sub2api 的失败终态脱敏会删除 `response.usage`，而其内部可能已解析该字段；即便 new-api 不再估算，也无法恢复被删数据。若同一请求已证明上游报告了 usage，应在 sub2api 失败终态中保留经过校验的数值 usage 明细，不恢复 prompt/output 内容；当前已查失败终态原本就无 usage 的样本不能靠这项改动凭空恢复数据。
+4. 不估算明确失败流，可能少收失败前已有部分生成而上游没有报告 usage 的成本。这是推荐方案的实际取舍；可靠计费应由上游返回 usage 支持，不用文本是否非空替代出账证据。
+5. 历史 completion=1 包含多种原因，不批量重算/退款；如需追溯账务，另按请求证据制定范围。
+
+### 本轮实施与自检记录
+
+| 检查 | 当前结果 | 证据/范围 |
+| --- | --- | --- |
+| 修改前复现 | 已复现，预期失败 | `GOMAXPROCS=2 go test ./service -run 'TestResponsesUsageAccumulatorExplicitFailureDoesNotEstimate/failed_without_usage/with_stream_status' -count=1 -p=1`：期望 0/0，旧代码实际 80505/1 |
+| 核心修复 | 已实现 | `failed` 独立于 StreamStatus；在 token 推算前返回上游 usage；error/status=failed 中已有 response.usage 也进入累计 |
+| 工具/图像审查 | 已通过 | 裸 `error` 可以先于 `response.failed`；保留原有图像终态提交时机，避免提前提交空计数后遗漏失败终态内已完成图片；新增回归覆盖该序列及二次 Finish |
+| 定向 usage/HTTP/账务回归 | 已通过 | 现有测试文件补充 34 个 failure/status 向量、9 个 HTTP SSE 场景及 7 个实际账务场景，另有工具/图像终态序列、已有正值上游快照不被缺失/全零终态抹除的回归 |
+| `GOMAXPROCS=2 go test ./service ./relay/channel/openai ./relay -count=1 -p=1` | 已通过 | service、OpenAI relay、Responses WebSocket 所在 relay 包 |
+| `GOMAXPROCS=2 go test ./controller -run '^TestResponsesStreamOutcomesPreserveAccounting$' -count=1 -p=1` | 已通过 | 20 个 HTTP/WebSocket 入口场景；失败后同连接的下一次成功请求仍结算，随后按成功请求限流 |
+| `GOMAXPROCS=2 go test ./service -run '^TestFixedPriceBillingDatabaseMatrix$' -count=1 -p=1 -v`，配置独立测试 DSN | 已通过 | SQLite 3.50.4、MySQL 8.2.0、PostgreSQL 18.4；临时库 `newapi_failed_usage_cbbccf31ec97` 分别在 MySQL/PostgreSQL 新建，测试完成后均已删除，未连接业务库跑测试 |
+| 首轮全量检查的失败处理 | 已定位并修正测试合同 | 原 controller `failed-estimated-output` 用例明确期望失败流仍按估算输出收费；按批准方案更新为零，并保留所有后续请求/资金/限流断言。单独运行另发现该用例依赖其他测试先初始化 i18n，已显式初始化，未改 controller 生产逻辑 |
+| `GOMAXPROCS=2 go test ./... -count=1 -p=1`（使用 `-json` 收集结果） | 已通过 | 48 个有测试的包通过，无失败；包含更新后的 controller 端到端用例 |
+| `GOMAXPROCS=2 go test -race ./service ./relay/channel/openai ./relay/helper ./controller -run 'TestResponsesUsageAccumulator\|TestObserveResponsesOutcome\|TestApplyResponsesUsage\|TestOaiResponsesStreamHandlerExplicitFailureUsage\|TestOaiResponsesStreamHandlerDrainsTerminalUsageAfterClientGone\|TestStreamScannerHandler_(ClientCancel\|Drain)\|TestStreamDataWritersIgnoreClientGone\|TestResponsesStreamOutcomesPreserveAccounting' -count=1 -p=1` | 已通过 | 四个包全部通过，无 race 报告；涵盖 usage、原有 drain 与 HTTP/WebSocket 入口 |
+| `GOMAXPROCS=2 go vet -p=1 ./...`、`GOMAXPROCS=2 go build -p=1 ./...` | 已通过 | 根模块静态检查和构建 |
+| relaykit 内 `GOWORK=off go build ./...`、`GOWORK=off go test ./... -count=1 -p=1` | 已通过 | 独立协议模块未作修改，独立构建和测试通过 |
+| `git diff --check`、所有六个修改文件严格 UTF-8 解码及 U+FFFD 检查 | 已通过 | 无空白错误、无非法 UTF-8、无替换字符 |
+
+**最终代码审查结论：明确失败后停止新增 token 估算，保留已报告 usage、缓存及已完成图片/工具计数；不修改失败帧透传、重试、drain 和价格合同。修改前 80505/1 的回归样本在本方案下为 0/0，三数据库已验证零 token 结算返还预扣且重复结算不重复扣费。完整本地验收通过，尚未部署；线上仅在运行该提交后的新请求生效，历史日志和账务不自动改写。**

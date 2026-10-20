@@ -100,6 +100,7 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 	const flat = `tier("request", fixed(0.01))`
 	const startingQuota = 2_000_000
 	const imageExpression = `tier("standard", p * 5 + cr * 1.25 + img * 8 + img_cr * 2 + c * 30)`
+	const responsesExpression = `tier("standard", p * 2 + cr * 0.2 + c * 12)`
 	imageUsage := &dto.Usage{PromptTokens: 1000, CompletionTokens: 100, TotalTokens: 1100,
 		PromptTokensDetails: dto.InputTokenDetails{CachedTokens: 300, ImageTokens: 600, CachedTokensDetails: &dto.CachedTokenDetails{ImageTokens: common.GetPointer(200)}}}
 	operation_setting.SetToolPriceForTest("fixed_billing_tool", 4)
@@ -110,6 +111,7 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 		usage                                     *dto.Usage
 		audio, stream, refund, insufficient, tool bool
 		realtime, reserveInsufficient             bool
+		responsesFailure                          bool
 		wallet, outboundImages                    int
 		groupRatio                                float64
 		want                                      int
@@ -128,6 +130,13 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 		{name: "explicit zero remains free", expression: `tier("free", fixed(0))`, usage: &dto.Usage{PromptTokens: 100, TotalTokens: 100}, unit: billingexpr.BillingUnitRequest},
 		{name: "multipliers and separate tool surcharge", expression: flat + ` * (param("fast") == true ? 2 : 1)`, groupRatio: 1.5, tool: true, want: 18000, unit: billingexpr.BillingUnitRequest},
 		{name: "failed request refunds exactly once", expression: flat, refund: true},
+		{name: "failed Responses without usage refunds estimated input", expression: responsesExpression, estimate: 80505, stream: true, responsesFailure: true, unit: billingexpr.BillingUnitToken},
+		{name: "failed Responses with zero usage refunds estimated input", expression: responsesExpression, estimate: 80505, usage: &dto.Usage{}, stream: true, responsesFailure: true, unit: billingexpr.BillingUnitToken},
+		{name: "failed Responses preserves input and cache without output estimate", expression: responsesExpression, estimate: 80505, usage: &dto.Usage{InputTokens: 20, InputTokensDetails: &dto.InputTokenDetails{CachedTokens: 4}}, stream: true, responsesFailure: true, want: 16, unit: billingexpr.BillingUnitToken},
+		{name: "failed Responses preserves output without input estimate", expression: responsesExpression, estimate: 80505, usage: &dto.Usage{OutputTokens: 5}, stream: true, responsesFailure: true, want: 30, unit: billingexpr.BillingUnitToken},
+		{name: "failed Responses preserves reported usage and cache pricing", expression: responsesExpression, estimate: 80505, usage: &dto.Usage{InputTokens: 20, OutputTokens: 5, InputTokensDetails: &dto.InputTokenDetails{CachedTokens: 4}}, stream: true, responsesFailure: true, want: 46, unit: billingexpr.BillingUnitToken},
+		{name: "failed Responses retains independent tool surcharge", expression: responsesExpression, estimate: 80505, stream: true, responsesFailure: true, tool: true, want: 2000, unit: billingexpr.BillingUnitToken},
+		{name: "failed Responses keeps existing fixed price contract", expression: flat, stream: true, responsesFailure: true, want: 5000, unit: billingexpr.BillingUnitRequest},
 		{name: "insufficient wallet never reserves tokens", expression: flat, insufficient: true},
 		{name: "image cache stream settles usage and refunds unused reservation", expression: imageExpression, estimate: 10000, usage: imageUsage, stream: true, want: 4113, unit: billingexpr.BillingUnitToken},
 		{name: "audio settlement records image cache billing inputs", expression: imageExpression, estimate: 10000, usage: imageUsage, audio: true, want: 4113, unit: billingexpr.BillingUnitToken},
@@ -227,6 +236,17 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 					if tc.tool {
 						info.ResponsesUsageInfo = &relaycommon.ResponsesUsageInfo{BuiltInTools: map[string]*relaycommon.BuildInToolInfo{"fixed_billing_tool": {CallCount: 1}}}
 					}
+					settlementUsage := tc.usage
+					if tc.responsesFailure {
+						info.StreamStatus = relaycommon.NewStreamStatus()
+						info.RelayFormat = types.RelayFormatOpenAIResponses
+						info.RelayMode = relayconstant.RelayModeResponses
+						ctx.Request.URL.Path = "/v1/responses"
+						accumulator := NewResponsesUsageAccumulator(info)
+						accumulator.Observe(&dto.ResponsesStreamResponse{Type: "response.output_text.delta", Delta: " "}, nil)
+						accumulator.Observe(&dto.ResponsesStreamResponse{Type: "response.failed", Response: &dto.OpenAIResponsesResponse{Usage: tc.usage}}, nil)
+						settlementUsage = accumulator.Finish()
+					}
 					if tc.realtime {
 						PostWssConsumeQuota(ctx, info, info.OriginModelName, &dto.RealtimeUsage{
 							InputTokens: tc.usage.PromptTokens, OutputTokens: tc.usage.CompletionTokens, TotalTokens: tc.usage.TotalTokens,
@@ -234,17 +254,30 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 					} else if tc.audio {
 						PostAudioConsumeQuota(ctx, info, tc.usage, nil)
 					} else {
-						PostTextConsumeQuota(ctx, info, tc.usage, nil)
+						PostTextConsumeQuota(ctx, info, settlementUsage, nil)
 					}
 					require.NoError(t, info.Billing.Settle(tc.want), "a repeated settlement must not charge again")
 					var log model.Log
 					require.NoError(t, logDB.Where("user_id = ?", user.Id).Take(&log).Error)
 					assert.Equal(t, tc.want, log.Quota)
 					assert.Equal(t, tc.stream, log.IsStream)
-					assert.NotContains(t, log.Content, "nothing was charged")
+					if tc.responsesFailure && tc.want == 0 {
+						assert.Contains(t, log.Content, "nothing was charged")
+					} else {
+						assert.NotContains(t, log.Content, "nothing was charged")
+					}
 					var other map[string]any
 					require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
 					assert.Equal(t, string(tc.unit), other["billing_unit"])
+					if tc.responsesFailure {
+						assert.Equal(t, settlementUsage.PromptTokens, log.PromptTokens)
+						assert.Equal(t, settlementUsage.CompletionTokens, log.CompletionTokens)
+						assert.Equal(t, float64(settlementUsage.PromptTokensDetails.CachedTokens), other["cache_tokens"])
+						status, ok := other["stream_status"].(map[string]any)
+						require.True(t, ok)
+						assert.Equal(t, "failed", status["response_status"])
+						assert.Equal(t, "error", status["status"])
+					}
 					if tc.requestedImages > 0 {
 						count := tc.actualImages
 						if count == 0 {
@@ -291,7 +324,11 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 			assert.EqualValues(t, tc.want, user.UsedQuota)
 			assert.EqualValues(t, tc.want, token.UsedQuota)
 			if !tc.refund && !tc.insufficient {
-				assert.Equal(t, 1, user.RequestCount)
+				if tc.responsesFailure && tc.want == 0 {
+					assert.Zero(t, user.RequestCount)
+				} else {
+					assert.Equal(t, 1, user.RequestCount)
+				}
 			}
 		})
 	}

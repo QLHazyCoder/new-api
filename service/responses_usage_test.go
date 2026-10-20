@@ -89,26 +89,156 @@ func TestResponsesUsageAccumulatorInterruptedTextFallback(t *testing.T) {
 				accumulator.Observe(&dto.ResponsesStreamResponse{Type: "response.failed", Response: &dto.OpenAIResponsesResponse{Usage: upstream}}, nil)
 			}
 			usage := accumulator.Finish()
-			assert.Equal(t, 1, usage.CompletionTokens)
+			wantCompletion := 1
 			if withUsage {
+				wantCompletion = 0
+				assert.Zero(t, usage.CompletionTokens)
 				assert.Equal(t, 20, usage.PromptTokens)
-				assert.Equal(t, 21, usage.TotalTokens)
+				assert.Equal(t, 20, usage.TotalTokens)
 				require.NotNil(t, usage.BillingUsage)
 				assert.Equal(t, dto.BillingUsageSourceOAIResponses, usage.BillingUsage.Source)
-				assert.True(t, usage.BillingUsage.Estimated)
+				assert.False(t, usage.BillingUsage.Estimated)
 				canonical, ok := usage.BillingUsage.CanonicalUsage()
 				require.True(t, ok)
 				assert.Equal(t, 4, canonical.PromptTokensDetails.CachedTokens)
-				assert.Equal(t, 1, canonical.CompletionTokens)
+				assert.Zero(t, canonical.CompletionTokens)
 			} else {
+				assert.Equal(t, 1, usage.CompletionTokens)
 				assert.Equal(t, 100, usage.PromptTokens)
 				assert.Equal(t, 101, usage.TotalTokens)
 			}
 			accumulator.Observe(&dto.ResponsesStreamResponse{Type: "response.output_text.delta", Delta: " late output"}, nil)
-			assert.Equal(t, usage, accumulator.Finish())
-			assert.Equal(t, 1, usage.CompletionTokens)
+			assert.Same(t, usage, accumulator.Finish())
+			assert.Equal(t, wantCompletion, usage.CompletionTokens)
+			assert.Equal(t, usage.PromptTokens+usage.CompletionTokens, usage.TotalTokens)
 		})
 	}
+}
+
+func TestResponsesUsageAccumulatorExplicitFailureDoesNotEstimate(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		event          string
+		deltaType      string
+		delta          string
+		wantPrompt     int
+		wantCompletion int
+		wantCache      int
+	}{
+		{name: "failed without usage", event: `{"type":"response.failed","response":{"status":"failed"}}`, delta: " "},
+		{name: "failed after text", event: `{"type":"response.failed","response":{"status":"failed"}}`, delta: "hello"},
+		{name: "failed with null usage", event: `{"type":"response.failed","response":{"usage":null}}`, delta: "hello"},
+		{name: "failed with zero usage", event: `{"type":"response.failed","response":{"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`, delta: "hello"},
+		{name: "failed with input only", event: `{"type":"response.failed","response":{"usage":{"input_tokens":20,"output_tokens":0,"input_tokens_details":{"cached_tokens":4}}}}`, delta: "hello", wantPrompt: 20, wantCache: 4},
+		{name: "failed with output only", event: `{"type":"response.failed","response":{"usage":{"input_tokens":0,"output_tokens":5}}}`, delta: "hello", wantCompletion: 5},
+		{name: "failed with complete usage", event: `{"type":"response.failed","response":{"usage":{"input_tokens":20,"output_tokens":5,"input_tokens_details":{"cached_tokens":4}}}}`, delta: "hello", wantPrompt: 20, wantCompletion: 5, wantCache: 4},
+		{name: "flat error", event: `{"type":"error","code":"server_error"}`, delta: "hello"},
+		{name: "response error", event: `{"type":"response.error","code":"server_error"}`, delta: "hello"},
+		{name: "response error with usage", event: `{"type":"response.error","response":{"usage":{"input_tokens":20,"output_tokens":5,"input_tokens_details":{"cached_tokens":4}}}}`, delta: "hello", wantPrompt: 20, wantCompletion: 5, wantCache: 4},
+		{name: "flat error with response usage", event: `{"type":"error","response":{"usage":{"input_tokens":20,"output_tokens":5}}}`, delta: "hello", wantPrompt: 20, wantCompletion: 5},
+		{name: "done with failed status", event: `{"type":"response.done","response":{"status":"failed"}}`, delta: "hello"},
+		{name: "failed status with usage", event: `{"type":"response.in_progress","response":{"status":"failed","usage":{"input_tokens":20,"output_tokens":5}}}`, delta: "hello", wantPrompt: 20, wantCompletion: 5},
+		{name: "failed after reasoning", event: `{"type":"response.failed"}`, deltaType: "response.reasoning_text.delta", delta: "Inspect the request"},
+		{name: "failed after function arguments", event: `{"type":"response.failed"}`, deltaType: "response.function_call_arguments.delta", delta: `{"command":"ls"}`},
+		{name: "failed after refusal", event: `{"type":"response.failed"}`, deltaType: "response.refusal.delta", delta: "I cannot help with that request"},
+		{name: "failed with terminal output only", event: `{"type":"response.failed","response":{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}}`},
+	} {
+		for _, withStatus := range []bool{false, true} {
+			statusName := "without stream status"
+			if withStatus {
+				statusName = "with stream status"
+			}
+			t.Run(tc.name+"/"+statusName, func(t *testing.T) {
+				info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-4o"}}
+				info.SetEstimatePromptTokens(80505)
+				if withStatus {
+					info.StreamStatus = relaycommon.NewStreamStatus()
+				}
+				accumulator := NewResponsesUsageAccumulator(info)
+				accumulator.Observe(&dto.ResponsesStreamResponse{Type: "response.created"}, nil)
+				if tc.delta != "" {
+					deltaType := tc.deltaType
+					if deltaType == "" {
+						deltaType = "response.output_text.delta"
+					}
+					accumulator.Observe(&dto.ResponsesStreamResponse{Type: deltaType, Delta: tc.delta}, nil)
+				}
+				var event dto.ResponsesStreamResponse
+				require.NoError(t, common.UnmarshalJsonStr(tc.event, &event))
+				accumulator.Observe(&event, common.StringToByteSlice(tc.event))
+				usage := accumulator.Finish()
+				require.NotNil(t, usage)
+				assert.Equal(t, tc.wantPrompt, usage.PromptTokens)
+				assert.Equal(t, tc.wantCompletion, usage.CompletionTokens)
+				assert.Equal(t, tc.wantPrompt+tc.wantCompletion, usage.TotalTokens)
+				assert.Equal(t, tc.wantCache, usage.PromptTokensDetails.CachedTokens)
+				if withStatus {
+					assert.True(t, info.StreamStatus.ResponseFailed())
+				}
+				accumulator.Observe(&dto.ResponsesStreamResponse{Type: "response.output_text.delta", Delta: " late output"}, nil)
+				assert.Same(t, usage, accumulator.Finish())
+				assert.Equal(t, tc.wantPrompt+tc.wantCompletion, usage.TotalTokens)
+			})
+		}
+	}
+}
+
+func TestResponsesUsageAccumulatorFailedTerminalRetainsReportedSnapshot(t *testing.T) {
+	for _, finalUsage := range []*dto.Usage{nil, {}} {
+		name := "missing final usage"
+		if finalUsage != nil {
+			name = "zero final usage"
+		}
+		t.Run(name, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{StreamStatus: relaycommon.NewStreamStatus()}
+			info.SetEstimatePromptTokens(80505)
+			accumulator := NewResponsesUsageAccumulator(info)
+			reported := &dto.Usage{InputTokens: 20, OutputTokens: 5, InputTokensDetails: &dto.InputTokenDetails{CachedTokens: 4}}
+			reported.BillingUsage = dto.NewOpenAIResponsesBillingUsage(reported)
+			accumulator.Observe(&dto.ResponsesStreamResponse{Type: "response.error", Response: &dto.OpenAIResponsesResponse{Usage: reported}}, nil)
+			accumulator.Observe(&dto.ResponsesStreamResponse{Type: "response.failed", Response: &dto.OpenAIResponsesResponse{Usage: finalUsage}}, nil)
+			usage := accumulator.Finish()
+			assert.Equal(t, 20, usage.PromptTokens)
+			assert.Equal(t, 5, usage.CompletionTokens)
+			assert.Equal(t, 25, usage.TotalTokens)
+			assert.Equal(t, 4, usage.PromptTokensDetails.CachedTokens)
+			require.NotNil(t, usage.BillingUsage)
+			assert.Equal(t, reported.BillingUsage, usage.BillingUsage)
+			assert.False(t, usage.BillingUsage.Estimated)
+		})
+	}
+}
+
+func TestResponsesUsageAccumulatorErrorBeforeTerminalKeepsCompletedTools(t *testing.T) {
+	operation_setting.SetToolPriceForTest("failed_response_priced_fn", 5)
+	t.Cleanup(func() { operation_setting.DeleteToolPriceForTest("failed_response_priced_fn") })
+	info := &relaycommon.RelayInfo{StreamStatus: relaycommon.NewStreamStatus()}
+	info.SetEstimatePromptTokens(80505)
+	accumulator := NewResponsesUsageAccumulator(info)
+	accumulator.Observe(&dto.ResponsesStreamResponse{
+		Type: dto.ResponsesOutputTypeItemDone,
+		Item: &dto.ResponsesOutput{Type: dto.BuildInCallFunctionCall, Name: "failed_response_priced_fn"},
+	}, nil)
+	accumulator.Observe(&dto.ResponsesStreamResponse{Type: "error", Code: "server_error"}, nil)
+	terminal := &dto.ResponsesStreamResponse{
+		Type: "response.failed",
+		Response: &dto.OpenAIResponsesResponse{Output: []dto.ResponsesOutput{
+			{ID: "complete-image", Type: dto.ResponsesOutputTypeImageGenerationCall, Status: "completed", Result: "final-image"},
+			{ID: "partial-image", Type: dto.ResponsesOutputTypeImageGenerationCall, Status: "partial", Result: "partial-image"},
+		}},
+	}
+	accumulator.Observe(terminal, nil)
+	accumulator.Observe(terminal, nil)
+	usage := accumulator.Finish()
+	assert.Zero(t, usage.TotalTokens)
+	require.NotNil(t, info.ResponsesUsageInfo)
+	tools := info.ResponsesUsageInfo.BuiltInTools
+	require.Contains(t, tools, "failed_response_priced_fn")
+	require.Contains(t, tools, dto.BuildInToolImageGeneration)
+	assert.Equal(t, 1, tools["failed_response_priced_fn"].CallCount)
+	assert.Equal(t, 1, tools[dto.BuildInToolImageGeneration].CallCount)
+	assert.Same(t, usage, accumulator.Finish())
+	assert.Equal(t, 1, tools[dto.BuildInToolImageGeneration].CallCount)
 }
 
 func TestObserveResponsesOutcomeRecordsProtocolFacts(t *testing.T) {

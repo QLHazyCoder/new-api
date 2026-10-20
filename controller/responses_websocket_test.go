@@ -925,29 +925,35 @@ func TestResponsesWebSocketInitialUpstreamRejectionRefundsReservation(t *testing
 // TEST_RESPONSES_SQL_DSN / TEST_RESPONSES_LOG_SQL_DSN optionally run these
 // entry-point regressions against isolated real MySQL/PostgreSQL databases.
 func TestResponsesStreamOutcomesPreserveAccounting(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	for _, transport := range []string{"websocket", "http-sse"} {
 		for _, tc := range []struct {
 			name, expression, terminal string
 			// sseTerminal is the flat error envelope used by the Responses SSE
 			// protocol; the WebSocket protocol nests the error instead.
 			sseTerminal string
-			delta       bool
+			delta       string
 			failed      bool
 			ignored     bool
+			firstQuota  int
 		}{
-			{name: "failed-null-fixed", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"response.failed","response":{"id":"first","status":"failed","usage":null,"error":{"code":"server_error","message":"sensitive upstream detail"}}}`, failed: true},
-			{name: "failed-missing-fixed", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"response.failed","response":{"id":"first","status":"failed"}}`, failed: true},
-			{name: "failed-actual-usage", expression: `tier("input", p * 2)`, terminal: `{"type":"response.failed","response":{"id":"first","status":"failed","usage":{"input_tokens":1000,"output_tokens":10,"total_tokens":1010}}}`, failed: true},
-			{name: "failed-estimated-output", expression: `tier("output", c * 2000)`, terminal: `{"type":"response.failed","response":{"id":"first","status":"failed","usage":null}}`, delta: true, failed: true},
-			{name: "error-after-created", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"error","status":500,"error":{"type":"server_error","code":"server_error","message":"Internal server error"}}`, sseTerminal: `{"type":"error","code":"server_error","message":"Internal server error","param":null,"sequence_number":2}`, failed: true},
-			{name: "business-error-after-created", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"error","status":400,"error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Input too long"}}`, sseTerminal: `{"type":"error","code":"context_length_exceeded","message":"Input too long","param":null,"sequence_number":2}`, failed: true, ignored: true},
-			{name: "completed-at-output-limit", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"response.incomplete","response":{"id":"first","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":1000,"output_tokens":1,"total_tokens":1001}}}`},
-			{name: "completed-zero-fixed", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"response.completed","response":{"id":"first","status":"completed","usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`},
+			{name: "failed-null-fixed", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"response.failed","response":{"id":"first","status":"failed","usage":null,"error":{"code":"server_error","message":"sensitive upstream detail"}}}`, failed: true, firstQuota: 1000},
+			{name: "failed-missing-fixed", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"response.failed","response":{"id":"first","status":"failed"}}`, failed: true, firstQuota: 1000},
+			{name: "failed-actual-usage", expression: `tier("input", p * 2)`, terminal: `{"type":"response.failed","response":{"id":"first","status":"failed","usage":{"input_tokens":1000,"output_tokens":10,"total_tokens":1010}}}`, failed: true, firstQuota: 1000},
+			{name: "failed-output-without-usage", expression: `tier("output", c * 2000)`, terminal: `{"type":"response.failed","response":{"id":"first","status":"failed","usage":null}}`, delta: "hello", failed: true},
+			{name: "failed-whitespace-without-usage", expression: `tier("output", c * 2000)`, terminal: `{"type":"response.failed","response":{"id":"first","status":"failed"}}`, delta: " ", failed: true},
+			{name: "failed-output-with-zero-usage", expression: `tier("output", c * 2000)`, terminal: `{"type":"response.failed","response":{"id":"first","status":"failed","usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`, delta: "hello", failed: true},
+			{name: "error-after-created", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"error","status":500,"error":{"type":"server_error","code":"server_error","message":"Internal server error"}}`, sseTerminal: `{"type":"error","code":"server_error","message":"Internal server error","param":null,"sequence_number":2}`, failed: true, firstQuota: 1000},
+			{name: "business-error-after-created", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"error","status":400,"error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Input too long"}}`, sseTerminal: `{"type":"error","code":"context_length_exceeded","message":"Input too long","param":null,"sequence_number":2}`, failed: true, ignored: true, firstQuota: 1000},
+			{name: "completed-at-output-limit", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"response.incomplete","response":{"id":"first","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":1000,"output_tokens":1,"total_tokens":1001}}}`, firstQuota: 1000},
+			{name: "completed-zero-fixed", expression: `tier("request", fixed(0.002))`, terminal: `{"type":"response.completed","response":{"id":"first","status":"completed","usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`, firstQuota: 1000},
 		} {
 			t.Run(transport+"/"+tc.name, func(t *testing.T) {
 				events := []string{`{"type":"response.created","response":{"id":"first","status":"in_progress"}}`}
-				if tc.delta {
-					events = append(events, `{"type":"response.output_text.delta","delta":"hello"}`)
+				if tc.delta != "" {
+					delta, err := common.Marshal(dto.ResponsesStreamResponse{Type: "response.output_text.delta", Delta: tc.delta})
+					require.NoError(t, err)
+					events = append(events, string(delta))
 				}
 				terminal := tc.terminal
 				if transport == "http-sse" && tc.sseTerminal != "" {
@@ -1001,7 +1007,7 @@ func TestResponsesStreamOutcomesPreserveAccounting(t *testing.T) {
 						assert.JSONEq(t, expected, string(actual), "upstream frames must be delivered once and unchanged")
 					}
 				}
-				quotas := []int{1000}
+				quotas := []int{tc.firstQuota}
 				if tc.failed {
 					// The first terminal must complete settlement and middleware before
 					// admitting this immediately following request.
@@ -1025,6 +1031,10 @@ func TestResponsesStreamOutcomesPreserveAccounting(t *testing.T) {
 				if tc.failed {
 					assert.Equal(t, "error", stream["status"])
 					assert.Equal(t, "failed", stream["response_status"])
+					if tc.firstQuota == 0 {
+						assert.Zero(t, logs[0].PromptTokens)
+						assert.Zero(t, logs[0].CompletionTokens)
+					}
 				} else {
 					assert.Equal(t, "ok", stream["status"])
 					if tc.name == "completed-at-output-limit" {

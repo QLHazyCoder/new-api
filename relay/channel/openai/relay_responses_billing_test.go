@@ -256,6 +256,62 @@ func runResponsesImageBillingStream(t *testing.T, events ...string) (*relaycommo
 	return info, c
 }
 
+func TestOaiResponsesStreamHandlerExplicitFailureUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	for _, tc := range []struct {
+		name           string
+		event          string
+		delta          string
+		wantPrompt     int
+		wantCompletion int
+		wantCache      int
+		completed      bool
+	}{
+		{name: "whitespace before failed without usage", delta: " ", event: `{"type":"response.failed","response":{"status":"failed"}}`},
+		{name: "text before failed without usage", delta: "hello", event: `{"type":"response.failed","response":{"status":"failed"}}`},
+		{name: "failed with zero usage", delta: "hello", event: `{"type":"response.failed","response":{"status":"failed","usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`},
+		{name: "failed with input only", delta: "hello", event: `{"type":"response.failed","response":{"usage":{"input_tokens":20,"output_tokens":0,"input_tokens_details":{"cached_tokens":4}}}}`, wantPrompt: 20, wantCache: 4},
+		{name: "failed with real usage", delta: "hello", event: `{"type":"response.failed","response":{"usage":{"input_tokens":20,"output_tokens":5,"input_tokens_details":{"cached_tokens":4}}}}`, wantPrompt: 20, wantCompletion: 5, wantCache: 4},
+		{name: "flat error", delta: "hello", event: `{"type":"error","code":"server_error","message":"upstream stream failed"}`},
+		{name: "response error preserves usage", delta: "hello", event: `{"type":"response.error","response":{"usage":{"input_tokens":20,"output_tokens":5,"input_tokens_details":{"cached_tokens":4}}}}`, wantPrompt: 20, wantCompletion: 5, wantCache: 4},
+		{name: "failed response status", delta: "hello", event: `{"type":"response.done","response":{"status":"failed"}}`},
+		{name: "completed with one real output token", delta: "hello", event: `{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":20,"output_tokens":1,"input_tokens_details":{"cached_tokens":4}}}}`, wantPrompt: 20, wantCompletion: 1, wantCache: 4, completed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			delta, err := common.Marshal(dto.ResponsesStreamResponse{Type: "response.output_text.delta", Delta: tc.delta})
+			require.NoError(t, err)
+			body := "data: {\"type\":\"response.created\",\"response\":{\"status\":\"in_progress\"}}\n\ndata: " + string(delta) + "\n\ndata: " + tc.event + "\n\n"
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			info := &relaycommon.RelayInfo{
+				OriginModelName: "gpt-4o", DisablePing: true,
+				ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeSub2API, UpstreamModelName: "gpt-4o"},
+			}
+			info.SetEstimatePromptTokens(80505)
+			resp := &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{"Content-Type": {"text/event-stream"}}}
+			usage, apiErr := OaiResponsesStreamHandler(c, info, resp)
+			require.Nil(t, apiErr, "an already-forwarded failure must not trigger retry or a second error")
+			require.NotNil(t, usage)
+			assert.Equal(t, tc.wantPrompt, usage.PromptTokens)
+			assert.Equal(t, tc.wantCompletion, usage.CompletionTokens)
+			assert.Equal(t, tc.wantPrompt+tc.wantCompletion, usage.TotalTokens)
+			assert.Equal(t, tc.wantCache, usage.PromptTokensDetails.CachedTokens)
+			assert.Equal(t, !tc.completed, info.StreamStatus.ResponseFailed())
+			assert.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
+			assert.Equal(t, 1, strings.Count(w.Body.String(), tc.event))
+			assert.Contains(t, w.Body.String(), string(delta))
+			assert.NotContains(t, w.Body.String(), "[DONE]")
+			if !tc.completed {
+				assert.NotContains(t, w.Body.String(), "response.completed")
+			}
+		})
+	}
+}
+
 func TestOaiResponsesStreamHandlerDeduplicatesCompletedImageOutput(t *testing.T) {
 	item := `{"type":"image_generation_call","id":"img_1","call_id":"call_1","status":"completed","quality":"high","size":"1536x1024","result":"base64-a"}`
 	info, _ := runResponsesImageBillingStream(
