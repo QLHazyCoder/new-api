@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { canViewRankings } from '@/features/rankings/access'
 import { useStatus } from '@/hooks/use-status'
 import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
+import { resolveNavigationTarget } from '@/lib/navigation-target'
 import { useAuthStore } from '@/stores/auth-store'
 
 export type TopNavLink = {
@@ -95,7 +96,14 @@ export function useTopNavLinks(): TopNavLink[] {
   // Docs (supports external links)
   if (modules?.docs !== false) {
     if (docsLink) {
-      links.push({ title: t('Docs'), href: docsLink, external: true })
+      const origin =
+        typeof window === 'undefined'
+          ? 'http://localhost'
+          : window.location.origin
+      links.push({
+        title: t('Docs'),
+        ...resolveNavigationTarget(docsLink, origin),
+      })
     } else {
       links.push({ title: t('Docs'), href: '/docs' })
     }

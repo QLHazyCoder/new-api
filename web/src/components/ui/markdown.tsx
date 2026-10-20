@@ -31,6 +31,9 @@ interface MarkdownProps {
   breaks?: boolean
   children: string
   className?: string
+  /** Escape author-supplied HTML while keeping generated Markdown markup. */
+  allowHtml?: boolean
+  imageUrlFilter?: (url: string) => boolean
 }
 
 const markdownOptions = {
@@ -751,11 +754,22 @@ function addExternalLinkAttributes(html: string, baseUrl?: string): string {
 function renderMarkdown(
   markdown: string,
   breaks = false,
-  baseUrl?: string
+  baseUrl?: string,
+  allowHtml = true,
+  imageUrlFilter?: (url: string) => boolean
 ): string {
+  const renderer = Object.create(markdownRenderer) as Renderer
+  if (!allowHtml) renderer.html = (token) => escapeHtml(token.text)
+  if (imageUrlFilter) {
+    renderer.image = (token) => {
+      if (!imageUrlFilter(token.href)) return escapeHtml(token.text)
+      return markdownRenderer.image.call(renderer, token)
+    }
+  }
   const parsedHtml = markdownParser.parse(markdown, {
     ...markdownOptions,
     breaks,
+    renderer,
   })
   const html = DOMPurify.sanitize(parsedHtml, sanitizeOptions)
 
@@ -764,8 +778,21 @@ function renderMarkdown(
 
 export function Markdown(props: MarkdownProps) {
   const html = useMemo(
-    () => renderMarkdown(props.children, props.breaks, props.baseUrl),
-    [props.breaks, props.children, props.baseUrl]
+    () =>
+      renderMarkdown(
+        props.children,
+        props.breaks,
+        props.baseUrl,
+        props.allowHtml,
+        props.imageUrlFilter
+      ),
+    [
+      props.breaks,
+      props.children,
+      props.baseUrl,
+      props.allowHtml,
+      props.imageUrlFilter,
+    ]
   )
 
   return (
