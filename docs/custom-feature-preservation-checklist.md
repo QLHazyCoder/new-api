@@ -9,22 +9,28 @@
 
 ## 1. 覆盖范围与基线
 
-- 当前合并前快照：本地 `main@3dfa7cea6b4341a84578da97d31bce0fbe3bc0a0`，复核日期
-  2026-10-14。合并目标固定为作者最新正式标签
-  `v1.0.0-rc.44@633b4c5b190dc1af99a2814391354d86948e7943`。
-  本轮逐项保护和验证记录见第 12 节；第 11 节为 RC-42 的历史记录。
+- 最近一次完整上游合并审计快照：RC-44 合并前本地
+  `main@3dfa7cea6b4341a84578da97d31bce0fbe3bc0a0`，复核日期 2026-10-14。
+  合并目标为作者正式标签 `v1.0.0-rc.44@633b4c5b190dc1af99a2814391354d86948e7943`；
+  该轮保护和验证记录见第 12 节，第 11 节为 RC-42 历史记录。
 - 上次盘点快照为 `main@54da177f7617d0e7bf34cba43437afe1650cf97b`（2026-09-28）；
   第 8、9 节仍是 2026-09-23 的历史审计，不能当作本轮代码或线上状态。
 - 2026-09-23 的 RC-40 对照以 `main@6fb2358525cf762fa81a4c59ec3751275493bf71` 为历史快照，
   直接比较得到 541 个不同路径（114 个新增、422 个修改、5 个删除）；它们包含本项目差异、
   作者版本演进、测试/文档/工具文件，不能把路径数或提交数直接当成功能数，逐项分类仍保留在
   第 8、9 节。RC-40 已于 2026-09-27 通过 `ba886153f`、`3ffc9dd4f` 集成到当前 `main`。
-- 本轮逐项复核 P-01 至 P-34，并把 RC-39 合并收尾提交 `4824d38fd` 之后的 26 个本地
-  非合并提交逐一归属；新增 P-35。现行第 4 节列出 28 项仍含本地独有实现或本地业务契约的
+- 2026-09-23 盘点逐项复核 P-01 至 P-34，并把 RC-39 合并收尾提交 `4824d38fd` 之后的 26 个本地
+  非合并提交逐一归属；新增 P-35。当时第 4 节列出 28 项仍含本地独有实现或本地业务契约的
   保护项。5 个旧条目中，P-09/P-10/P-25 的行为已由作者 RC-40 等价覆盖而整项移出；P-18/P-23
   仅保留仍独有的子契约，其上游等价子行为移入历史归档。另将 P-02/P-26 两项治理条目和
   已退休的 P-33 移出；历史编号及来源仍可追溯。另识别 1 组作者历史实现残留，不计入 QLH
   自研项。上述数字按保护项/行为组统计，不是原子用户功能数量。
+- 2026-10-20 新增 P-36，记录普通用户任务日志隐藏插件平台标识的契约，来源提交为
+  `0a758e1d7`。当前第 4 节有 29 项现行保护项；RC-42、RC-44 章节中的 28 项核对表仍是
+  各自合并时的历史快照，不随本次盘点回写。
+- 2026-10-20 新增 P-37，记录 New API 原生公开文档阅读、同源导航、匿名发布内容接口及
+  Tools 管理/草稿数据边界，来源提交为 `2980da538`。当前第 4 节有 30 项现行保护项；
+  RC-42、RC-44 章节中的 28 项核对表仍是各自合并时的历史快照。
 - 在第 8、9 节的历史审计时点，RC-40 尚未合并；当时“已吸收”仅指作者侧语义等价。
   当前合并前 `main` 已包含 RC-40 及后续维护提交，不能再把两侧历史差异重复计成功能。
 
@@ -672,6 +678,56 @@
   代码和迁移工具存在，不代表生产日志已执行迁移。
 - 来源提交：`9b0238b83`。
 
+### P-36 普通用户任务日志隐藏插件标识
+
+- 必须保留：普通角色请求 `/api/task/self` 时，具有 `TaskPluginSnapshot` 的插件任务
+  不返回 `platform`。该任务的 `platform` 即插件 key；不得通过 `platform`、
+  `admin_info` 或 `root_info` 的插件诊断投影向普通用户暴露插件 key、名称、版本或作者。
+  仅在前端隐藏字段不满足要求，API 响应本身必须省略标识。
+- 必须保留：管理员和 Root 的平台及插件诊断可见性不变；没有插件执行快照的历史任务和
+  原生任务继续返回平台。前端遇到缺失的 `platform` 时，任务 ID 副标题只显示 action，
+  详情不显示 Platform 行，不渲染空分隔符。
+- 必须保留：成功的 Suno 插件任务在隐藏平台后通过 `legacy_audio_available` 选择旧音频
+  预览；该布尔标记不得包含插件身份。此行为只改变任务日志响应投影，不改任务存储、
+  筛选条件或原生 `/v1` 任务响应，也不需要数据库迁移。
+- 当前位置：`controller/task.go`、`dto/task.go`、
+  `web/src/features/usage-logs/types.ts`、任务日志列与详情组件、`web/src/features/usage-logs/lib/task-artifacts.ts`。
+- 合并检查：验证普通角色的 `/api/task/self` JSON 不含插件任务 `platform` 和插件元数据；
+  管理员/Root 仍可查看，普通原生任务仍显示平台，缺失平台时 UI 不显示平台标识或多余
+  分隔符，Suno 音频预览继续可用。若上游提供等价或更强实现，可采用上游实现，但上述
+  角色隔离和回归场景必须继续成立。
+- 验证入口：`controller/task_log_view_test.go`、
+  `controller/task_generic_test.go`、
+  `web/src/features/usage-logs/components/__tests__/task-logs-columns.test.tsx`、
+  `web/src/features/usage-logs/components/__tests__/task-details-dialog.test.tsx`、
+  `web/src/features/usage-logs/__tests__/artifacts.test.ts`。
+- 来源提交：`0a758e1d7`。
+
+### P-37 文档管理的数据边界与公开阅读路由
+
+- 必须保留：New API 在 `/docs` 与 `/docs/{slug}` 提供匿名公开阅读，并复用 `PublicLayout`
+  和站点顶部导航。目录搜索、折叠、移动端抽屉、排序后首篇选择、文章深链和未发布文章
+  404 必须保持可用；同源 `docs_link` 在当前标签页内导航，外部链接仍按外链处理。
+- 必须保留：浏览器阅读仅请求同域 `/api/public/docs` 与 `/api/public/docs/{slug}`，不出现
+  `/tools/` 页面资源或 API 请求；公开响应只包含已发布快照，不返回草稿。HTTPS 图片、独立
+  图片 URL 的扩展名限制以及作者 HTML 禁用继续生效。
+- 必须保留：New API 只负责公开阅读。Tools `/tools/documents` 仍负责目录、Markdown 草稿、
+  发布/下架和永久删除；`docs.db` 与公开 API 是内容来源，不增加第二份数据库、图片存储或
+  后端文档实现。Caddy 仅在 `coderapi.vip` 将 `/docs*` 转发到 `new-api-proxy`，将
+  `/api/public/docs*` 保留原 URI 转发到 `newapi-tools`；现有 `/tools` 管理路由不变。
+- 当前位置：`web/src/routes/docs/**`、`web/src/features/docs/**`、
+  `web/src/lib/navigation-target.ts`、`web/src/hooks/use-top-nav-links.ts`、
+  `web/src/components/layout/components/public-header.tsx`、
+  `web/src/features/home/components/sections/hero.tsx`；Tools 管理与数据实现位于
+  `/opt/qlh-main/new_api_tools/frontend/src/features/docs/` 和 `backend/internal/service/docs/`，
+  公网转发配置位于 `/opt/qlh-main/caddy/Caddyfile`。
+- 合并检查：验证 `/docs` 与深链匿名加载、顶部导航保留、同源链接不新开标签、同域 API 路径
+  不含 `/tools/`、仅发布内容可见、撤下文章返回 404，以及标准/独立行/自链接图片规则和原始
+  HTML 安全边界。不要把公开阅读重新挂回 Tools 登录壳，也不要改变 Tools 草稿/发布契约。
+- 验证入口：`web/src/features/docs/__tests__/reading.test.tsx`、`api.test.ts`、
+  `markdown.test.tsx`、`tree.test.ts`、`web/src/lib/__tests__/navigation-target.test.ts`。
+- 来源提交：`2980da538`。
+
 ## 5. 提交映射完整性
 
 以下现行保护项映射用于机械核对。未来合并前，应从历史基线列出本地非合并提交并与本节
@@ -708,6 +764,8 @@
 | P-32 | `afab95b53` |
 | P-34 | `5e5c79c1`, `f0a62f2c` |
 | P-35 | `9b0238b83` |
+| P-36 | `0a758e1d7` |
+| P-37 | `2980da538` |
 
 ### 已移出或剥离的历史映射（不计入现行保护项）
 
@@ -792,6 +850,17 @@ GitHub Actions 的 amd64、arm64 与 manifest 均成功。
   英文为固定基准的本地化同步；已将条目收窄后保留。P-09/P-10/P-25 整项移出，P-18/P-23
   已被 RC-40 覆盖的子契约、P-02/P-26 治理项及退休的 P-33 转入第 5 节历史归档。现行保护项
   为 28 项；历史来源保留但不再混入自研数量。
+- 2026-10-20：补录 P-36，保护普通用户任务日志对插件平台标识的服务端隐藏、管理员诊断
+  可见性、原生任务兼容、缺失平台时的前端呈现，以及 Suno 插件音频预览标记。对应实现
+  已在 `0a758e1d7` 提交；后端角色投影、前端列表/详情和预览回归入口列于 P-36。当前清单
+  共 29 项现行保护项；历史 RC-42/RC-44 核对表保持其当时的 28 项快照。
+- 2026-10-20：补录 P-37，保护 New API 原生公开文档路由、顶部导航和同源链接行为、匿名
+  只读发布接口、Markdown 安全边界，以及 Tools 作为唯一编辑与内容存储端的职责。New API
+  功能提交 `2980da538`、Tools 收敛提交 `15db4f7` 已部署；三个 New API 公网入口在五分钟内
+  11 轮检查均返回 `main-2980da5`，Tools revision 与 `15db4f7` 一致。Caddy 路由提交
+  `66f4434` 和 green 活动槽位提交 `3fe7d69` 已在部署仓库本地提交并 reload/切换；因该仓库
+  还包含 5 个此前未推送的其他提交，尚待确定父仓库推送范围。生产 HTTP 检查确认 `/docs`、
+  `/docs/videos`、公开文章 API 和 `/tools/` 均可用；未执行生产浏览器视觉验收，也未改数据库。
 
 ## 8. RC-40 对照与 RC-39 后续提交闭环（2026-09-23 历史快照）
 
