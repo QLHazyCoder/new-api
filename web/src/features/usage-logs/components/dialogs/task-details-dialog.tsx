@@ -117,7 +117,9 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
       <div className='space-y-3'>
         <DetailSection label={t('Basic Information')}>
           <DetailRow label={t('Task ID')} value={props.log.task_id} mono />
-          <DetailRow label={t('Platform')} value={props.log.platform} mono />
+          {props.log.platform ? (
+            <DetailRow label={t('Platform')} value={props.log.platform} mono />
+          ) : null}
           <DetailRow
             label={t('Action')}
             value={t(taskActionMapper.getLabel(props.log.action))}

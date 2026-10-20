@@ -337,6 +337,23 @@ describe('legacy task preview compatibility', () => {
       'plugin'
     )
   })
+
+  test('keeps Suno audio preview available when the plugin platform is hidden', () => {
+    assert.equal(
+      resolveTaskPreviewMode(
+        taskFixture({
+          platform: undefined,
+          admin_info: undefined,
+          legacy_audio_available: true,
+        })
+      ),
+      'legacy-suno'
+    )
+    assert.equal(
+      resolveTaskPreviewMode(taskFixture({ legacy_audio_available: true })),
+      'plugin'
+    )
+  })
 })
 
 describe('synchronous results the gateway did not retain', () => {

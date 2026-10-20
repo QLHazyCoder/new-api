@@ -462,6 +462,11 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 				Input:           task.Properties.Input,
 				OriginModelName: task.Properties.OriginModelName,
 			}
+			if taskHasPluginExecution(task) {
+				item.Platform = ""
+				item.LegacyAudioAvailable = task.Status == model.TaskStatusSuccess &&
+					task.Platform == constant.TaskPlatformSuno
+			}
 		}
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
 		item.ResultDiscarded = task.PrivateData.ResultDiscarded

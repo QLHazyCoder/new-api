@@ -258,6 +258,9 @@ func TestGetUserTaskProjectsUpstreamModelByRole(t *testing.T) {
 		OriginModelName:   "requested-model",
 		UpstreamModelName: "upstream-model",
 	}
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{
+		TaskPlugin: &model.TaskPluginSnapshot{Key: "document", Name: "Document", Version: "1.2.3"},
+	}
 	require.NoError(t, model.DB.Save(task).Error)
 
 	for _, tc := range []struct {
@@ -281,10 +284,15 @@ func TestGetUserTaskProjectsUpstreamModelByRole(t *testing.T) {
 			require.Equal(t, http.StatusOK, recorder.Code)
 			if tc.visible {
 				assert.Contains(t, recorder.Body.String(), "upstream-model")
+				assert.Contains(t, recorder.Body.String(), `"platform":"document"`)
+				assert.Contains(t, recorder.Body.String(), `"version":"1.2.3"`)
 			} else {
 				assert.NotContains(t, recorder.Body.String(), "upstream_model_name")
 				assert.NotContains(t, recorder.Body.String(), "upstream-model")
 				assert.Contains(t, recorder.Body.String(), "requested-model")
+				assert.NotContains(t, recorder.Body.String(), `"platform"`)
+				assert.NotContains(t, recorder.Body.String(), "document")
+				assert.NotContains(t, recorder.Body.String(), "1.2.3")
 			}
 		})
 	}

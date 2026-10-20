@@ -42,6 +42,7 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	}
 
 	userView := tasksToDto([]*model.Task{task}, false, common.RoleCommonUser)[0]
+	assert.Empty(t, userView.Platform)
 	assert.Nil(t, userView.AdminInfo)
 	assert.Nil(t, userView.RootInfo)
 	userProperties, ok := userView.Properties.(model.Properties)
@@ -51,6 +52,7 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	assert.Empty(t, userProperties.UpstreamModelName)
 
 	adminView := tasksToDto([]*model.Task{task}, false, common.RoleAdminUser)[0]
+	assert.Equal(t, "document-parser", adminView.Platform)
 	require.NotNil(t, adminView.AdminInfo)
 	require.NotNil(t, adminView.AdminInfo.TaskPlugin)
 	assert.Equal(t, "document-parser", adminView.AdminInfo.TaskPlugin.Key)
@@ -67,6 +69,7 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 	assert.Equal(t, "upstream-model", adminProperties.UpstreamModelName)
 
 	rootView := tasksToDto([]*model.Task{task}, false, common.RoleRootUser)[0]
+	assert.Equal(t, "document-parser", rootView.Platform)
 	require.NotNil(t, rootView.AdminInfo)
 	require.NotNil(t, rootView.RootInfo)
 	require.NotNil(t, rootView.RootInfo.TaskPlugin)
@@ -88,6 +91,8 @@ func TestTaskLogDTOSeparatesUserAdminAndRootDetails(t *testing.T) {
 
 	userJSON, err := common.Marshal(userView)
 	require.NoError(t, err)
+	assert.NotContains(t, string(userJSON), `"platform"`)
+	assert.NotContains(t, string(userJSON), "document-parser")
 	assert.NotContains(t, string(userJSON), "upstream-model")
 }
 
@@ -98,9 +103,36 @@ func TestTaskLogDTODoesNotInventHistoricalPluginProvenance(t *testing.T) {
 	}
 
 	adminView := tasksToDto([]*model.Task{task}, false, common.RoleAdminUser)[0]
+	assert.Equal(t, "document-parser", adminView.Platform)
 
 	assert.Nil(t, adminView.AdminInfo)
 	assert.Nil(t, adminView.RootInfo)
+
+	userView := tasksToDto([]*model.Task{task}, false, common.RoleCommonUser)[0]
+	assert.Equal(t, "document-parser", userView.Platform)
+}
+
+func TestTaskLogDTOHidesPluginPlatformAndPreservesSunoAudioPreview(t *testing.T) {
+	task := &model.Task{
+		TaskID:   "task_suno_plugin",
+		Platform: constant.TaskPlatformSuno,
+		Status:   model.TaskStatusSuccess,
+		PrivateData: model.TaskPrivateData{
+			Execution: &model.TaskExecutionSnapshot{
+				TaskPlugin: &model.TaskPluginSnapshot{Key: "sunoapi", Name: "SunoAPI", Version: "1.1.0"},
+			},
+		},
+	}
+
+	view := tasksToDto([]*model.Task{task}, false, common.RoleCommonUser)[0]
+	assert.Empty(t, view.Platform)
+	assert.True(t, view.LegacyAudioAvailable)
+
+	encoded, err := common.Marshal(view)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), `"platform"`)
+	assert.NotContains(t, string(encoded), "sunoapi")
+	assert.Contains(t, string(encoded), `"legacy_audio_available":true`)
 }
 
 func TestTaskLogDTOReplacesLegacyVideoURLWithAvailabilityFlag(t *testing.T) {

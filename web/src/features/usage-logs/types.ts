@@ -390,7 +390,7 @@ export interface TaskLog {
   id: number
   user_id: number
   username?: string
-  platform: string // suno, kling, runway, etc.
+  platform?: string // suno, kling, runway, etc.; omitted for common-user plugin tasks
   task_id: string
   action: string // MUSIC, LYRICS, GENERATE, TEXT_GENERATE, etc.
   channel_id: number
@@ -408,6 +408,7 @@ export interface TaskLog {
     origin_model_name?: string
   }
   legacy_video_available?: boolean
+  legacy_audio_available?: boolean
   // A synchronous result returned inline and never persisted; artifact
   // retrieval is not offered for it.
   result_discarded?: boolean
