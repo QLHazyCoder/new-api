@@ -166,7 +166,7 @@
 | `go vet ./...`、`go build ./...` | 通过 | 根模块 |
 | `git diff --check`、UTF-8 解码及 U+FFFD 检查 | 通过 | 无空白错误，文档 UTF-8 有效且无替换字符 |
 
-一次较早的全量串行测试曾报告 `controller` 包失败，但当次输出未保留具体失败用例；随后 `go test ./controller -count=1` 与再次运行的完整测试套件均通过。未确认初次失败原因，不据此归因。
+一次较早的全量串行测试曾报告 `controller` 包失败，复核日志确认是旧的 `failed-estimated-output` 用例仍固定断言 `completion=1`；按当前临时估算策略更新断言后，`go test ./controller -count=1` 与再次运行的完整测试套件均通过。
 
 本轮未更改数据库、价格表达式或生产服务，因此未运行数据库方言矩阵，也未作线上 usage/账单对账。提交推送后仍须等用户部署；部署侧不由本次提交自动执行。
 
