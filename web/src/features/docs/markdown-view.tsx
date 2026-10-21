@@ -48,7 +48,7 @@ export function DocsMarkdown(props: {
       enableCodeCopy
       headingIds={headingIds}
       imageUrlFilter={isSecureDocsImageURL}
-      className='[&_:is(h1,h2,h3,h4,h5,h6)]:scroll-mt-24 [&_img]:h-auto [&_p]:leading-7 [&_pre]:max-w-full [&_table]:max-w-full'
+      className='text-base [&_:is(h1,h2,h3,h4,h5,h6)]:scroll-mt-24 [&_img]:h-auto [&_p]:leading-8 [&_pre]:max-w-full [&_table]:max-w-full'
     >
       {markdown}
     </Markdown>

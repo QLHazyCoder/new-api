@@ -2008,8 +2008,6 @@
     "Close documentation directory": "ドキュメント目次を閉じる",
     "Article navigation": "記事の目次",
     "On this page": "このページの内容",
-    "Open article navigation": "記事の目次を開く",
-    "Close article navigation": "記事の目次を閉じる",
     "Documentation Link": "ドキュメントリンク",
     "Documentation or external knowledge base.": "ドキュメントまたは外部知識ベース。",
     "Does not check healthy channels. It only rechecks auto-disabled channels and restores them after they recover.": "正常なチャネルはチェックしません。自動無効化されたチャネルのみを再チェックし、復旧後に再び有効化します。",

@@ -29,7 +29,7 @@ import { toIntlLocale } from '@/i18n/languages'
 import { getServerErrorStatus } from '@/lib/server-error-message'
 
 import { getPublicDocArticle } from './api'
-import { ArticleToc, MobileArticleToc } from './article-toc'
+import { ArticleToc } from './article-toc'
 import {
   extractDocumentationHeadings,
   normalizeStandaloneDocsImages,
@@ -109,7 +109,7 @@ export function DocsArticlePage(props: { slug: string }) {
     <div className='flex w-full min-w-0 items-start'>
       <article
         ref={articleRef}
-        className='max-w-[960px] min-w-0 flex-1 px-5 py-8 sm:px-8 sm:py-12'
+        className='min-w-0 flex-1 px-5 py-8 sm:px-8 sm:py-12 2xl:px-12'
       >
         <nav
           aria-label={t('Document location')}
@@ -140,12 +140,6 @@ export function DocsArticlePage(props: { slug: string }) {
             {t('Updated {{date}}', { date: updatedAt })}
           </time>
         </p>
-        <MobileArticleToc
-          activeHeadingId={activeHeadingId}
-          key={article.slug}
-          headings={tocHeadings}
-          onSelect={selectHeading}
-        />
         <div className='pt-3'>
           <DocsMarkdown markdown={normalizedMarkdown} headings={headings} />
         </div>

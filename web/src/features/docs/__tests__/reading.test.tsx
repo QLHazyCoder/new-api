@@ -386,42 +386,21 @@ test('manual scrolling stops deep link correction for images that load afterward
   expect(scroll.mock.calls).toHaveLength(beforeLoad)
 })
 
-test('the mobile article navigation closes after selection and keeps the selected section', async () => {
-  const { router } = await openDocs('/docs/quick-start')
-  await userEvent.click(
-    await screen.findByRole('button', { name: 'Open article navigation' })
-  )
-  const drawer = await screen.findByRole('dialog', {
+test('article chapters use one desktop navigation without an additional mobile drawer', async () => {
+  await openDocs('/docs/quick-start')
+  const toc = await screen.findByRole('navigation', {
     name: 'Article navigation',
   })
-  await userEvent.click(within(drawer).getByRole('link', { name: '使用说明' }))
-
-  await waitFor(() =>
-    expect(
-      screen.queryByRole('dialog', { name: 'Article navigation' })
-    ).not.toBeInTheDocument()
-  )
-  await waitFor(() => expect(router.state.location.hash).toBe('使用说明'))
+  expect(within(toc).getByRole('link', { name: 'Linux' })).toBeInTheDocument()
   expect(
-    screen.getByRole('button', { name: 'Open article navigation' })
-  ).toHaveAttribute('aria-expanded', 'false')
-})
-
-test('closing the article navigation with Escape returns focus to its trigger', async () => {
-  await openDocs('/docs/quick-start')
-  const trigger = await screen.findByRole('button', {
-    name: 'Open article navigation',
-  })
-  await userEvent.click(trigger)
-  await screen.findByRole('dialog', { name: 'Article navigation' })
-  await userEvent.keyboard('{Escape}')
-
-  await waitFor(() =>
-    expect(
-      screen.queryByRole('dialog', { name: 'Article navigation' })
-    ).not.toBeInTheDocument()
-  )
-  await waitFor(() => expect(trigger).toHaveFocus())
+    screen.getAllByRole('navigation', { name: 'Article navigation' })
+  ).toHaveLength(1)
+  expect(
+    screen.queryByRole('button', { name: 'Open article navigation' })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole('dialog', { name: 'Article navigation' })
+  ).not.toBeInTheDocument()
 })
 
 test('articles without H2 or H3 do not show an article navigation panel', async () => {
