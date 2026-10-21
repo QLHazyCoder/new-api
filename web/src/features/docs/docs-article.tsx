@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { ArrowRight01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useQuery } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
@@ -29,10 +29,17 @@ import { toIntlLocale } from '@/i18n/languages'
 import { getServerErrorStatus } from '@/lib/server-error-message'
 
 import { getPublicDocArticle } from './api'
+import { ArticleToc, MobileArticleToc } from './article-toc'
+import {
+  extractDocumentationHeadings,
+  normalizeStandaloneDocsImages,
+} from './markdown'
 import { DocsMarkdown } from './markdown-view'
+import { useArticleNavigation } from './use-article-navigation'
 
 export function DocsArticlePage(props: { slug: string }) {
   const { i18n, t } = useTranslation()
+  const articleRef = useRef<HTMLElement>(null)
   const query = useQuery({
     queryKey: ['public-docs', 'article', props.slug],
     queryFn: () => getPublicDocArticle(props.slug),
@@ -40,6 +47,24 @@ export function DocsArticlePage(props: { slug: string }) {
     meta: { errorToast: false },
   })
   const article = query.data
+  const normalizedMarkdown = useMemo(
+    () => (article ? normalizeStandaloneDocsImages(article.markdown) : ''),
+    [article]
+  )
+  const headings = useMemo(
+    () => extractDocumentationHeadings(normalizedMarkdown),
+    [normalizedMarkdown]
+  )
+  const tocHeadings = useMemo(
+    () =>
+      headings.filter((heading) => heading.depth === 2 || heading.depth === 3),
+    [headings]
+  )
+  const { activeHeadingId, selectHeading } = useArticleNavigation({
+    articleRef,
+    headings,
+    slug: props.slug,
+  })
 
   useEffect(() => {
     document.title = article ? `${article.title} - ${t('Docs')}` : t('Docs')
@@ -81,39 +106,55 @@ export function DocsArticlePage(props: { slug: string }) {
   ).format(new Date(article.updated_at))
 
   return (
-    <article className='mx-auto w-full max-w-[800px] px-5 py-8 sm:px-8 sm:py-12'>
-      <nav
-        aria-label={t('Document location')}
-        className='text-muted-foreground mb-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs'
+    <div className='flex w-full min-w-0 items-start'>
+      <article
+        ref={articleRef}
+        className='max-w-[960px] min-w-0 flex-1 px-5 py-8 sm:px-8 sm:py-12'
       >
-        {article.path.map((part, index) => (
-          <span
-            key={article.path.slice(0, index + 1).join('/')}
-            className='flex items-center gap-2'
-          >
-            <span>{part}</span>
-            {index < article.path.length - 1 && (
-              <HugeiconsIcon
-                icon={ArrowRight01Icon}
-                strokeWidth={2}
-                className='size-3'
-                aria-hidden='true'
-              />
-            )}
-          </span>
-        ))}
-      </nav>
-      <h1 className='text-foreground text-2xl leading-tight font-semibold break-words sm:text-[30px]'>
-        {article.title}
-      </h1>
-      <p className='text-muted-foreground border-border mt-3 border-b pb-5 text-xs'>
-        <time dateTime={article.updated_at}>
-          {t('Updated {{date}}', { date: updatedAt })}
-        </time>
-      </p>
-      <div className='pt-3'>
-        <DocsMarkdown markdown={article.markdown} />
-      </div>
-    </article>
+        <nav
+          aria-label={t('Document location')}
+          className='text-muted-foreground mb-5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs'
+        >
+          {article.path.map((part, index) => (
+            <span
+              key={article.path.slice(0, index + 1).join('/')}
+              className='flex items-center gap-2'
+            >
+              <span>{part}</span>
+              {index < article.path.length - 1 && (
+                <HugeiconsIcon
+                  icon={ArrowRight01Icon}
+                  strokeWidth={2}
+                  className='size-3'
+                  aria-hidden='true'
+                />
+              )}
+            </span>
+          ))}
+        </nav>
+        <h1 className='text-foreground text-2xl leading-tight font-semibold break-words sm:text-[30px]'>
+          {article.title}
+        </h1>
+        <p className='text-muted-foreground border-border mt-3 border-b pb-5 text-xs'>
+          <time dateTime={article.updated_at}>
+            {t('Updated {{date}}', { date: updatedAt })}
+          </time>
+        </p>
+        <MobileArticleToc
+          activeHeadingId={activeHeadingId}
+          key={article.slug}
+          headings={tocHeadings}
+          onSelect={selectHeading}
+        />
+        <div className='pt-3'>
+          <DocsMarkdown markdown={normalizedMarkdown} headings={headings} />
+        </div>
+      </article>
+      <ArticleToc
+        activeHeadingId={activeHeadingId}
+        headings={tocHeadings}
+        onSelect={selectHeading}
+      />
+    </div>
   )
 }

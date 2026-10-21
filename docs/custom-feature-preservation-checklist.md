@@ -708,6 +708,13 @@
 - 必须保留：New API 在 `/docs` 与 `/docs/{slug}` 提供匿名公开阅读，并复用 `PublicLayout`
   和站点顶部导航。目录搜索、折叠、移动端抽屉、排序后首篇选择、文章深链和未发布文章
   404 必须保持可用；同源 `docs_link` 在当前标签页内导航，外部链接仍按外链处理。
+- 必须保留：公开阅读在桌面使用 340px 文档目录、最大 960px 正文和 240px H2/H3 文章目录，
+  长目录名称可换行。文章目录点击在当前标签更新 hash 并定位章节，中文和重复标题锚点不
+  冲突；深链在图片/字体加载后校正定位，用户主动交互后停止校正。滚动跟随当前章节及文末
+  短章节，窄屏使用目录抽屉，无章节时不留空目录栏。
+- 必须保留：普通 fenced code 右上角可复制原始代码，保留缩进和空行，不包含 Markdown
+  围栏、操作文案或渲染器添加的换行；行内代码、公式、流程和时序图不增加复制按钮。共享
+  Markdown 默认调用行为不变。标准/裸 URL 可点击并保留目标参数，危险链接协议不可执行。
 - 必须保留：浏览器阅读仅请求同域 `/api/public/docs` 与 `/api/public/docs/{slug}`，不出现
   `/tools/` 页面资源或 API 请求；公开响应只包含已发布快照，不返回草稿。HTTPS 图片、独立
   图片 URL 的扩展名限制以及作者 HTML 禁用继续生效。
@@ -721,11 +728,19 @@
   `web/src/features/home/components/sections/hero.tsx`；Tools 管理与数据实现位于
   `/opt/qlh-main/new_api_tools/frontend/src/features/docs/` 和 `backend/internal/service/docs/`，
   公网转发配置位于 `/opt/qlh-main/caddy/Caddyfile`。
+- 交互职责：`web/src/features/docs/article-toc.tsx`、`use-article-navigation.ts` 和
+  `web/src/components/ui/markdown.tsx`；文件映射与阶段验收见
+  `docs/documentation-reader-enhancements.md`。
 - 合并检查：验证 `/docs` 与深链匿名加载、顶部导航保留、同源链接不新开标签、同域 API 路径
   不含 `/tools/`、仅发布内容可见、撤下文章返回 404，以及标准/独立行/自链接图片规则和原始
   HTML 安全边界。不要把公开阅读重新挂回 Tools 登录壳，也不要改变 Tools 草稿/发布契约。
+- 合并检查：验证长标题/窄屏无溢出、H2/H3 目录定位及高亮、移动抽屉选择后不跳回顶部、
+  带片段地址刷新、切换文章清理章节状态、代码复制成功/失败和状态恢复，以及共享 Markdown
+  的公式/图表渲染回归。语言变更不得破坏被观察的标题节点，主动滚动后不得被图片加载拉回
+  原章节。不得将普通代码中的 URL 转为链接。
 - 验证入口：`web/src/features/docs/__tests__/reading.test.tsx`、`api.test.ts`、
-  `markdown.test.tsx`、`tree.test.ts`、`web/src/lib/__tests__/navigation-target.test.ts`。
+  `markdown.test.tsx`、`tree.test.ts`、`web/src/lib/__tests__/navigation-target.test.ts`、
+  `web/src/components/ui/__tests__/markdown.test.tsx`。
 - 来源提交：`2980da538`。
 
 ## 5. 提交映射完整性

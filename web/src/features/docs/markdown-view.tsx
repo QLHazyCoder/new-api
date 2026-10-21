@@ -16,18 +16,41 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useMemo } from 'react'
+
 import { Markdown } from '@/components/ui/markdown'
 
-import { isSecureDocsImageURL, normalizeStandaloneDocsImages } from './markdown'
+import {
+  type DocumentationHeading,
+  extractDocumentationHeadings,
+  isSecureDocsImageURL,
+  normalizeStandaloneDocsImages,
+} from './markdown'
 
-export function DocsMarkdown(props: { markdown: string }) {
+export function DocsMarkdown(props: {
+  markdown: string
+  headings?: readonly DocumentationHeading[]
+}) {
+  const markdown = useMemo(
+    () => normalizeStandaloneDocsImages(props.markdown),
+    [props.markdown]
+  )
+  const headingIds = useMemo(
+    () =>
+      (props.headings ?? extractDocumentationHeadings(markdown)).map(
+        (heading) => heading.id
+      ),
+    [markdown, props.headings]
+  )
   return (
     <Markdown
       allowHtml={false}
+      enableCodeCopy
+      headingIds={headingIds}
       imageUrlFilter={isSecureDocsImageURL}
-      className='[&_img]:h-auto [&_p]:leading-7 [&_pre]:max-w-full [&_table]:max-w-full'
+      className='[&_:is(h1,h2,h3,h4,h5,h6)]:scroll-mt-24 [&_img]:h-auto [&_p]:leading-7 [&_pre]:max-w-full [&_table]:max-w-full'
     >
-      {normalizeStandaloneDocsImages(props.markdown)}
+      {markdown}
     </Markdown>
   )
 }

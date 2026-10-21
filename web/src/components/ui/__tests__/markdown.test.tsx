@@ -16,10 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { expect, test } from 'vitest'
 
 import { Markdown } from '../markdown'
+
+test('ordinary Markdown keeps code blocks without document-only controls or heading IDs', () => {
+  const { container } = render(
+    <Markdown>{'## Summary\n\n```text\nexample\n```'}</Markdown>
+  )
+  expect(screen.getByRole('heading', { name: 'Summary' })).not.toHaveAttribute(
+    'id'
+  )
+  expect(container.querySelector('pre code')).toHaveTextContent('example')
+  expect(
+    screen.queryByRole('button', { name: 'Copy code' })
+  ).not.toBeInTheDocument()
+})
 
 test.each([
   ['inline', 'Formula: $$\\frac{1}{2}$$.'],

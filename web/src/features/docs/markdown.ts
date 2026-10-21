@@ -16,7 +16,45 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { extractMarkdownHeadings } from '@/components/ui/markdown'
+
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif']
+
+export type DocumentationHeading = {
+  id: string
+  depth: number
+  text: string
+}
+
+function slugifyHeading(value: string): string {
+  const slug = value
+    .normalize('NFKC')
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^\p{L}\p{N}]+/gu, '-')
+    .replaceAll(/^-+|-+$/g, '')
+
+  return slug || 'section'
+}
+
+export function extractDocumentationHeadings(
+  markdown: string
+): DocumentationHeading[] {
+  const usedIDs = new Set<string>()
+
+  return extractMarkdownHeadings(markdown).map((heading) => {
+    const baseID = slugifyHeading(heading.text)
+    let id = baseID
+    let occurrence = 2
+    while (usedIDs.has(id)) {
+      id = `${baseID}-${occurrence}`
+      occurrence += 1
+    }
+    usedIDs.add(id)
+
+    return { ...heading, id }
+  })
+}
 
 export function isSecureDocsImageURL(
   value: string,

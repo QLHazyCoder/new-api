@@ -21,8 +21,12 @@ import * as katex from 'katex'
 
 import 'katex/dist/katex.min.css'
 import { Marked, Renderer, type MarkedExtension, type Tokens } from 'marked'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
+import { buttonVariants } from '@/components/ui/button'
+import { copyToClipboard } from '@/lib/copy-to-clipboard'
 import { cn } from '@/lib/utils'
 
 interface MarkdownProps {
@@ -33,7 +37,11 @@ interface MarkdownProps {
   className?: string
   /** Escape author-supplied HTML while keeping generated Markdown markup. */
   allowHtml?: boolean
+  /** Add stable ids to block headings in document-style Markdown. */
+  headingIds?: readonly string[]
   imageUrlFilter?: (url: string) => boolean
+  /** Add a copy control to fenced code blocks. */
+  enableCodeCopy?: boolean
 }
 
 const markdownOptions = {
@@ -609,6 +617,19 @@ function renderSequenceDiagram(source: string): string {
 
 const markdownRenderer = new Renderer()
 const renderDefaultCode = markdownRenderer.code.bind(markdownRenderer)
+function isFencedCodeToken(token: Tokens.Code): boolean {
+  return /^\s{0,3}(?:`{3,}|~{3,})/.test(token.raw)
+}
+
+function isSpecialCodeLanguage(language: string | undefined): boolean {
+  return (
+    language === 'math' ||
+    language === 'katex' ||
+    language === 'latex' ||
+    language === 'flow' ||
+    language === 'seq'
+  )
+}
 
 markdownRenderer.code = (token: Tokens.Code): string => {
   const language = token.lang?.toLowerCase()
@@ -723,6 +744,36 @@ const markdownParser = new Marked({
 
 markdownParser.use(...markdownExtensions)
 
+/** Use the rendering parser so nested headings and extensions keep the same order. */
+export function extractMarkdownHeadings(
+  markdown: string
+): { depth: number; text: string }[] {
+  const headings: { depth: number; text: string }[] = []
+  const tokens = markdownParser.lexer(markdown)
+  markdownParser.walkTokens(tokens, (token) => {
+    if (token.type === 'text') token.text = replaceEmojiShortcodes(token.text)
+  })
+  markdownParser.walkTokens(tokens, (token) => {
+    if (token.type !== 'heading') return
+    const renderer = Object.create(markdownRenderer) as Renderer
+    renderer.html = (html) => escapeHtml(html.text)
+    const html = markdownParser.parser([token], {
+      ...markdownParser.defaults,
+      renderer,
+    })
+    const content = DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [],
+      ALLOWED_ATTR: [],
+      RETURN_DOM_FRAGMENT: true,
+    })
+    headings.push({
+      depth: token.depth,
+      text: (content.textContent ?? '').trim().replace(/\s+/g, ' '),
+    })
+  })
+  return headings
+}
+
 function addExternalLinkAttributes(html: string, baseUrl?: string): string {
   if (typeof window === 'undefined') {
     return html
@@ -756,10 +807,38 @@ function renderMarkdown(
   breaks = false,
   baseUrl?: string,
   allowHtml = true,
-  imageUrlFilter?: (url: string) => boolean
+  imageUrlFilter?: (url: string) => boolean,
+  headingIds?: readonly string[],
+  enableCodeCopy = false,
+  codeCopyLabel = 'Copy code'
 ): string {
   const renderer = Object.create(markdownRenderer) as Renderer
+  let headingIndex = 0
   if (!allowHtml) renderer.html = (token) => escapeHtml(token.text)
+  if (headingIds) {
+    renderer.heading = (token: Tokens.Heading): string => {
+      const id = headingIds[headingIndex]
+      headingIndex += 1
+      const rendered = renderer.parser.parseInline(token.tokens)
+      const idAttribute = id ? ` id="${escapeHtml(id)}"` : ''
+      return `<h${token.depth}${idAttribute} tabindex="-1">${rendered}</h${token.depth}>\n`
+    }
+  }
+  if (enableCodeCopy) {
+    renderer.code = (token: Tokens.Code): string => {
+      const language = token.lang?.toLowerCase()
+      const rendered = markdownRenderer.code.call(renderer, token)
+      if (!isFencedCodeToken(token) || isSpecialCodeLanguage(language)) {
+        return rendered
+      }
+
+      const codeClass = language
+        ? ` class="language-${escapeHtml(language.split(/\s/)[0])}"`
+        : ''
+      const buttonClass = buttonVariants({ variant: 'ghost', size: 'xs' })
+      return `<div data-markdown-code-block class="not-prose markdown-code-block"><div class="flex justify-end border-b px-2 py-1"><button type="button" data-markdown-code-copy aria-live="polite" aria-label="${escapeHtml(codeCopyLabel)}" class="${buttonClass}">${escapeHtml(codeCopyLabel)}</button></div><pre><code${codeClass}>${escapeHtml(token.text)}</code></pre></div>`
+    }
+  }
   if (imageUrlFilter) {
     renderer.image = (token) => {
       if (!imageUrlFilter(token.href)) return escapeHtml(token.text)
@@ -777,6 +856,8 @@ function renderMarkdown(
 }
 
 export function Markdown(props: MarkdownProps) {
+  const { t } = useTranslation()
+  const containerRef = useRef<HTMLDivElement>(null)
   const html = useMemo(
     () =>
       renderMarkdown(
@@ -784,7 +865,9 @@ export function Markdown(props: MarkdownProps) {
         props.breaks,
         props.baseUrl,
         props.allowHtml,
-        props.imageUrlFilter
+        props.imageUrlFilter,
+        props.headingIds,
+        props.enableCodeCopy
       ),
     [
       props.breaks,
@@ -792,11 +875,78 @@ export function Markdown(props: MarkdownProps) {
       props.baseUrl,
       props.allowHtml,
       props.imageUrlFilter,
+      props.headingIds,
+      props.enableCodeCopy,
     ]
   )
+  // Keep the parsed DOM (copy state, focus and observed heading elements) intact
+  // when the surrounding article updates only its active chapter.
+  const innerHTML = useMemo(() => ({ __html: html }), [html])
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!props.enableCodeCopy || !container) return
+    const resetTimers = new Map<HTMLButtonElement, number>()
+    let disposed = false
+
+    // Translate only the controls; replacing the article HTML on a language
+    // switch would detach the headings observed by the reading navigation.
+    container
+      .querySelectorAll<HTMLButtonElement>('button[data-markdown-code-copy]')
+      .forEach((button) => {
+        button.textContent = t('Copy code')
+        button.setAttribute('aria-label', t('Copy code'))
+        button.disabled = false
+        delete button.dataset.copied
+      })
+
+    const handleCodeCopy = async (event: Event) => {
+      if (!(event.target instanceof Element)) return
+      const button = event.target.closest<HTMLButtonElement>(
+        'button[data-markdown-code-copy]'
+      )
+      if (!button || !container.contains(button) || button.disabled) return
+      const code = button
+        .closest('[data-markdown-code-block]')
+        ?.querySelector('pre > code')
+      if (!code) return
+
+      button.disabled = true
+      const success = await copyToClipboard(code.textContent ?? '')
+      if (disposed) return
+      button.disabled = false
+      if (!success) {
+        toast.error(t('Failed to copy to clipboard'))
+        return
+      }
+
+      const existingTimer = resetTimers.get(button)
+      if (existingTimer !== undefined) window.clearTimeout(existingTimer)
+      button.textContent = t('Copied!')
+      button.setAttribute('aria-label', t('Copied!'))
+      button.dataset.copied = 'true'
+      resetTimers.set(
+        button,
+        window.setTimeout(() => {
+          button.textContent = t('Copy code')
+          button.setAttribute('aria-label', t('Copy code'))
+          delete button.dataset.copied
+          resetTimers.delete(button)
+        }, 2000)
+      )
+    }
+
+    container.addEventListener('click', handleCodeCopy)
+    return () => {
+      disposed = true
+      container.removeEventListener('click', handleCodeCopy)
+      resetTimers.forEach((timer) => window.clearTimeout(timer))
+    }
+  }, [html, props.enableCodeCopy, t])
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         'prose prose-sm dark:prose-invert max-w-none',
         '[&_h1]:mt-6 [&_h1]:mb-3 [&_h1]:text-2xl [&_h1]:font-semibold',
@@ -824,11 +974,13 @@ export function Markdown(props: MarkdownProps) {
         '[&_.markdown-sequence-lifeline]:stroke-primary [&_.markdown-sequence-lifeline]:stroke-[1.5]',
         '[&_.markdown-sequence-note]:fill-warning/20 [&_.markdown-sequence-note]:stroke-warning',
         '[&_.markdown-sequence-note-text]:fill-foreground [&_.markdown-sequence-note-text]:text-xs',
+        props.enableCodeCopy &&
+          '[&_.markdown-code-block]:my-3 [&_.markdown-code-block]:min-w-0 [&_.markdown-code-block]:rounded-md [&_.markdown-code-block]:border [&_.markdown-code-block]:bg-muted [&_.markdown-code-block_pre]:my-0 [&_.markdown-code-block_pre]:border-0 [&_.markdown-code-block_pre]:rounded-none [&_button[data-copied]]:text-success',
         '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         '[overflow-wrap:anywhere]',
         props.className
       )}
-      dangerouslySetInnerHTML={{ __html: html }}
+      dangerouslySetInnerHTML={innerHTML}
     />
   )
 }

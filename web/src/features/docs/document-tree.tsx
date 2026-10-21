@@ -51,9 +51,10 @@ export function DocumentTree(props: DocumentTreeProps) {
                 variant='ghost'
                 size='sm'
                 aria-current={active ? 'page' : undefined}
+                title={node.title}
                 onClick={() => props.onSelectArticle(node.slug)}
                 className={cn(
-                  'h-9 w-full justify-start gap-2 px-2 text-left font-normal',
+                  'h-auto min-h-9 w-full justify-start gap-2 px-2 py-1 text-left font-normal',
                   active && 'bg-accent text-accent-foreground font-medium'
                 )}
               >
@@ -63,7 +64,9 @@ export function DocumentTree(props: DocumentTreeProps) {
                   strokeWidth={2}
                   aria-hidden='true'
                 />
-                <span className='min-w-0 flex-1 truncate'>{node.title}</span>
+                <span className='min-w-0 flex-1 wrap-anywhere whitespace-normal'>
+                  {node.title}
+                </span>
               </Button>
             </li>
           )
@@ -101,14 +104,19 @@ export function DocumentTree(props: DocumentTreeProps) {
                   />
                 </Button>
               )}
-              <span className='flex h-9 min-w-0 flex-1 items-center gap-2 px-1 text-sm font-medium'>
+              <span className='flex min-h-9 min-w-0 flex-1 items-center gap-2 px-1 py-1 text-sm font-medium'>
                 <HugeiconsIcon
                   icon={Folder01Icon}
                   strokeWidth={2}
                   className='text-primary size-4 shrink-0'
                   aria-hidden='true'
                 />
-                <span className='truncate'>{node.name}</span>
+                <span
+                  title={node.name}
+                  className='min-w-0 wrap-anywhere whitespace-normal'
+                >
+                  {node.name}
+                </span>
               </span>
             </div>
             {isExpanded && node.children.length > 0 && (

@@ -102,7 +102,7 @@ export function DocsLayout(props: { children: ReactNode }) {
     <PublicLayout showMainContainer={false}>
       <Sheet open={mobileDirectoryOpen} onOpenChange={setMobileDirectoryOpen}>
         <div className='min-h-svh pt-16'>
-          <div className='mx-auto grid min-h-[calc(100svh-4rem)] w-full max-w-[1800px] lg:grid-cols-[280px_minmax(0,1fr)]'>
+          <div className='mx-auto grid min-h-[calc(100svh-4rem)] w-full max-w-[2200px] lg:grid-cols-[340px_minmax(0,1fr)]'>
             <aside className='bg-muted/20 border-border sticky top-16 hidden h-[calc(100svh-4rem)] min-h-0 flex-col border-e lg:flex'>
               <DirectoryPanel id='docs-search-desktop' {...panelProps} />
             </aside>
