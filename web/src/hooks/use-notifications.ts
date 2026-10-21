@@ -16,176 +16,360 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
-import { useState, useMemo } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import { useStatus } from '@/hooks/use-status'
 import { getNotice } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
+import { statusQueryOptions } from '@/lib/status-query'
+import { useAuthStore } from '@/stores/auth-store'
 import { useNotificationStore } from '@/stores/notification-store'
 
-function hashString(input: string): string {
-  let hash = 0
-  if (!input) return '0'
+interface AnnouncementItem {
+  id?: number | string
+  type?: string
+  content?: string
+  extra?: string
+  publishDate?: string | Date
+}
 
-  for (let i = 0; i < input.length; i += 1) {
-    const chr = input.charCodeAt(i)
-    hash = (hash << 5) - hash + chr
-    hash |= 0
-  }
+interface NotificationSnapshot {
+  notice: string
+  noticeVersion: string | null
+  announcements: AnnouncementItem[]
+  announcementsVersion: string | null
+}
 
-  return hash.toString(36)
+function getAnnouncementsVersion(announcements: AnnouncementItem[]): string {
+  return JSON.stringify(
+    announcements.map((item) => ({
+      id: item.id ?? null,
+      content: (item.content || '').trim(),
+      extra: (item.extra || '').trim(),
+      type: item.type || '',
+      publishDate: item.publishDate || '',
+    }))
+  )
+}
+
+function hasUnconfirmedNotice(
+  snapshot: NotificationSnapshot,
+  confirmed: string | null
+) {
+  return (
+    snapshot.noticeVersion !== null &&
+    snapshot.noticeVersion !== confirmed &&
+    (snapshot.notice.length > 0 || confirmed !== null)
+  )
+}
+
+function hasUnconfirmedAnnouncements(
+  snapshot: NotificationSnapshot,
+  confirmed: string | null
+) {
+  return (
+    snapshot.announcementsVersion !== null &&
+    snapshot.announcementsVersion !== confirmed &&
+    (snapshot.announcements.length > 0 || confirmed !== null)
+  )
 }
 
 /**
- * Generate a unique key for an announcement
- * Prefer backend id, fall back to a content hash so edits register
+ * Reads the current Notice and timeline versions. A dialog snapshot is frozen
+ * when opened and only those versions are confirmed when the user closes it.
  */
-function getAnnouncementKey(item: Record<string, unknown>): string {
-  if (!item) return ''
+export function useNotifications(enabled = true) {
+  const queryClient = useQueryClient()
+  const userId = useAuthStore((state) => state.auth.user?.id ?? null)
+  const isAuthenticated = userId !== null
 
-  if (item.id !== undefined && item.id !== null) {
-    return `id:${item.id}`
-  }
-
-  const fingerprint = JSON.stringify({
-    publishDate: (item?.publishDate as string) || '',
-    content: ((item?.content as string) || '').trim(),
-    extra: ((item?.extra as string) || '').trim(),
-    type: (item?.type as string) || '',
-    title: ((item?.title as string) || '').trim(),
-    link: ((item?.link as string) || '').trim(),
+  const noticeQuery = useQuery({
+    queryKey: ['notice'],
+    queryFn: async () => requireServerSuccess(await getNotice()),
+    staleTime: 1000 * 60 * 5,
+    enabled,
   })
-  return `hash:${hashString(fingerprint)}`
-}
+  const statusQuery = useQuery({ ...statusQueryOptions, enabled })
 
-/**
- * Hook to manage notifications (Notice + Announcements)
- * Provides unread counts and read status management
- */
-export function useNotifications() {
   const [popoverOpen, setPopoverOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<'notice' | 'announcements'>(
     'notice'
   )
+  const [latestSnapshot, setLatestSnapshot] =
+    useState<NotificationSnapshot | null>(null)
+  const [dialogSnapshot, setDialogSnapshotState] =
+    useState<NotificationSnapshot | null>(null)
+  const isDialogOpenRef = useRef(false)
+  const isMountedRef = useRef(false)
+  const checkGenerationRef = useRef(0)
+  const checkPromiseRef = useRef<Promise<void> | null>(null)
+  const latestSnapshotRef = useRef<NotificationSnapshot | null>(null)
+  const dialogSnapshotRef = useRef<NotificationSnapshot | null>(null)
+  const activeTabRef = useRef(activeTab)
 
-  // Fetch Notice from API
-  const {
-    data: noticeResponse,
-    isLoading: noticeLoading,
-    refetch: refetchNotice,
-  } = useQuery({
-    queryKey: ['notice'],
-    queryFn: async () => requireServerSuccess(await getNotice()),
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  })
+  const confirmedNoticeVersion = useNotificationStore(
+    (state) => state.confirmedNoticeVersion
+  )
+  const confirmedAnnouncementsVersion = useNotificationStore(
+    (state) => state.confirmedAnnouncementsVersion
+  )
+  const setLatest = useCallback((snapshot: NotificationSnapshot) => {
+    latestSnapshotRef.current = snapshot
+    setLatestSnapshot(snapshot)
+  }, [])
 
-  // Fetch Announcements from status
-  const { status, loading: statusLoading } = useStatus()
-  const announcementsEnabled = status?.announcements_enabled ?? false
-  const announcements = useMemo<Record<string, unknown>[]>(() => {
-    if (!announcementsEnabled) return []
-    return ((status?.announcements || []) as Record<string, unknown>[]).slice(
-      0,
-      20
-    )
-  }, [announcementsEnabled, status?.announcements])
+  const setDialogSnapshot = useCallback(
+    (snapshot: NotificationSnapshot | null) => {
+      dialogSnapshotRef.current = snapshot
+      setDialogSnapshotState(snapshot)
+    },
+    []
+  )
 
-  // Notification store
-  const {
-    lastReadNotice,
-    markNoticeRead,
-    markAnnouncementsRead,
-    isAnnouncementRead,
-  } = useNotificationStore()
+  const setTab = useCallback((tab: 'notice' | 'announcements') => {
+    activeTabRef.current = tab
+    setActiveTab(tab)
+  }, [])
 
-  // Extract notice content
-  const noticeContent = noticeResponse?.success
-    ? (noticeResponse.data || '').trim()
-    : ''
+  const announcements = useMemo<AnnouncementItem[]>(() => {
+    const status = statusQuery.data
+    if (!status || status.announcements_enabled !== true) return []
+    return ((status.announcements || []) as AnnouncementItem[]).slice(0, 20)
+  }, [statusQuery.data])
 
-  // Calculate unread counts
-  const unreadCounts = useMemo(() => {
-    const noticeUnread =
-      noticeContent && noticeContent !== lastReadNotice ? 1 : 0
-
-    const announcementsUnread = announcements.filter(
-      (item: Record<string, unknown>) => {
-        const key = getAnnouncementKey(item)
-        return !isAnnouncementRead(key)
-      }
-    ).length
-
+  const currentQuerySnapshot = useMemo<NotificationSnapshot>(() => {
+    const notice =
+      noticeQuery.data?.success === true
+        ? (noticeQuery.data.data || '').trim()
+        : ''
+    const timelineEnabled = statusQuery.data?.announcements_enabled === true
     return {
-      notice: noticeUnread,
-      announcements: announcementsUnread,
-      total: noticeUnread + announcementsUnread,
+      notice,
+      noticeVersion: noticeQuery.isSuccess ? notice : null,
+      announcements,
+      announcementsVersion:
+        statusQuery.isSuccess && timelineEnabled
+          ? getAnnouncementsVersion(announcements)
+          : null,
     }
-  }, [noticeContent, lastReadNotice, announcements, isAnnouncementRead])
+  }, [
+    announcements,
+    noticeQuery.data,
+    noticeQuery.isSuccess,
+    statusQuery.data,
+    statusQuery.isSuccess,
+  ])
 
-  const markAnnouncementsAsRead = () => {
-    if (announcements.length > 0) {
-      const allKeys = announcements.map((item: Record<string, unknown>) =>
-        getAnnouncementKey(item)
-      )
-      markAnnouncementsRead(allKeys)
+  const checkForUpdates = useCallback((): Promise<void> => {
+    if (!enabled || !isAuthenticated) return Promise.resolve()
+    if (checkPromiseRef.current) return checkPromiseRef.current
+    const generation = checkGenerationRef.current
+
+    const checkPromise = (async () => {
+      const [noticeResult, statusResult] = await Promise.allSettled([
+        queryClient.fetchQuery({
+          queryKey: ['notice'],
+          queryFn: async () => requireServerSuccess(await getNotice()),
+          staleTime: 0,
+        }),
+        queryClient.fetchQuery({ ...statusQueryOptions, staleTime: 0 }),
+      ])
+
+      // A pending public request may finish after navigation or sign-out.
+      if (
+        !isMountedRef.current ||
+        generation !== checkGenerationRef.current ||
+        useAuthStore.getState().auth.user?.id !== userId
+      ) {
+        return
+      }
+
+      const noticeSucceeded = noticeResult.status === 'fulfilled'
+      const statusSucceeded = statusResult.status === 'fulfilled'
+      let fetchedNotice = ''
+      if (noticeSucceeded && noticeResult.value.success === true) {
+        fetchedNotice = (noticeResult.value.data || '').trim()
+      }
+      const fetchedStatus = statusSucceeded ? statusResult.value : null
+      const timelineEnabled = fetchedStatus?.announcements_enabled === true
+      const fetchedAnnouncements = timelineEnabled
+        ? ((fetchedStatus?.announcements || []) as AnnouncementItem[]).slice(
+            0,
+            20
+          )
+        : []
+
+      const previous = latestSnapshotRef.current
+      const snapshot: NotificationSnapshot = {
+        notice: noticeSucceeded ? fetchedNotice : (previous?.notice ?? ''),
+        noticeVersion: noticeSucceeded ? fetchedNotice : null,
+        announcements: statusSucceeded
+          ? fetchedAnnouncements
+          : (previous?.announcements ?? []),
+        announcementsVersion:
+          statusSucceeded && timelineEnabled
+            ? getAnnouncementsVersion(fetchedAnnouncements)
+            : null,
+      }
+
+      if (noticeSucceeded || statusSucceeded) {
+        setLatest(snapshot)
+
+        const currentStore = useNotificationStore.getState()
+        const noticeUpdated =
+          noticeSucceeded &&
+          hasUnconfirmedNotice(snapshot, currentStore.confirmedNoticeVersion)
+        const announcementsUpdated =
+          statusSucceeded &&
+          timelineEnabled &&
+          hasUnconfirmedAnnouncements(
+            snapshot,
+            currentStore.confirmedAnnouncementsVersion
+          )
+
+        if (
+          isAuthenticated &&
+          !isDialogOpenRef.current &&
+          (noticeUpdated || announcementsUpdated)
+        ) {
+          let nextTab = activeTabRef.current
+          if (noticeUpdated && !announcementsUpdated) {
+            nextTab = 'notice'
+          } else if (announcementsUpdated && !noticeUpdated) {
+            nextTab = 'announcements'
+          }
+          setTab(nextTab)
+          setDialogSnapshot(snapshot)
+          isDialogOpenRef.current = true
+          setPopoverOpen(true)
+        }
+      }
+    })().finally(() => {
+      if (checkPromiseRef.current === checkPromise) {
+        checkPromiseRef.current = null
+      }
+    })
+
+    checkPromiseRef.current = checkPromise
+    return checkPromise
+  }, [
+    enabled,
+    isAuthenticated,
+    queryClient,
+    setDialogSnapshot,
+    setLatest,
+    setTab,
+    userId,
+  ])
+
+  useEffect(() => {
+    isMountedRef.current = true
+    isDialogOpenRef.current = false
+    setPopoverOpen(false)
+    setDialogSnapshot(null)
+    latestSnapshotRef.current = null
+    setLatestSnapshot(null)
+    void checkForUpdates()
+
+    const checkWhenVisible = () => {
+      if (document.visibilityState === 'visible') void checkForUpdates()
     }
-  }
-
-  // Handle popover open
-  const handleOpenPopover = (tab?: 'notice' | 'announcements') => {
-    const nextTab = tab || activeTab
-
-    // Mark currently visible content as read when opening the notification center
-    if (noticeContent) {
-      markNoticeRead(noticeContent)
+    window.addEventListener('focus', checkWhenVisible)
+    document.addEventListener('visibilitychange', checkWhenVisible)
+    return () => {
+      isMountedRef.current = false
+      checkGenerationRef.current += 1
+      checkPromiseRef.current = null
+      window.removeEventListener('focus', checkWhenVisible)
+      document.removeEventListener('visibilitychange', checkWhenVisible)
     }
-    if (nextTab === 'announcements') {
-      markAnnouncementsAsRead()
-    }
+  }, [checkForUpdates, setDialogSnapshot])
 
-    setActiveTab(nextTab)
-    setPopoverOpen(true)
-  }
-
-  const handlePopoverOpenChange = (open: boolean) => {
-    if (open) {
-      handleOpenPopover(activeTab)
+  useEffect(() => {
+    // Manual opening can happen before the first requests finish. Capture
+    // their settled result once, then keep it frozen until the dialog closes.
+    if (
+      !popoverOpen ||
+      dialogSnapshot !== null ||
+      noticeQuery.isFetching ||
+      statusQuery.isFetching ||
+      noticeQuery.isPending ||
+      statusQuery.isPending
+    ) {
       return
     }
+    setDialogSnapshot(currentQuerySnapshot)
+  }, [
+    currentQuerySnapshot,
+    dialogSnapshot,
+    noticeQuery.isFetching,
+    noticeQuery.isPending,
+    popoverOpen,
+    setDialogSnapshot,
+    statusQuery.isFetching,
+    statusQuery.isPending,
+  ])
 
-    setPopoverOpen(false)
-  }
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) {
+        const pending = noticeQuery.isFetching || statusQuery.isFetching
+        setDialogSnapshot(pending ? null : currentQuerySnapshot)
+        isDialogOpenRef.current = true
+        setPopoverOpen(true)
+        return
+      }
 
-  // Handle tab change - mark announcements as read when switching to that tab
-  const handleTabChange = (tab: 'notice' | 'announcements') => {
-    setActiveTab(tab)
+      const snapshot = dialogSnapshotRef.current
+      if (snapshot) {
+        useNotificationStore
+          .getState()
+          .confirmVersions(
+            snapshot.noticeVersion,
+            snapshot.announcementsVersion
+          )
+      }
+      isDialogOpenRef.current = false
+      setPopoverOpen(false)
+      setDialogSnapshot(null)
+    },
+    [
+      currentQuerySnapshot,
+      noticeQuery.isFetching,
+      setDialogSnapshot,
+      statusQuery.isFetching,
+    ]
+  )
 
-    if (tab === 'announcements') {
-      markAnnouncementsAsRead()
-    }
-  }
+  const latest = latestSnapshot ?? currentQuerySnapshot
+  const unreadNotice = hasUnconfirmedNotice(latest, confirmedNoticeVersion)
+  const unreadAnnouncements = hasUnconfirmedAnnouncements(
+    latest,
+    confirmedAnnouncementsVersion
+  )
+  const shownSnapshot = dialogSnapshot ?? currentQuerySnapshot
 
   return {
-    // Data
-    notice: noticeContent,
-    announcements,
-    loading: noticeLoading || statusLoading,
-
-    // Unread counts
-    unreadCount: unreadCounts.total,
-    unreadNoticeCount: unreadCounts.notice,
-    unreadAnnouncementsCount: unreadCounts.announcements,
-
-    // Popover state
+    notice: shownSnapshot.notice,
+    announcements: shownSnapshot.announcements,
+    loading:
+      dialogSnapshot === null &&
+      (noticeQuery.isFetching ||
+        statusQuery.isFetching ||
+        noticeQuery.isPending ||
+        statusQuery.isPending),
+    unreadCount: Number(unreadNotice) + Number(unreadAnnouncements),
+    noticeUpdated: hasUnconfirmedNotice(shownSnapshot, confirmedNoticeVersion),
+    announcementsUpdated: hasUnconfirmedAnnouncements(
+      shownSnapshot,
+      confirmedAnnouncementsVersion
+    ),
     popoverOpen,
-    setPopoverOpen: handlePopoverOpenChange,
+    setPopoverOpen: handleOpenChange,
     activeTab,
-    setActiveTab: handleTabChange,
-
-    // Actions
-    openPopover: handleOpenPopover,
-    closePopover: () => setPopoverOpen(false),
-    refetchNotice,
+    setActiveTab: setTab,
+    openPopover: () => handleOpenChange(true),
+    closePopover: () => handleOpenChange(false),
+    refetchNotice: noticeQuery.refetch,
   }
 }

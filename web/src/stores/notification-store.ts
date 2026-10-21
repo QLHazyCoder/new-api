@@ -20,68 +20,58 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 interface NotificationState {
-  // Last read Notice content signature (full trimmed message)
-  lastReadNotice: string
-  // Array of read announcement keys (id or content hash)
-  readAnnouncementKeys: string[]
-  // Timestamp of last "Close Today" action
-  closedUntilDate: string | null
+  confirmedNoticeVersion: string | null
+  confirmedAnnouncementsVersion: string | null
 
-  // Actions
-  markNoticeRead: (noticeContent: string) => void
-  markAnnouncementsRead: (keys: string[]) => void
-  setClosedUntilDate: (date: string | null) => void
-  isAnnouncementRead: (key: string) => boolean
-  isNoticeClosed: () => boolean
+  confirmVersions: (
+    noticeVersion: string | null,
+    announcementsVersion: string | null
+  ) => void
+}
+
+type LegacyNotificationState = {
+  lastReadNotice?: unknown
 }
 
 /**
- * Notification store for tracking read status of Notice and Announcements
- * Persists to localStorage to maintain state across sessions
+ * Persists the exact content versions confirmed by closing the notification
+ * dialog. Legacy timeline IDs cannot establish which content was confirmed,
+ * so existing timeline content needs one confirmation after this upgrade.
  */
 export const useNotificationStore = create<NotificationState>()(
   persist(
-    (set, get) => ({
-      lastReadNotice: '',
-      readAnnouncementKeys: [],
-      closedUntilDate: null,
+    (set) => ({
+      confirmedNoticeVersion: null,
+      confirmedAnnouncementsVersion: null,
 
-      markNoticeRead: (noticeContent: string) => {
-        // Persist the full trimmed content so edits beyond 100 chars register
-        const normalizedContent = noticeContent.trim()
-        set({ lastReadNotice: normalizedContent })
-      },
-
-      markAnnouncementsRead: (keys: string[]) => {
+      confirmVersions: (noticeVersion, announcementsVersion) => {
         set((state) => ({
-          readAnnouncementKeys: [
-            ...new Set([...state.readAnnouncementKeys, ...keys]),
-          ],
+          confirmedNoticeVersion: noticeVersion ?? state.confirmedNoticeVersion,
+          confirmedAnnouncementsVersion:
+            announcementsVersion ?? state.confirmedAnnouncementsVersion,
         }))
-      },
-
-      setClosedUntilDate: (date: string | null) => {
-        set({ closedUntilDate: date })
-      },
-
-      isAnnouncementRead: (key: string) => {
-        return get().readAnnouncementKeys.includes(key)
-      },
-
-      isNoticeClosed: () => {
-        const { closedUntilDate } = get()
-        if (!closedUntilDate) return false
-
-        const today = new Date().toDateString()
-        return closedUntilDate === today
       },
     }),
     {
       name: 'notification-storage',
+      version: 2,
+      migrate: (persistedState, version) => {
+        if (version >= 2) {
+          return persistedState as NotificationState
+        }
+
+        const legacyState = persistedState as LegacyNotificationState | null
+        return {
+          confirmedNoticeVersion:
+            typeof legacyState?.lastReadNotice === 'string'
+              ? legacyState.lastReadNotice.trim()
+              : null,
+          confirmedAnnouncementsVersion: null,
+        }
+      },
       partialize: (state) => ({
-        lastReadNotice: state.lastReadNotice,
-        readAnnouncementKeys: state.readAnnouncementKeys,
-        closedUntilDate: state.closedUntilDate,
+        confirmedNoticeVersion: state.confirmedNoticeVersion,
+        confirmedAnnouncementsVersion: state.confirmedAnnouncementsVersion,
       }),
     }
   )

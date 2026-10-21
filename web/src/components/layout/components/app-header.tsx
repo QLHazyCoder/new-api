@@ -109,7 +109,9 @@ export function AppHeader({
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
 
   // Notifications hook
-  const notifications = useNotifications()
+  const notifications = useNotifications(
+    showNotifications && (rightContent === undefined || rightContent === null)
+  )
 
   return (
     <Header>
@@ -142,6 +144,8 @@ export function AppHeader({
               notice={notifications.notice}
               announcements={notifications.announcements}
               loading={notifications.loading}
+              noticeUpdated={notifications.noticeUpdated}
+              announcementsUpdated={notifications.announcementsUpdated}
             />
           )}
           <LanguageSwitcher />
