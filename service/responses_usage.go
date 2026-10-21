@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"hash/crc32"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -10,6 +11,20 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/tokenkit"
 )
+
+const (
+	temporaryEstimatedCompletionMin = 30
+	temporaryEstimatedCompletionMax = 90
+)
+
+func temporaryEstimatedCompletion(requestID string) int {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return temporaryEstimatedCompletionMin
+	}
+	span := uint32(temporaryEstimatedCompletionMax - temporaryEstimatedCompletionMin + 1)
+	return temporaryEstimatedCompletionMin + int(crc32.ChecksumIEEE([]byte(requestID))%span)
+}
 
 // ResponsesUsageAccumulator owns the accounting facts for one Responses stream.
 // HTTP SSE and WebSocket transports feed the same events into it, then settle
@@ -21,7 +36,6 @@ type ResponsesUsageAccumulator struct {
 	outputText     strings.Builder
 	imageCounter   relaycommon.ImageGenerationCallCounter
 	imageCommitted bool
-	failed         bool
 	started        bool
 	finished       bool
 }
@@ -40,19 +54,11 @@ func (a *ResponsesUsageAccumulator) Observe(event *dto.ResponsesStreamResponse, 
 		a.info.ObserveResponseModel(event.Response.Model)
 	}
 	a.started = true
-	failed := observeResponsesOutcome(a.info, event)
-	a.failed = a.failed || failed
-	if failed && event.Response != nil {
-		// Error envelopes and failed response statuses can also carry usage
-		// without being one of the terminal event types below.
-		ApplyResponsesUsage(a.usage, event.Response.Usage)
-	}
+	ObserveResponsesOutcome(a.info, event)
 	switch event.Type {
 	case "response.completed", "response.done", "response.failed", "response.incomplete", "response.cancelled", "response.canceled":
 		if event.Response != nil {
-			if !failed {
-				ApplyResponsesUsage(a.usage, event.Response.Usage)
-			}
+			ApplyResponsesUsage(a.usage, event.Response.Usage)
 			if a.outputText.Len() == 0 {
 				// Some upstreams carry the output only on the terminal event.
 				a.outputText.WriteString(relayconvert.ExtractOutputTextFromResponses(event.Response))
@@ -105,16 +111,18 @@ func (a *ResponsesUsageAccumulator) Finish() *dto.Usage {
 		a.imageCounter.Commit(a.info)
 		a.imageCommitted = true
 	}
-	// Explicit failures retain only provider-reported token usage. Even a
-	// whitespace delta must not trigger an estimated prompt charge, and a
-	// reported zero must not be replaced by an output estimate.
-	if a.failed {
-		return a.usage
-	}
+	estimatedCompletion := false
 	if a.usage.CompletionTokens == 0 {
 		if output := a.outputText.String(); output != "" {
 			a.usage.CompletionTokens = tokenkit.Count(a.info.GetUpstreamModelName(), output)
+			estimatedCompletion = true
 		}
+	}
+	if estimatedCompletion && a.usage.CompletionTokens == 1 {
+		// Temporary operational estimate for streams without authoritative
+		// output usage. Keep it stable per request until upstream terminal usage
+		// is available again; reported provider usage never enters this branch.
+		a.usage.CompletionTokens = temporaryEstimatedCompletion(a.info.RequestId)
 	}
 	// Upstream bills the prompt as soon as it starts generating, so a stream
 	// that produced any event but no usage still owes its input tokens unless
@@ -134,25 +142,15 @@ func (a *ResponsesUsageAccumulator) Finish() *dto.Usage {
 // on the stream status for health classification. Only codes and types are
 // kept; messages never leave the event.
 func ObserveResponsesOutcome(info *relaycommon.RelayInfo, event *dto.ResponsesStreamResponse) {
-	observeResponsesOutcome(info, event)
-}
-
-// observeResponsesOutcome shares failure classification with accounting even
-// when the caller does not maintain a transport StreamStatus.
-func observeResponsesOutcome(info *relaycommon.RelayInfo, event *dto.ResponsesStreamResponse) bool {
-	if event == nil {
-		return false
+	if info == nil || info.StreamStatus == nil || event == nil {
+		return
 	}
 	var responseStatus string
 	if event.Response != nil {
 		_ = common.Unmarshal(event.Response.Status, &responseStatus)
 	}
-	failed := event.Type == "error" || event.Type == "response.failed" || event.Type == "response.error" || responseStatus == "failed"
-	if info == nil || info.StreamStatus == nil {
-		return failed
-	}
 	switch {
-	case failed:
+	case event.Type == "error" || event.Type == "response.failed" || event.Type == "response.error" || responseStatus == "failed":
 		code, errorType := event.Code, ""
 		if event.Response != nil {
 			if oaiErr := event.Response.GetOpenAIError(); oaiErr != nil {
@@ -174,7 +172,6 @@ func observeResponsesOutcome(info *relaycommon.RelayInfo, event *dto.ResponsesSt
 	case event.Type == "response.completed" || event.Type == "response.done" || responseStatus == "completed":
 		info.StreamStatus.MarkCompleted()
 	}
-	return failed
 }
 
 func ApplyResponsesUsage(dst *dto.Usage, src *dto.Usage) {
