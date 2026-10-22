@@ -1,4 +1,4 @@
-import { ready } from "./bridge";
+import { ready, reportCanvasFailure } from "./bridge";
 
 // Opaque-origin frames cannot access Web Storage. This in-memory object only
 // supports tiny upstream interface preferences, never projects or media.
@@ -28,4 +28,4 @@ Object.defineProperty(window, "sessionStorage", { value: new MemoryStorage() });
 
 // Dynamic import is intentional: no upstream module may touch storage before
 // the opaque-origin storage shim has been installed.
-void ready.then(() => import("./start"));
+void ready.then(() => import("./start")).catch(reportCanvasFailure);

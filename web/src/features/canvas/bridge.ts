@@ -195,7 +195,8 @@ export function canvasEndpoint(
 export function createCanvasBridge(
   port: MessagePort,
   closed: () => void,
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean = () => true,
+  loaded: () => void = () => undefined
 ): () => void {
   const requests = new Map<string, AbortController>()
   const acknowledgements = new Map<string, () => void>()
@@ -203,11 +204,17 @@ export function createCanvasBridge(
   let disposed = false
   port.onmessage = async (
     event: MessageEvent<
-      CanvasRequest | { type: 'cancel' | 'ack' | 'fatal'; id: string }
+      | CanvasRequest
+      | { type: 'cancel' | 'ack'; id: string }
+      | { type: 'fatal' | 'loaded' }
     >
   ) => {
     const message = event.data
     if (!message || disposed || !isCurrent()) return
+    if (message.type === 'loaded') {
+      loaded()
+      return
+    }
     if (message.type === 'fatal') {
       closed()
       return

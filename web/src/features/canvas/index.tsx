@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
+import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { createCanvasBridge } from './bridge'
@@ -41,25 +42,52 @@ export function Canvas() {
     if (!userID || !sid) return
     const frame = iframe.current
     if (!frame) return
+    let active = true
     let dispose: (() => void) | undefined
     let channel: MessageChannel | undefined
-    const timeout = window.setTimeout(() => setStatus('failed'), 30_000)
+    const fail = () => {
+      if (!active) return
+      active = false
+      window.clearTimeout(timeout)
+      dispose?.()
+      channel?.port1.close()
+      frame.src = 'about:blank'
+      setStatus('failed')
+    }
+    // A connected channel does not mean that the application has loaded.
+    // Keep this deadline until its first successful render.
+    const timeout = window.setTimeout(fail, 30_000)
     const initialize = () => {
+      if (!active) return
       dispose?.()
       channel?.port1.close()
       channel = new MessageChannel()
       const activeChannel = channel
       const nonce = crypto.randomUUID()
       channel.port1.onmessage = (event: MessageEvent) => {
-        if (event.data?.type !== 'ready' || event.data.nonce !== nonce) return
-        window.clearTimeout(timeout)
-        setStatus('ready')
+        if (
+          !active ||
+          channel !== activeChannel ||
+          event.data?.type !== 'ready' ||
+          event.data.nonce !== nonce
+        ) {
+          return
+        }
         dispose = createCanvasBridge(
           activeChannel.port1,
-          () => setStatus('failed'),
+          fail,
           () => {
             const current = useAuthStore.getState().auth
-            return current.user?.id === userID && current.session?.sid === sid
+            return (
+              active &&
+              channel === activeChannel &&
+              current.user?.id === userID &&
+              current.session?.sid === sid
+            )
+          },
+          () => {
+            window.clearTimeout(timeout)
+            setStatus('ready')
           }
         )
       }
@@ -74,6 +102,7 @@ export function Canvas() {
     // This effect installs the listener before assigning src.
     frame.src = '/canvas-app/index.html#/canvas'
     return () => {
+      active = false
       frame.removeEventListener('load', initialize)
       window.clearTimeout(timeout)
       dispose?.()
@@ -97,11 +126,11 @@ export function Canvas() {
         ref={iframe}
         title={t('Infinite Canvas')}
         sandbox='allow-scripts allow-downloads'
-        className={
-          status === 'failed'
-            ? 'hidden'
-            : 'h-full min-h-0 w-full flex-1 border-0'
-        }
+        className={cn(
+          'h-full min-h-0 w-full flex-1 border-0',
+          status === 'loading' && 'invisible',
+          status === 'failed' && 'hidden'
+        )}
         referrerPolicy='same-origin'
         aria-busy={status === 'loading'}
       />

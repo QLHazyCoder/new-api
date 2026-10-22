@@ -11,9 +11,20 @@ import { useAgentStore } from "../stores/use-agent-store";
 import { usePromptSourceStore } from "../stores/use-prompt-source-store";
 import { initializeConfig } from "./config";
 import { router } from "./layout";
-import { reportCanvasFailure } from "./bridge";
+import { reportCanvasFailure, reportCanvasReady } from "./bridge";
 
-const root = createRoot(document.getElementById("root")!);
+export function CanvasApplication() {
+  React.useEffect(reportCanvasReady, []);
+  return (
+    <AppProviders>
+      <RouterProvider router={router} />
+    </AppProviders>
+  );
+}
+
+const rootElement = document.querySelector<HTMLElement>("#root");
+if (!rootElement) throw new Error("Canvas root element is unavailable");
+const root = createRoot(rootElement);
 // Agent is disabled at its execution/store boundary as well as at the UI.
 useAgentStore.setState({
   enabled: false,
@@ -31,9 +42,7 @@ initializeConfig()
   .then(() => {
     root.render(
       <React.StrictMode>
-        <AppProviders>
-          <RouterProvider router={router} />
-        </AppProviders>
+        <CanvasApplication />
       </React.StrictMode>,
     );
   })

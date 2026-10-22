@@ -23,8 +23,9 @@ export const ready = new Promise<void>((resolve) => {
       event.data?.type !== "canvas:init" ||
       event.data.protocol !== 1 ||
       !event.ports[0]
-    )
+    ) {
       return;
+    }
     const parentOrigin = new URL(document.referrer).origin;
     if (event.origin !== parentOrigin || typeof event.data.nonce !== "string") return;
     window.removeEventListener("message", initialize);
@@ -78,6 +79,10 @@ export const ready = new Promise<void>((resolve) => {
 
 export function reportCanvasFailure(): void {
   port?.postMessage({ type: "fatal" });
+}
+
+export function reportCanvasReady(): void {
+  port.postMessage({ type: "loaded" });
 }
 
 export async function canvasRequest(

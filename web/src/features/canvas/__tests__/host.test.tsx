@@ -80,6 +80,66 @@ afterEach(() => {
 })
 
 describe('Canvas host lifecycle', () => {
+  it('keeps loading until the connected child has rendered its application', () => {
+    render(<Canvas />)
+    const frame = screen.getByTitle('Infinite Canvas') as HTMLIFrameElement
+    const frameWindow = frame.contentWindow
+    if (!frameWindow) throw new Error('Iframe window is unavailable')
+    const postMessage = vi.spyOn(frameWindow, 'postMessage')
+    fireEvent.load(frame)
+    const initialization = postMessage.mock.calls.at(-1)?.[0] as {
+      nonce: string
+    }
+    const port = channels.at(-1)?.port1
+    expect(port).toBeDefined()
+    act(() => {
+      port?.onmessage?.(
+        new MessageEvent('message', {
+          data: { type: 'ready', nonce: initialization.nonce },
+        })
+      )
+    })
+    expect(frame.getAttribute('aria-busy')).toBe('true')
+    expect(frame.classList.contains('invisible')).toBe(true)
+    act(() => {
+      port?.onmessage?.(
+        new MessageEvent('message', { data: { type: 'loaded' } })
+      )
+    })
+    expect(frame.getAttribute('aria-busy')).toBe('false')
+    expect(frame.classList.contains('invisible')).toBe(false)
+    expect(screen.queryByText('Loading...')).toBeNull()
+  })
+  it('shows a retry when initialization stalls after the channel connects', () => {
+    vi.useFakeTimers()
+    render(<Canvas />)
+    const frame = screen.getByTitle('Infinite Canvas') as HTMLIFrameElement
+    const frameWindow = frame.contentWindow
+    if (!frameWindow) throw new Error('Iframe window is unavailable')
+    const postMessage = vi.spyOn(frameWindow, 'postMessage')
+    fireEvent.load(frame)
+    const initialization = postMessage.mock.calls.at(-1)?.[0] as {
+      nonce: string
+    }
+    const port = channels.at(-1)?.port1
+    expect(port).toBeDefined()
+    act(() => {
+      port?.onmessage?.(
+        new MessageEvent('message', {
+          data: { type: 'ready', nonce: initialization.nonce },
+        })
+      )
+      vi.advanceTimersByTime(30_000)
+    })
+    expect(screen.getByText('Unable to open canvas')).toBeTruthy()
+    expect(port?.close).toHaveBeenCalled()
+    act(() => {
+      port?.onmessage?.(
+        new MessageEvent('message', { data: { type: 'loaded' } })
+      )
+    })
+    expect(screen.getByText('Unable to open canvas')).toBeTruthy()
+  })
   it('restricts the iframe and closes the former account channel on account switch', () => {
     render(<Canvas />)
     const frame = screen.getByTitle('Infinite Canvas') as HTMLIFrameElement
