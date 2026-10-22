@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Group type definitions and assignments must be updated together": "Group type definitions and assignments must be updated together",
+    "Group types must be a JSON object": "Group types must be a JSON object",
+    "Group type ID must be non-empty and trimmed": "Group type ID must be non-empty and trimmed",
+    "Group type ID is reserved for automatic routing": "Group type ID is reserved for automatic routing",
+    "Group type name must not be empty: {{type}}": "Group type name must not be empty: {{type}}",
+    "Group type name must be unique: {{name}}": "Group type name must be unique: {{name}}",
+    "Group type assignments must be a JSON object": "Group type assignments must be a JSON object",
+    "Group name must be non-empty and trimmed": "Group name must be non-empty and trimmed",
+    "Automatic routing cannot be assigned a group type": "Automatic routing cannot be assigned a group type",
+    "Group type ID must be non-empty and trimmed: {{group}}": "Group type ID must be non-empty and trimmed: {{group}}",
+    "Group type {{type}} does not exist (group {{group}})": "Group type {{type}} does not exist (group {{group}})",
+    "Group {{group}} does not exist in group ratios": "Group {{group}} does not exist in group ratios",
+    "GroupRatio must be a JSON object": "GroupRatio must be a JSON object",
     "Infinite Canvas": "Infinite Canvas",
     "Unable to open canvas": "Unable to open canvas",
     "Create with images, video, audio, and text on a canvas": "Create with images, video, audio, and text on a canvas",

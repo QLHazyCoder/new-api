@@ -34,11 +34,13 @@ type UserGroupOptions struct {
 func GetUserGroupOptions(userGroup string) UserGroupOptions {
 	usableGroups := GetUserUsableGroups(userGroup)
 	groupRatios := ratio_setting.GetGroupRatioCopy()
-	groupTypes := ratio_setting.GetGroupTypesCopy()
-	groupTypeMap := ratio_setting.GetGroupTypeMapCopy()
+	groupTypes, groupTypeMap := ratio_setting.GetGroupTypeOptionsCopy()
 
 	types := make([]GroupTypeOption, 0, len(groupTypes))
 	for typeID, typeInfo := range groupTypes {
+		if typeID == ratio_setting.AutoGroupTypeID {
+			continue
+		}
 		types = append(types, GroupTypeOption{
 			ID:    typeID,
 			Name:  typeInfo.Name,
@@ -66,7 +68,7 @@ func GetUserGroupOptions(userGroup string) UserGroupOptions {
 			Ratio: GetUserGroupRatio(userGroup, groupName),
 			Desc:  desc,
 		}
-		if typeID, ok := groupTypeMap[groupName]; ok && typeID != "" {
+		if typeID, ok := groupTypeMap[groupName]; ok && typeID != "" && typeID != ratio_setting.AutoGroupTypeID {
 			if typeInfo, ok := groupTypes[typeID]; ok {
 				option.Type = &GroupTypeOption{
 					ID:    typeID,

@@ -471,6 +471,32 @@ describe('API keys mutate drawer group types', () => {
     expect(findButton('Save changes', true).disabled).toBe(true)
     expect(screen.queryByText('Untyped access')).toBe(null)
   })
+
+  test('ignores the reserved automatic routing ID returned as a type', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    const reservedType: FixtureGroupType = {
+      id: '__auto__',
+      name: 'Imported routing',
+      order: 0,
+    }
+    const fixture: DrawerFixture = {
+      defaultUseAutoGroup: false,
+      groups: {
+        auto: { desc: 'Automatic routing', ratio: 'auto' },
+        default: { desc: 'Standard access', ratio: 1 },
+      },
+      groupTypes: [reservedType],
+      autoGroups: ['default'],
+      maxAutoGroups: 3,
+    }
+    installApiFixtures(createdPayloads, fixture)
+    await renderCreateDrawer(fixture)
+
+    expect(screen.queryByRole('button', { name: /Imported routing/ })).toBe(
+      null
+    )
+    expect(getControlByLabel('Group').disabled).toBe(false)
+  })
 })
 
 const EXISTING_UNCLASSIFIED_KEY: ApiKeyRow = {

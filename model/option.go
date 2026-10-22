@@ -1,11 +1,13 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -24,6 +26,14 @@ type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
 	Value string `json:"value"`
 }
+
+const (
+	groupTypesOptionKey   = "group_ratio_setting.group_types"
+	groupTypeMapOptionKey = "group_ratio_setting.group_type_map"
+	groupRatioOptionKey   = "GroupRatio"
+)
+
+var groupTypeOptionsUpdateMutex sync.Mutex
 
 // normalizeLegacyOptionValue repairs the historical nil sentinel emitted by
 // older deployments for this JSON-backed option. Passing it to the ratio map
@@ -207,6 +217,8 @@ func InitOptionMap() {
 }
 
 func loadOptionsFromDatabase() {
+	groupTypeOptionsUpdateMutex.Lock()
+	defer groupTypeOptionsUpdateMutex.Unlock()
 	requestPolicyOptionMutex.Lock()
 	defer requestPolicyOptionMutex.Unlock()
 	defer func() {
@@ -222,9 +234,18 @@ func loadOptionsFromDatabase() {
 		return
 	}
 	passkeyOptions := make(map[string]string)
+	groupTypesJSON, groupTypeMapJSON := "{}", "{}"
 	for _, option := range options {
 		if IsPasskeyDomainOption(option.Key) {
 			passkeyOptions[option.Key] = option.Value
+			continue
+		}
+		switch option.Key {
+		case groupTypesOptionKey:
+			groupTypesJSON = option.Value
+			continue
+		case groupTypeMapOptionKey:
+			groupTypeMapJSON = option.Value
 			continue
 		}
 		value, repaired := normalizeLegacyOptionValue(option.Key, option.Value)
@@ -239,6 +260,10 @@ func loadOptionsFromDatabase() {
 		if err != nil {
 			common.SysLog(common.LogText("failed to update option map: %s", err.Error()))
 		}
+	}
+	if err := applyGroupTypeOptionsToRuntime(groupTypesJSON, groupTypeMapJSON); err != nil {
+		common.SysError("failed to update group type options: " + err.Error())
+		updateGroupTypeOptionValues(groupTypesJSON, groupTypeMapJSON)
 	}
 	applyPasskeyDomainOptions(passkeyOptions)
 	if err := operation_setting.RefreshAmountDiscountPolicy(); err != nil {
@@ -355,6 +380,9 @@ func UpdateOption(key string, value string) error {
 	if IsModelPricingOption(key) {
 		return UpdateModelPricingOptions(map[string]string{key: value})
 	}
+	if key == groupTypesOptionKey || key == groupTypeMapOptionKey {
+		return common.NewMessage("Group type definitions and assignments must be updated together")
+	}
 	normalizedValue, err := normalizeOptionValue(key, value)
 	if err != nil {
 		return err
@@ -383,6 +411,14 @@ func UpdateOption(key string, value string) error {
 func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
+	}
+	groupTypes, hasGroupTypes := values[groupTypesOptionKey]
+	groupTypeMap, hasGroupTypeMap := values[groupTypeMapOptionKey]
+	if hasGroupTypes || hasGroupTypeMap {
+		if len(values) != 2 || !hasGroupTypes || !hasGroupTypeMap {
+			return common.NewMessage("Group type definitions and assignments must be updated together")
+		}
+		return UpdateGroupTypeOptions(groupTypes, groupTypeMap)
 	}
 	for key := range values {
 		if IsPasskeyDomainOption(key) {
@@ -443,6 +479,78 @@ func UpdateOptionsBulk(values map[string]string) error {
 		requestPolicySnapshot.Store(policySnapshot)
 	}
 	return nil
+}
+
+// UpdateGroupTypeOptions persists and publishes group definitions and assignments together.
+func UpdateGroupTypeOptions(groupTypesJSON, groupTypeMapJSON string) error {
+	if err := ratio_setting.CheckGroupTypeAssignments(groupTypesJSON, groupTypeMapJSON); err != nil {
+		return err
+	}
+	if DB == nil {
+		return fmt.Errorf("database is unavailable")
+	}
+
+	groupTypeOptionsUpdateMutex.Lock()
+	defer groupTypeOptionsUpdateMutex.Unlock()
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var groupRatios map[string]float64
+		var storedGroupRatios Option
+		err := tx.Where(&Option{Key: groupRatioOptionKey}).First(&storedGroupRatios).Error
+		if err == nil {
+			if err := common.Unmarshal([]byte(storedGroupRatios.Value), &groupRatios); err != nil {
+				return fmt.Errorf("parse GroupRatio: %w", err)
+			}
+			if groupRatios == nil {
+				return common.NewMessage("GroupRatio must be a JSON object")
+			}
+		} else {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("read GroupRatio: %w", err)
+			}
+			groupRatios = ratio_setting.GetGroupRatioCopy()
+		}
+		if err := ratio_setting.CheckGroupTypeOptions(groupTypesJSON, groupTypeMapJSON, groupRatios); err != nil {
+			return err
+		}
+
+		for _, option := range []Option{
+			{Key: groupTypesOptionKey, Value: groupTypesJSON},
+			{Key: groupTypeMapOptionKey, Value: groupTypeMapJSON},
+		} {
+			stored := Option{Key: option.Key}
+			if err := tx.FirstOrCreate(&stored, Option{Key: option.Key}).Error; err != nil {
+				return err
+			}
+			stored.Value = option.Value
+			if err := tx.Save(&stored).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return applyGroupTypeOptionsToRuntime(groupTypesJSON, groupTypeMapJSON)
+}
+
+func applyGroupTypeOptionsToRuntime(groupTypesJSON, groupTypeMapJSON string) error {
+	if err := ratio_setting.UpdateGroupTypeOptionsByJSONString(groupTypesJSON, groupTypeMapJSON); err != nil {
+		return err
+	}
+	updateGroupTypeOptionValues(groupTypesJSON, groupTypeMapJSON)
+	return nil
+}
+
+func updateGroupTypeOptionValues(groupTypesJSON, groupTypeMapJSON string) {
+	common.OptionMapRWMutex.Lock()
+	defer common.OptionMapRWMutex.Unlock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	common.OptionMap[groupTypesOptionKey] = groupTypesJSON
+	common.OptionMap[groupTypeMapOptionKey] = groupTypeMapJSON
 }
 
 func updateOptionMap(key string, value string) (err error) {

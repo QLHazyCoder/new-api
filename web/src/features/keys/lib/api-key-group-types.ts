@@ -17,10 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { GroupTypeInfo } from '@/lib/api'
+import { AUTO_GROUP_TYPE_ID } from '@/lib/group-types'
 
 import type { ApiKeyGroupOption } from '../components/api-key-group-combobox'
 
-export const AUTO_GROUP_TYPE_ID = '__auto__'
+export { AUTO_GROUP_TYPE_ID } from '@/lib/group-types'
 
 export type ApiKeyGroupTypeOption = GroupTypeInfo & {
   id: string
@@ -43,6 +44,7 @@ export function buildGroupTypeOptions(
   }
 
   return configuredTypes
+    .filter((type) => type.id !== AUTO_GROUP_TYPE_ID)
     .map((type) => ({
       ...type,
       order: type.order ?? 0,

@@ -86,10 +86,21 @@ func TestCheckGroupTypeSettings(t *testing.T) {
 	require.NoError(t, ratio_setting.CheckGroupTypes(`{"vendor":{"name":"Vendor","order":1}}`))
 	require.Error(t, ratio_setting.CheckGroupTypes(`{"vendor":{"name":""}}`))
 	require.Error(t, ratio_setting.CheckGroupTypes(`{"a":{"name":"Same"},"b":{"name":"same"}}`))
+	require.Error(t, ratio_setting.CheckGroupTypes(`{"__auto__":{"name":"Automatic routing"}}`))
+	require.Error(t, ratio_setting.CheckGroupTypes(`null`))
 	require.Error(t, ratio_setting.CheckGroupTypes(`not-json`))
 
 	require.NoError(t, ratio_setting.CheckGroupTypeMap(`{"default":"vendor"}`))
 	require.Error(t, ratio_setting.CheckGroupTypeMap(`{"default":""}`))
 	require.Error(t, ratio_setting.CheckGroupTypeMap(`{"":"vendor"}`))
+	require.Error(t, ratio_setting.CheckGroupTypeMap(`{" auto ":"vendor"}`))
+	require.Error(t, ratio_setting.CheckGroupTypeMap(`{"auto":"vendor"}`))
+	require.Error(t, ratio_setting.CheckGroupTypeMap(`null`))
 	require.Error(t, ratio_setting.CheckGroupTypeMap(`not-json`))
+
+	groupTypes := `{"vendor":{"name":"Vendor","order":1}}`
+	require.NoError(t, ratio_setting.CheckGroupTypeOptions(groupTypes, `{"default":"vendor"}`, map[string]float64{"default": 1}))
+	require.NoError(t, ratio_setting.CheckGroupTypeOptions(groupTypes, `{"AUTO":"vendor"}`, map[string]float64{"AUTO": 1}), "ordinary group names remain case sensitive")
+	require.Error(t, ratio_setting.CheckGroupTypeOptions(groupTypes, `{"default":"missing"}`, map[string]float64{"default": 1}))
+	require.Error(t, ratio_setting.CheckGroupTypeOptions(groupTypes, `{"retired":"vendor"}`, map[string]float64{"default": 1}))
 }

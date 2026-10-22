@@ -31,6 +31,7 @@ import type {
   UpdateOptionResponse,
   UpdateAmountDiscountPolicyRequest,
   UpdateAmountDiscountPolicyResponse,
+  UpdateGroupTypeOptionsRequest,
   UpdatePasskeyDomainsRequest,
   UpdatePasskeyDomainsResponse,
   UpstreamChannelsResponse,
@@ -44,6 +45,16 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function updateSystemGroupTypeOptions(
+  request: UpdateGroupTypeOptionsRequest
+) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/option/group-types',
+    request
+  )
   return res.data
 }
 

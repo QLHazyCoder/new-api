@@ -148,6 +148,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/option/":                                           accessTokenScopeRule("option:read"),
 	"GET /api/option/request_policy":                             accessTokenScopeRule("option:read"),
 	"PATCH /api/option/request_policy":                           accessTokenScopeRule("option:write"),
+	"PUT /api/option/group-types":                                accessTokenScopeRule("option:write"),
 	"PUT /api/option/":                                           accessTokenScopeRule("option:write"),
 	"GET /api/option/payment/amount-discount-groups":             accessTokenScopeRule("option:read"),
 	"PUT /api/option/payment/amount-discount-policy":             accessTokenScopeRule("option:write"),

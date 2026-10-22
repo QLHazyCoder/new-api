@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -31,6 +32,10 @@ var groupDescriptionsMap = types.NewRWMap[string, string]()
 var groupTypesMap = types.NewRWMap[string, GroupTypeInfo]()
 
 var groupTypeMap = types.NewRWMap[string, string]()
+
+const AutoGroupTypeID = "__auto__"
+
+var groupTypeOptionsMutex sync.RWMutex
 
 var defaultGroupSpecialUsableGroup = map[string]map[string]string{}
 
@@ -100,27 +105,100 @@ func GetGroupDescriptionsCopy() map[string]string {
 }
 
 func GetGroupTypesCopy() map[string]GroupTypeInfo {
-	return GetGroupRatioSetting().GroupTypes.ReadAll()
+	setting := GetGroupRatioSetting()
+	groupTypeOptionsMutex.RLock()
+	defer groupTypeOptionsMutex.RUnlock()
+	return setting.GroupTypes.ReadAll()
 }
 
 func GetGroupTypeMapCopy() map[string]string {
-	return GetGroupRatioSetting().GroupTypeMap.ReadAll()
+	setting := GetGroupRatioSetting()
+	groupTypeOptionsMutex.RLock()
+	defer groupTypeOptionsMutex.RUnlock()
+	return setting.GroupTypeMap.ReadAll()
+}
+
+func GetGroupTypeOptionsCopy() (map[string]GroupTypeInfo, map[string]string) {
+	setting := GetGroupRatioSetting()
+	groupTypeOptionsMutex.RLock()
+	defer groupTypeOptionsMutex.RUnlock()
+	return setting.GroupTypes.ReadAll(), setting.GroupTypeMap.ReadAll()
 }
 
 func GroupTypes2JSONString() string {
-	return GetGroupRatioSetting().GroupTypes.MarshalJSONString()
+	setting := GetGroupRatioSetting()
+	groupTypeOptionsMutex.RLock()
+	defer groupTypeOptionsMutex.RUnlock()
+	return setting.GroupTypes.MarshalJSONString()
 }
 
 func UpdateGroupTypesByJSONString(jsonStr string) error {
-	return types.LoadFromJsonString(GetGroupRatioSetting().GroupTypes, jsonStr)
+	if err := CheckGroupTypes(jsonStr); err != nil {
+		return err
+	}
+	groupTypes := make(map[string]GroupTypeInfo)
+	if err := common.Unmarshal([]byte(jsonStr), &groupTypes); err != nil {
+		return err
+	}
+	setting := GetGroupRatioSetting()
+	groupTypeOptionsMutex.Lock()
+	defer groupTypeOptionsMutex.Unlock()
+	setting.GroupTypes.Clear()
+	setting.GroupTypes.AddAll(groupTypes)
+	return nil
 }
 
 func GroupTypeMap2JSONString() string {
-	return GetGroupRatioSetting().GroupTypeMap.MarshalJSONString()
+	setting := GetGroupRatioSetting()
+	groupTypeOptionsMutex.RLock()
+	defer groupTypeOptionsMutex.RUnlock()
+	return setting.GroupTypeMap.MarshalJSONString()
+}
+
+func GroupTypeOptions2JSONString() (string, string) {
+	setting := GetGroupRatioSetting()
+	groupTypeOptionsMutex.RLock()
+	defer groupTypeOptionsMutex.RUnlock()
+	return setting.GroupTypes.MarshalJSONString(), setting.GroupTypeMap.MarshalJSONString()
 }
 
 func UpdateGroupTypeMapByJSONString(jsonStr string) error {
-	return types.LoadFromJsonString(GetGroupRatioSetting().GroupTypeMap, jsonStr)
+	if err := CheckGroupTypeMap(jsonStr); err != nil {
+		return err
+	}
+	groupTypeMap := make(map[string]string)
+	if err := common.Unmarshal([]byte(jsonStr), &groupTypeMap); err != nil {
+		return err
+	}
+	setting := GetGroupRatioSetting()
+	groupTypeOptionsMutex.Lock()
+	defer groupTypeOptionsMutex.Unlock()
+	setting.GroupTypeMap.Clear()
+	setting.GroupTypeMap.AddAll(groupTypeMap)
+	return nil
+}
+
+// UpdateGroupTypeOptionsByJSONString replaces the related maps as one runtime snapshot.
+func UpdateGroupTypeOptionsByJSONString(groupTypesJSON, groupTypeMapJSON string) error {
+	if err := CheckGroupTypeAssignments(groupTypesJSON, groupTypeMapJSON); err != nil {
+		return err
+	}
+	groupTypes := make(map[string]GroupTypeInfo)
+	if err := common.Unmarshal([]byte(groupTypesJSON), &groupTypes); err != nil {
+		return err
+	}
+	groupTypeMap := make(map[string]string)
+	if err := common.Unmarshal([]byte(groupTypeMapJSON), &groupTypeMap); err != nil {
+		return err
+	}
+	setting := GetGroupRatioSetting()
+	groupTypeOptionsMutex.Lock()
+	defer groupTypeOptionsMutex.Unlock()
+	setting.GroupTypes.Clear()
+	setting.GroupTypes.AddAll(groupTypes)
+	setting.GroupTypeMap.Clear()
+	setting.GroupTypeMap.AddAll(groupTypeMap)
+	return nil
 }
 
 func CheckGroupTypes(jsonStr string) error {
@@ -128,18 +206,24 @@ func CheckGroupTypes(jsonStr string) error {
 	if err := common.Unmarshal([]byte(jsonStr), &groupTypes); err != nil {
 		return err
 	}
+	if groupTypes == nil {
+		return common.NewMessage("Group types must be a JSON object")
+	}
 	names := make(map[string]struct{}, len(groupTypes))
 	for typeID, typeInfo := range groupTypes {
-		if strings.TrimSpace(typeID) == "" {
-			return errors.New("group type id must not be empty")
+		if strings.TrimSpace(typeID) == "" || typeID != strings.TrimSpace(typeID) {
+			return common.NewMessage("Group type ID must be non-empty and trimmed")
+		}
+		if typeID == AutoGroupTypeID {
+			return common.NewMessage("Group type ID is reserved for automatic routing")
 		}
 		name := strings.TrimSpace(typeInfo.Name)
 		if name == "" {
-			return errors.New("group type name must not be empty: " + typeID)
+			return common.NewMessage("Group type name must not be empty: {{type}}", map[string]any{"type": typeID})
 		}
 		nameKey := strings.ToLower(name)
 		if _, ok := names[nameKey]; ok {
-			return errors.New("group type name must be unique: " + name)
+			return common.NewMessage("Group type name must be unique: {{name}}", map[string]any{"name": name})
 		}
 		names[nameKey] = struct{}{}
 	}
@@ -151,12 +235,57 @@ func CheckGroupTypeMap(jsonStr string) error {
 	if err := common.Unmarshal([]byte(jsonStr), &groupTypeMap); err != nil {
 		return err
 	}
+	if groupTypeMap == nil {
+		return common.NewMessage("Group type assignments must be a JSON object")
+	}
 	for groupName, typeID := range groupTypeMap {
-		if strings.TrimSpace(groupName) == "" {
-			return errors.New("group name must not be empty")
+		if strings.TrimSpace(groupName) == "" || groupName != strings.TrimSpace(groupName) {
+			return common.NewMessage("Group name must be non-empty and trimmed")
 		}
-		if strings.TrimSpace(typeID) == "" {
-			return errors.New("group type id must not be empty: " + groupName)
+		if groupName == "auto" {
+			return common.NewMessage("Automatic routing cannot be assigned a group type")
+		}
+		if strings.TrimSpace(typeID) == "" || typeID != strings.TrimSpace(typeID) {
+			return common.NewMessage("Group type ID must be non-empty and trimmed: {{group}}", map[string]any{"group": groupName})
+		}
+	}
+	return nil
+}
+
+func CheckGroupTypeAssignments(groupTypesJSON, groupTypeMapJSON string) error {
+	if err := CheckGroupTypes(groupTypesJSON); err != nil {
+		return err
+	}
+	if err := CheckGroupTypeMap(groupTypeMapJSON); err != nil {
+		return err
+	}
+	groupTypes := make(map[string]GroupTypeInfo)
+	if err := common.Unmarshal([]byte(groupTypesJSON), &groupTypes); err != nil {
+		return err
+	}
+	assignments := make(map[string]string)
+	if err := common.Unmarshal([]byte(groupTypeMapJSON), &assignments); err != nil {
+		return err
+	}
+	for groupName, typeID := range assignments {
+		if _, ok := groupTypes[typeID]; !ok {
+			return common.NewMessage("Group type {{type}} does not exist (group {{group}})", map[string]any{"type": typeID, "group": groupName})
+		}
+	}
+	return nil
+}
+
+func CheckGroupTypeOptions(groupTypesJSON, groupTypeMapJSON string, groupRatios map[string]float64) error {
+	if err := CheckGroupTypeAssignments(groupTypesJSON, groupTypeMapJSON); err != nil {
+		return err
+	}
+	assignments := make(map[string]string)
+	if err := common.Unmarshal([]byte(groupTypeMapJSON), &assignments); err != nil {
+		return err
+	}
+	for groupName := range assignments {
+		if _, ok := groupRatios[groupName]; !ok {
+			return common.NewMessage("Group {{group}} does not exist in group ratios", map[string]any{"group": groupName})
 		}
 	}
 	return nil

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -20,9 +21,11 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestUpdateOptionRejectsInvalidTaskBillingExpressions(t *testing.T) {
@@ -79,6 +82,113 @@ export function parseTaskResult() { return {}; }
 			assert.Contains(t, recorder.Body.String(), `"success":false`)
 			assert.Contains(t, recorder.Body.String(), modelName)
 			assert.Contains(t, recorder.Body.String(), testCase.errorText)
+		})
+	}
+}
+
+func TestUpdateOptionRequiresPairedGroupTypeUpdate(t *testing.T) {
+	for _, key := range []string{"group_ratio_setting.group_types", "group_ratio_setting.group_type_map"} {
+		t.Run(key, func(t *testing.T) {
+			body, err := common.Marshal(OptionUpdateRequest{Key: key, Value: `{}`})
+			require.NoError(t, err)
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodPut, "/api/option/", strings.NewReader(string(body)))
+
+			UpdateOption(context)
+
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			assert.Contains(t, recorder.Body.String(), `"success":false`)
+			assert.Contains(t, recorder.Body.String(), "updated together")
+		})
+	}
+}
+
+func TestUpdateGroupTypeOptionsRejectsReservedAutomaticID(t *testing.T) {
+	body, err := common.Marshal(GroupTypeOptionsUpdateRequest{
+		GroupTypes:   `{"__auto__":{"name":"Imported routing"}}`,
+		GroupTypeMap: `{}`,
+	})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodPut, "/api/option/group-types", strings.NewReader(string(body)))
+
+	UpdateGroupTypeOptions(context)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":false`)
+	assert.Contains(t, recorder.Body.String(), "reserved for automatic routing")
+}
+
+func TestGroupTypeOptionsDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []struct{ kind, env string }{
+		{"sqlite", ""},
+		{"mysql", "TEST_MYSQL_DSN"},
+		{"postgres", "TEST_POSTGRES_DSN"},
+	} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip("set " + dialect.env + " to run this database")
+			}
+			originalGroupTypes := ratio_setting.GroupTypes2JSONString()
+			originalGroupTypeMap := ratio_setting.GroupTypeMap2JSONString()
+			originalGroupRatios := ratio_setting.GroupRatio2JSONString()
+			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+			t.Cleanup(func() {
+				require.NoError(t, ratio_setting.UpdateGroupTypeOptionsByJSONString(originalGroupTypes, originalGroupTypeMap))
+				require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatios))
+			})
+
+			groupRatios := `{"default":1,"vip":2}`
+			require.NoError(t, db.Create(&model.Option{Key: "GroupRatio", Value: groupRatios}).Error)
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(groupRatios))
+			require.NoError(t, ratio_setting.UpdateGroupTypeOptionsByJSONString(`{}`, `{}`))
+			for _, request := range []GroupTypeOptionsUpdateRequest{
+				{GroupTypes: `{"vendor":{"name":"Vendor","order":1}}`, GroupTypeMap: `{"default":"vendor","vip":"vendor"}`},
+				{GroupTypes: `{"domestic":{"name":"Domestic","order":0}}`, GroupTypeMap: `{"vip":"domestic"}`},
+			} {
+				var before []model.Option
+				require.NoError(t, db.Order("value").Find(&before).Error)
+				beforeTypes, beforeAssignments := ratio_setting.GetGroupTypeOptionsCopy()
+				// Fail the second persisted field, after the first write reached the real database.
+				require.NoError(t, db.Callback().Update().Before("gorm:update").Register("test:group-type-write-failure", func(tx *gorm.DB) {
+					if option, ok := tx.Statement.Dest.(*model.Option); ok && option.Key == "group_ratio_setting.group_type_map" {
+						tx.AddError(errors.New("injected group type assignment failure"))
+					}
+				}))
+				var response struct{ Success bool }
+				modelManagementRequest(t, UpdateGroupTypeOptions, http.MethodPut, "/api/option/group-types", request, &response)
+				assert.False(t, response.Success)
+				require.NoError(t, db.Callback().Update().Remove("test:group-type-write-failure"))
+				var after []model.Option
+				require.NoError(t, db.Order("value").Find(&after).Error)
+				assert.Equal(t, before, after, "neither field may survive a failed transaction")
+				afterTypes, afterAssignments := ratio_setting.GetGroupTypeOptionsCopy()
+				assert.Equal(t, beforeTypes, afterTypes)
+				assert.Equal(t, beforeAssignments, afterAssignments)
+
+				recorder := modelManagementRequest(t, UpdateGroupTypeOptions, http.MethodPut, "/api/option/group-types", request, &response)
+				require.True(t, response.Success, recorder.Body.String())
+				require.NoError(t, db.Find(&after).Error)
+				stored := map[string]string{}
+				for _, option := range after {
+					stored[option.Key] = option.Value
+				}
+				assert.JSONEq(t, groupRatios, stored["GroupRatio"])
+				assert.JSONEq(t, request.GroupTypes, stored["group_ratio_setting.group_types"])
+				assert.JSONEq(t, request.GroupTypeMap, stored["group_ratio_setting.group_type_map"])
+				types, assignments := ratio_setting.GroupTypeOptions2JSONString()
+				assert.JSONEq(t, request.GroupTypes, types)
+				assert.JSONEq(t, request.GroupTypeMap, assignments)
+			}
+			for _, invalidMap := range []string{`{"vip":"missing"}`, `{"retired":"domestic"}`} {
+				var response struct{ Success bool }
+				modelManagementRequest(t, UpdateGroupTypeOptions, http.MethodPut, "/api/option/group-types", GroupTypeOptionsUpdateRequest{
+					GroupTypes: `{"domestic":{"name":"Domestic","order":0}}`, GroupTypeMap: invalidMap,
+				}, &response)
+				assert.False(t, response.Success)
+			}
 		})
 	}
 }

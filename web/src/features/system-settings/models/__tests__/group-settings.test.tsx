@@ -85,6 +85,21 @@ function Fixture(props: {
 }
 
 describe('group settings workspace', () => {
+  it('keeps compact pricing columns fixed on a wide table', () => {
+    render(<Fixture />)
+
+    const table = screen.getByRole('table', { name: 'Pricing groups' })
+    expect(table).toHaveClass('table-fixed')
+
+    const columns = table.querySelectorAll('col')
+    expect(columns).toHaveLength(7)
+    expect(columns[1]).toHaveClass('w-44')
+    expect(columns[2]).toHaveClass('w-28')
+    expect(columns[3]).toHaveClass('w-28')
+    expect(columns[4]).toHaveClass('w-28')
+    expect(columns[6]).toHaveClass('w-24')
+  })
+
   it('filters by description and clears search without discarding edits', async () => {
     const user = userEvent.setup()
     render(<Fixture />)
@@ -317,21 +332,20 @@ describe('group settings workspace', () => {
 
   it('shows empty state guidance and disables save during a pending request', async () => {
     const user = userEvent.setup()
-    render(
-      <Fixture
-        isSaving
-        initial={{
-          GroupRatio: '{}',
-          TopupGroupRatio: '{}',
-          UserUsableGroups: '{}',
-          AutoGroups: '[]',
-        }}
-      />
-    )
+    const initial = {
+      GroupRatio: '{}',
+      TopupGroupRatio: '{}',
+      UserUsableGroups: '{}',
+      AutoGroups: '[]',
+    }
+    const rendered = render(<Fixture isSaving initial={initial} />)
     expect(
       screen.getByText('No groups yet. Add a group to get started.')
     ).toBeVisible()
     expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Add group' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Group types' })).toBeDisabled()
+    rendered.rerender(<Fixture initial={initial} />)
     await user.click(screen.getByRole('tab', { name: 'Special ratio rules' }))
     expect(
       screen.getByText('Base group ratios apply until you add an override.')
@@ -443,6 +457,63 @@ describe('group type management', () => {
         )
       ).toBeVisible()
     )
+  })
+
+  it('does not recreate a deleted pricing group from a stale type assignment', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_values: typeof defaults) => {})
+    render(
+      <Fixture
+        onSave={onSave}
+        initial={{
+          GroupTypes: JSON.stringify({
+            vendor: { name: 'Vendor', icon: '', order: 0 },
+          }),
+          GroupTypeMap: JSON.stringify({ retired: 'vendor' }),
+        }}
+      />
+    )
+
+    expect(screen.queryByDisplayValue('retired')).not.toBeInTheDocument()
+    await user.clear(screen.getAllByRole('spinbutton', { name: 'Ratio' })[0])
+    await user.type(
+      screen.getAllByRole('spinbutton', { name: 'Ratio' })[0],
+      '1.1'
+    )
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const saved = onSave.mock.calls[0][0]
+    expect(JSON.parse(saved.GroupRatio)).not.toHaveProperty('retired')
+    expect(JSON.parse(saved.GroupTypeMap)).toEqual({})
+  })
+
+  it('does not count the automatic routing entry as an unclassified group', () => {
+    render(
+      <Fixture
+        initial={{
+          GroupRatio: JSON.stringify({ auto: 1, default: 1, vip: 0.8 }),
+          UserUsableGroups: JSON.stringify({
+            auto: 'Automatic routing',
+            default: 'Standard access',
+            vip: 'Premium access',
+          }),
+          GroupTypes: JSON.stringify({
+            vendor: { name: 'Vendor', icon: '', order: 0 },
+          }),
+          GroupTypeMap: JSON.stringify({ default: 'vendor', vip: 'vendor' }),
+        }}
+      />
+    )
+
+    expect(
+      screen.queryByText(/user-selectable group\(s\) have no type/)
+    ).not.toBeInTheDocument()
+    expect(
+      within(getGroupRow('auto')).getByRole('combobox', { name: 'Group type' })
+    ).toBeDisabled()
   })
 
   it('deletes a type, clears its assignments, and saves empty maps', async () => {

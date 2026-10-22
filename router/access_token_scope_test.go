@@ -173,6 +173,7 @@ func TestAccessTokenRulesPreserveCustomFeatures(t *testing.T) {
 		key, kind, scope string
 	}{
 		{"GET /api/user/image-models", "scope", "profile:read"},
+		{"PUT /api/option/group-types", "scope", "option:write"},
 		{"GET /api/option/payment/amount-discount-groups", "scope", "option:read"},
 		{"PUT /api/option/payment/amount-discount-policy", "scope", "option:write"},
 		{"GET /api/sensitive-words/policy", "scope", "sensitive_word:read"},

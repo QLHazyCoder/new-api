@@ -34,6 +34,7 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
+import { FieldSet } from '@/components/ui/field'
 import {
   Form,
   FormControl,
@@ -111,7 +112,11 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   }, [])
 
   return (
-    <div className='space-y-6'>
+    <FieldSet
+      disabled={isSaving}
+      aria-busy={isSaving}
+      className='min-w-0 gap-6'
+    >
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <p className='text-muted-foreground text-sm'>
           {editMode === 'visual'
@@ -520,7 +525,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           </SettingsForm>
         )}
       </Form>
-    </div>
+    </FieldSet>
   )
 })
 

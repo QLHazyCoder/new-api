@@ -201,7 +201,6 @@ function buildGroupPricingRows(
     ...Object.keys(ratioMap),
     ...Object.keys(usableMap),
     ...Object.keys(topupMap),
-    ...Object.keys(typeAssignments),
   ])
 
   return [...names].map((name) => ({
@@ -680,7 +679,7 @@ function GroupPricingTable({
   }, [rows])
 
   const untypedSelectableCount = rows.filter(
-    (row) => row.selectable && !row.typeId
+    (row) => row.name !== 'auto' && row.selectable && !row.typeId
   ).length
   const typeModeActive = typeDefinitions.length > 0
 
@@ -774,10 +773,21 @@ function GroupPricingTable({
             </div>
           )}
           <StaticDataTable
-            tableClassName='min-w-[920px]'
+            tableClassName='min-w-[920px] table-fixed'
             tableProps={{ 'aria-label': t('Pricing groups') }}
             data={visibleRows}
             getRowKey={(row) => row._id}
+            colgroup={
+              <colgroup>
+                <col className='w-auto' />
+                <col className='w-44' />
+                <col className='w-28' />
+                <col className='w-28' />
+                <col className='w-28' />
+                <col className='w-auto' />
+                <col className='w-24' />
+              </colgroup>
+            }
             emptyClassName='text-muted-foreground h-20 text-sm'
             emptyContent={
               <EmptyState
@@ -835,6 +845,7 @@ function GroupPricingTable({
                       })),
                     ]}
                     value={row.typeId}
+                    disabled={row.name === 'auto'}
                     onValueChange={(value) =>
                       updateRow(row._id, 'typeId', value ?? '')
                     }

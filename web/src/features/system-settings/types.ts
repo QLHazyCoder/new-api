@@ -39,6 +39,11 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type UpdateGroupTypeOptionsRequest = {
+  group_types: string
+  group_type_map: string
+}
+
 export type AmountDiscountGroupsResponse = {
   success: boolean
   message: string

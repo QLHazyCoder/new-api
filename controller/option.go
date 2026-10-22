@@ -151,6 +151,24 @@ type OptionUpdateRequest struct {
 	Value any    `json:"value"`
 }
 
+type GroupTypeOptionsUpdateRequest struct {
+	GroupTypes   string `json:"group_types"`
+	GroupTypeMap string `json:"group_type_map"`
+}
+
+func UpdateGroupTypeOptions(c *gin.Context) {
+	var request GroupTypeOptionsUpdateRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid parameters"))
+		return
+	}
+	if err := model.UpdateGroupTypeOptions(request.GroupTypes, request.GroupTypeMap); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, nil)
+}
+
 func UpdatePasskeyDomains(c *gin.Context) {
 	var request struct {
 		RPID                *string `json:"rp_id"`
@@ -227,6 +245,9 @@ func UpdateOption(c *gin.Context) {
 			common.ApiErrorMsg(c, err.Error())
 			return
 		}
+	case "group_ratio_setting.group_types", "group_ratio_setting.group_type_map":
+		common.ApiErrorT(c, "Group type definitions and assignments must be updated together")
+		return
 	default:
 		if isPaymentComplianceOptionKey(option.Key) {
 			common.ApiErrorT(c, "Compliance confirmation fields cannot be changed through the general settings API")
@@ -295,18 +316,6 @@ func UpdateOption(c *gin.Context) {
 		}
 	case "GroupRatio":
 		err = ratio_setting.CheckGroupRatio(option.Value.(string))
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-	case "group_ratio_setting.group_types":
-		err = ratio_setting.CheckGroupTypes(option.Value.(string))
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-	case "group_ratio_setting.group_type_map":
-		err = ratio_setting.CheckGroupTypeMap(option.Value.(string))
 		if err != nil {
 			common.ApiError(c, err)
 			return

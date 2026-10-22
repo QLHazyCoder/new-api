@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Group type definitions and assignments must be updated together": "分组类型定义和归属必须一起保存",
+    "Group types must be a JSON object": "分组类型必须是 JSON 对象",
+    "Group type ID must be non-empty and trimmed": "分组类型 ID 不能为空或包含首尾空格",
+    "Group type ID is reserved for automatic routing": "此分组类型 ID 为自动路由保留",
+    "Group type name must not be empty: {{type}}": "分组类型名称不能为空：{{type}}",
+    "Group type name must be unique: {{name}}": "分组类型名称不能重复：{{name}}",
+    "Group type assignments must be a JSON object": "分组类型归属必须是 JSON 对象",
+    "Group name must be non-empty and trimmed": "分组名称不能为空或包含首尾空格",
+    "Automatic routing cannot be assigned a group type": "自动路由不能分配分组类型",
+    "Group type ID must be non-empty and trimmed: {{group}}": "分组类型 ID 不能为空或包含首尾空格：{{group}}",
+    "Group type {{type}} does not exist (group {{group}})": "分组类型 {{type}} 不存在（分组 {{group}}）",
+    "Group {{group}} does not exist in group ratios": "分组 {{group}} 未配置基础倍率",
+    "GroupRatio must be a JSON object": "GroupRatio 必须是 JSON 对象",
     "Infinite Canvas": "无限画布",
     "Unable to open canvas": "无法打开画布",
     "Create with images, video, audio, and text on a canvas": "在画布上使用图片、视频、音频和文本创作",

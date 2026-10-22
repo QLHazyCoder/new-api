@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Group type definitions and assignments must be updated together": "Определения типов групп и их назначения необходимо сохранять вместе",
+    "Group types must be a JSON object": "Типы групп должны быть объектом JSON",
+    "Group type ID must be non-empty and trimmed": "ID типа группы не должен быть пустым или содержать пробелы по краям",
+    "Group type ID is reserved for automatic routing": "Этот ID типа группы зарезервирован для автоматической маршрутизации",
+    "Group type name must not be empty: {{type}}": "Название типа группы не должно быть пустым: {{type}}",
+    "Group type name must be unique: {{name}}": "Название типа группы должно быть уникальным: {{name}}",
+    "Group type assignments must be a JSON object": "Назначения типов групп должны быть объектом JSON",
+    "Group name must be non-empty and trimmed": "Название группы не должно быть пустым или содержать пробелы по краям",
+    "Automatic routing cannot be assigned a group type": "Автоматической маршрутизации нельзя назначить тип группы",
+    "Group type ID must be non-empty and trimmed: {{group}}": "ID типа группы не должен быть пустым или содержать пробелы по краям: {{group}}",
+    "Group type {{type}} does not exist (group {{group}})": "Тип группы {{type}} не существует (группа {{group}})",
+    "Group {{group}} does not exist in group ratios": "Группа {{group}} отсутствует в коэффициентах групп",
+    "GroupRatio must be a JSON object": "GroupRatio должен быть объектом JSON",
     "Infinite Canvas": "Бесконечный холст",
     "Unable to open canvas": "Не удалось открыть холст",
     "Create with images, video, audio, and text on a canvas": "Создавайте изображения, видео, аудио и текст на холсте",

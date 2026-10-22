@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Group type definitions and assignments must be updated together": "グループタイプの定義と割り当ては同時に保存してください",
+    "Group types must be a JSON object": "グループタイプは JSON オブジェクトである必要があります",
+    "Group type ID must be non-empty and trimmed": "グループタイプ ID は空欄にできず、前後に空白を含められません",
+    "Group type ID is reserved for automatic routing": "このグループタイプ ID は自動ルーティング用に予約されています",
+    "Group type name must not be empty: {{type}}": "グループタイプ名は空欄にできません：{{type}}",
+    "Group type name must be unique: {{name}}": "グループタイプ名は重複できません：{{name}}",
+    "Group type assignments must be a JSON object": "グループタイプの割り当ては JSON オブジェクトである必要があります",
+    "Group name must be non-empty and trimmed": "グループ名は空欄にできず、前後に空白を含められません",
+    "Automatic routing cannot be assigned a group type": "自動ルーティングにはグループタイプを割り当てられません",
+    "Group type ID must be non-empty and trimmed: {{group}}": "グループタイプ ID は空欄にできず、前後に空白を含められません：{{group}}",
+    "Group type {{type}} does not exist (group {{group}})": "グループタイプ {{type}} は存在しません（グループ {{group}}）",
+    "Group {{group}} does not exist in group ratios": "グループ {{group}} の基本倍率が設定されていません",
+    "GroupRatio must be a JSON object": "GroupRatio は JSON オブジェクトである必要があります",
     "Infinite Canvas": "無限キャンバス",
     "Unable to open canvas": "キャンバスを開けません",
     "Create with images, video, audio, and text on a canvas": "画像、動画、音声、テキストをキャンバスで作成",

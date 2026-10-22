@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Group type definitions and assignments must be updated together": "Les types de groupes et leurs affectations doivent être enregistrés ensemble",
+    "Group types must be a JSON object": "Les types de groupes doivent être un objet JSON",
+    "Group type ID must be non-empty and trimmed": "L’identifiant du type de groupe ne doit être ni vide ni entouré d’espaces",
+    "Group type ID is reserved for automatic routing": "Cet identifiant de type de groupe est réservé au routage automatique",
+    "Group type name must not be empty: {{type}}": "Le nom du type de groupe ne doit pas être vide : {{type}}",
+    "Group type name must be unique: {{name}}": "Le nom du type de groupe doit être unique : {{name}}",
+    "Group type assignments must be a JSON object": "Les affectations de types de groupes doivent être un objet JSON",
+    "Group name must be non-empty and trimmed": "Le nom du groupe ne doit être ni vide ni entouré d’espaces",
+    "Automatic routing cannot be assigned a group type": "Le routage automatique ne peut pas recevoir de type de groupe",
+    "Group type ID must be non-empty and trimmed: {{group}}": "L’identifiant du type de groupe ne doit être ni vide ni entouré d’espaces : {{group}}",
+    "Group type {{type}} does not exist (group {{group}})": "Le type de groupe {{type}} n’existe pas (groupe {{group}})",
+    "Group {{group}} does not exist in group ratios": "Le groupe {{group}} n’existe pas dans les ratios de groupes",
+    "GroupRatio must be a JSON object": "GroupRatio doit être un objet JSON",
     "Infinite Canvas": "Canevas infini",
     "Unable to open canvas": "Impossible d’ouvrir le canevas",
     "Create with images, video, audio, and text on a canvas": "Créer avec des images, des vidéos, de l’audio et du texte",

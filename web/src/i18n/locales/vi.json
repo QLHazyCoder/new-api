@@ -1,5 +1,18 @@
 {
   "translation": {
+    "Group type definitions and assignments must be updated together": "Phải lưu đồng thời định nghĩa loại nhóm và các gán nhóm",
+    "Group types must be a JSON object": "Loại nhóm phải là một đối tượng JSON",
+    "Group type ID must be non-empty and trimmed": "ID loại nhóm không được để trống hoặc có khoảng trắng ở hai đầu",
+    "Group type ID is reserved for automatic routing": "ID loại nhóm này được dành riêng cho định tuyến tự động",
+    "Group type name must not be empty: {{type}}": "Tên loại nhóm không được để trống: {{type}}",
+    "Group type name must be unique: {{name}}": "Tên loại nhóm không được trùng lặp: {{name}}",
+    "Group type assignments must be a JSON object": "Các gán loại nhóm phải là một đối tượng JSON",
+    "Group name must be non-empty and trimmed": "Tên nhóm không được để trống hoặc có khoảng trắng ở hai đầu",
+    "Automatic routing cannot be assigned a group type": "Không thể gán loại nhóm cho định tuyến tự động",
+    "Group type ID must be non-empty and trimmed: {{group}}": "ID loại nhóm không được để trống hoặc có khoảng trắng ở hai đầu: {{group}}",
+    "Group type {{type}} does not exist (group {{group}})": "Loại nhóm {{type}} không tồn tại (nhóm {{group}})",
+    "Group {{group}} does not exist in group ratios": "Nhóm {{group}} chưa được cấu hình hệ số cơ bản",
+    "GroupRatio must be a JSON object": "GroupRatio phải là một đối tượng JSON",
     "Infinite Canvas": "Bảng vẽ vô hạn",
     "Unable to open canvas": "Không thể mở bảng vẽ",
     "Create with images, video, audio, and text on a canvas": "Sáng tạo bằng hình ảnh, video, âm thanh và văn bản",

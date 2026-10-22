@@ -44,6 +44,7 @@ type StaticDataTableBaseProps = {
 type StaticDataTableDataProps<TData = unknown> = StaticDataTableBaseProps & {
   columns: StaticDataTableColumn<TData>[]
   data: TData[]
+  colgroup?: React.ReactNode
   getRowKey?: (row: TData, index: number) => React.Key
   getRowClassName?: (row: TData, index: number) => string | undefined
   renderRow?: (row: TData, index: number) => React.ReactNode
@@ -95,6 +96,7 @@ export function StaticDataTable<TData = unknown>(
 function StaticDataTableWithColumns<TData>({
   columns,
   data,
+  colgroup,
   getRowKey,
   getRowClassName,
   renderRow,
@@ -117,6 +119,7 @@ function StaticDataTableWithColumns<TData>({
 
   return (
     <>
+      {colgroup}
       <TableHeader>
         <TableRow className={headerRowClassName}>
           {columns.map((column) => (

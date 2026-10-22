@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { AUTO_GROUP_TYPE_ID } from '@/lib/group-types'
+
 import { safeJsonParse } from '../utils/json-parser'
 
 export type GroupTypeDefinition = {
@@ -48,7 +50,7 @@ export function parseGroupTypes(value: string): GroupTypeDefinition[] {
   const types: GroupTypeDefinition[] = []
   for (const [id, rawType] of Object.entries(parsed)) {
     const typeID = id.trim()
-    if (!typeID) continue
+    if (!typeID || typeID === AUTO_GROUP_TYPE_ID) continue
     if (!rawType || typeof rawType !== 'object' || Array.isArray(rawType)) {
       continue
     }
@@ -73,7 +75,13 @@ export function serializeGroupTypes(types: GroupTypeDefinition[]): string {
     { name: string; icon: string; order: number }
   > = {}
   for (const [index, type] of sortGroupTypes(types).entries()) {
-    if (!type.id.trim() || !type.name.trim()) continue
+    if (
+      !type.id.trim() ||
+      type.id.trim() === AUTO_GROUP_TYPE_ID ||
+      !type.name.trim()
+    ) {
+      continue
+    }
     serialized[type.id.trim()] = {
       name: type.name.trim(),
       icon: type.icon.trim(),
@@ -94,7 +102,14 @@ export function parseGroupTypeMap(value: string): GroupTypeMap {
   const assignments: GroupTypeMap = {}
   for (const [groupName, typeID] of Object.entries(parsed)) {
     const name = groupName.trim()
-    if (!name || typeof typeID !== 'string' || !typeID.trim()) continue
+    if (
+      !name ||
+      name === 'auto' ||
+      typeof typeID !== 'string' ||
+      !typeID.trim()
+    ) {
+      continue
+    }
     assignments[name] = typeID.trim()
   }
   return assignments
@@ -102,12 +117,22 @@ export function parseGroupTypeMap(value: string): GroupTypeMap {
 
 export function serializeGroupTypeMap(
   assignments: GroupTypeMap,
-  validTypeIDs: ReadonlySet<string>
+  validTypeIDs: ReadonlySet<string>,
+  validGroupNames?: ReadonlySet<string>
 ): string {
   const serialized: GroupTypeMap = {}
   for (const groupName of Object.keys(assignments).sort()) {
     const typeID = assignments[groupName]?.trim()
-    if (!groupName.trim() || !typeID || !validTypeIDs.has(typeID)) continue
+    if (
+      !groupName.trim() ||
+      groupName === 'auto' ||
+      (validGroupNames && !validGroupNames.has(groupName)) ||
+      !typeID ||
+      typeID === AUTO_GROUP_TYPE_ID ||
+      !validTypeIDs.has(typeID)
+    ) {
+      continue
+    }
     serialized[groupName] = typeID
   }
   return JSON.stringify(serialized, null, 2)

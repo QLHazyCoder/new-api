@@ -187,7 +187,10 @@ export function ApiKeysMutateDrawer({
     [groupsData, t]
   )
   const configuredGroupTypes = useMemo(
-    () => groupsData?.group_types ?? [],
+    () =>
+      (groupsData?.group_types ?? []).filter(
+        (type) => type.id !== AUTO_GROUP_TYPE_ID
+      ),
     [groupsData]
   )
   const typeModeActive = configuredGroupTypes.length > 0

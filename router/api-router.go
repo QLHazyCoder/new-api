@@ -235,6 +235,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/", controller.GetOptions)
 			optionRoute.GET("/request_policy", controller.GetRequestPolicy)
 			optionRoute.PATCH("/request_policy", controller.UpdateRequestPolicy)
+			optionRoute.PUT("/group-types", controller.UpdateGroupTypeOptions)
 			optionRoute.PUT("/", controller.UpdateOption)
 			optionRoute.GET("/payment/amount-discount-groups", controller.GetAmountDiscountGroups)
 			optionRoute.PUT("/payment/amount-discount-policy", controller.UpdateAmountDiscountPolicy)

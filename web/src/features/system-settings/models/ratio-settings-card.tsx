@@ -36,11 +36,16 @@ import {
   type ModelPricingConfig,
 } from '@/features/model-pricing/api'
 import { pricingOptions } from '@/features/model-pricing/pricing'
+import { AUTO_GROUP_TYPE_ID } from '@/lib/group-types'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { SettingsPageTitleStatusPortal } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
-import { useUpdateOption } from '../hooks/use-update-option'
+import {
+  useUpdateGroupTypeOptions,
+  useUpdateOption,
+} from '../hooks/use-update-option'
+import { safeJsonParse } from '../utils/json-parser'
 import { positiveIntegerSchema } from '../utils/numeric-field'
 import { GroupRatioForm } from './group-ratio-form'
 import {
@@ -158,7 +163,15 @@ const createGroupSchema = (t: Translate) =>
         }
         const names = new Set<string>()
         for (const [id, value] of Object.entries(parsed)) {
-          if (!id.trim() || !value || typeof value !== 'object') return false
+          if (
+            !id.trim() ||
+            id !== id.trim() ||
+            id === AUTO_GROUP_TYPE_ID ||
+            !value ||
+            typeof value !== 'object'
+          ) {
+            return false
+          }
           if (Array.isArray(value)) return false
           const type = value as Record<string, unknown>
           if (typeof type.name !== 'string' || !type.name.trim()) return false
@@ -167,7 +180,8 @@ const createGroupSchema = (t: Translate) =>
           }
           if (
             type.order !== undefined &&
-            (typeof type.order !== 'number' || !Number.isFinite(type.order))
+            (typeof type.order !== 'number' ||
+              !Number.isSafeInteger(type.order))
           ) {
             return false
           }
@@ -188,8 +202,11 @@ const createGroupSchema = (t: Translate) =>
         return Object.entries(parsed).every(
           ([groupName, typeID]) =>
             Boolean(groupName.trim()) &&
+            groupName === groupName.trim() &&
+            groupName !== 'auto' &&
             typeof typeID === 'string' &&
-            Boolean(typeID.trim())
+            Boolean(typeID.trim()) &&
+            typeID === typeID.trim()
         )
       },
       predicateMessage: 'Expected a JSON map of group name to group type ID',
@@ -222,6 +239,7 @@ export function RatioSettingsCard({
 }: RatioSettingsCardProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const updateGroupTypeOptions = useUpdateGroupTypeOptions()
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const pricingQuery = useModelPricing()
@@ -402,20 +420,28 @@ export function RatioSettingsCard({
       GroupTypeMap: normalizeJsonString(groupDefaults.GroupTypeMap),
     }
 
-    groupForm.reset({
-      ...groupDefaults,
-      GroupRatio: formatJsonForTextarea(groupDefaults.GroupRatio),
-      TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
-      UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
-      GroupDescriptions: formatJsonForTextarea(groupDefaults.GroupDescriptions),
-      GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
-      AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
-      GroupSpecialUsableGroup: formatJsonForTextarea(
-        groupDefaults.GroupSpecialUsableGroup
-      ),
-      GroupTypes: formatJsonForTextarea(groupDefaults.GroupTypes),
-      GroupTypeMap: formatJsonForTextarea(groupDefaults.GroupTypeMap),
-    })
+    groupForm.reset(
+      {
+        ...groupDefaults,
+        GroupRatio: formatJsonForTextarea(groupDefaults.GroupRatio),
+        TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
+        UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
+        GroupDescriptions: formatJsonForTextarea(
+          groupDefaults.GroupDescriptions
+        ),
+        GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
+        AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
+        GroupSpecialUsableGroup: formatJsonForTextarea(
+          groupDefaults.GroupSpecialUsableGroup
+        ),
+        GroupTypes: formatJsonForTextarea(groupDefaults.GroupTypes),
+        GroupTypeMap: formatJsonForTextarea(groupDefaults.GroupTypeMap),
+      },
+      {
+        keepDirtyValues:
+          Object.keys(groupForm.formState.dirtyFields).length > 0,
+      }
+    )
   }, [groupDefaults, groupForm])
 
   const saveModelRatios = useCallback(
@@ -470,54 +496,85 @@ export function RatioSettingsCard({
 
   const saveGroupRatios = useCallback(
     async (values: GroupFormValues) => {
-      const normalized = {
-        GroupRatio: normalizeJsonString(values.GroupRatio),
-        TopupGroupRatio: normalizeJsonString(values.TopupGroupRatio),
-        UserUsableGroups: normalizeJsonString(values.UserUsableGroups),
-        GroupDescriptions: normalizeJsonString(values.GroupDescriptions),
-        GroupGroupRatio: normalizeJsonString(values.GroupGroupRatio),
-        AutoGroups: normalizeJsonString(values.AutoGroups),
-        MaxTokenAutoGroups: values.MaxTokenAutoGroups,
-        DefaultUseAutoGroup: values.DefaultUseAutoGroup,
-        GroupSpecialUsableGroup: normalizeJsonString(
-          values.GroupSpecialUsableGroup
-        ),
-        GroupTypes: normalizeJsonString(values.GroupTypes),
-        GroupTypeMap: normalizeJsonString(values.GroupTypeMap),
-      }
-      const validTypeIDs = new Set(
-        parseGroupTypes(normalized.GroupTypes).map((type) => type.id)
-      )
-      normalized.GroupTypeMap = normalizeJsonString(
-        serializeGroupTypeMap(
-          parseGroupTypeMap(normalized.GroupTypeMap),
-          validTypeIDs
+      try {
+        const normalized = {
+          GroupRatio: normalizeJsonString(values.GroupRatio),
+          TopupGroupRatio: normalizeJsonString(values.TopupGroupRatio),
+          UserUsableGroups: normalizeJsonString(values.UserUsableGroups),
+          GroupDescriptions: normalizeJsonString(values.GroupDescriptions),
+          GroupGroupRatio: normalizeJsonString(values.GroupGroupRatio),
+          AutoGroups: normalizeJsonString(values.AutoGroups),
+          MaxTokenAutoGroups: values.MaxTokenAutoGroups,
+          DefaultUseAutoGroup: values.DefaultUseAutoGroup,
+          GroupSpecialUsableGroup: normalizeJsonString(
+            values.GroupSpecialUsableGroup
+          ),
+          GroupTypes: normalizeJsonString(values.GroupTypes),
+          GroupTypeMap: normalizeJsonString(values.GroupTypeMap),
+        }
+        const validTypeIDs = new Set(
+          parseGroupTypes(normalized.GroupTypes).map((type) => type.id)
         )
-      )
+        const groupRatios = safeJsonParse<unknown>(normalized.GroupRatio, {
+          fallback: {},
+          silent: true,
+        })
+        const validGroupNames =
+          groupRatios &&
+          typeof groupRatios === 'object' &&
+          !Array.isArray(groupRatios)
+            ? new Set(Object.keys(groupRatios))
+            : new Set<string>()
+        normalized.GroupTypeMap = normalizeJsonString(
+          serializeGroupTypeMap(
+            parseGroupTypeMap(normalized.GroupTypeMap),
+            validTypeIDs,
+            validGroupNames
+          )
+        )
 
-      // Map form field names to API keys (most are 1:1, except GroupSpecialUsableGroup)
-      const apiKeyMap: Record<string, string> = {
-        GroupDescriptions: 'group_ratio_setting.group_descriptions',
-        GroupSpecialUsableGroup:
-          'group_ratio_setting.group_special_usable_group',
-        GroupTypes: 'group_ratio_setting.group_types',
-        GroupTypeMap: 'group_ratio_setting.group_type_map',
+        // Map form field names to API keys (most are 1:1, except GroupSpecialUsableGroup)
+        const apiKeyMap: Record<string, string> = {
+          GroupDescriptions: 'group_ratio_setting.group_descriptions',
+          GroupSpecialUsableGroup:
+            'group_ratio_setting.group_special_usable_group',
+        }
+
+        const updates = (
+          Object.keys(normalized) as Array<keyof typeof normalized>
+        ).filter(
+          (key) => normalized[key] !== groupNormalizedDefaults.current[key]
+        )
+
+        for (const key of updates) {
+          if (key === 'GroupTypes' || key === 'GroupTypeMap') continue
+          const apiKey = apiKeyMap[key] || key
+          await updateOption.mutateAsync({
+            key: apiKey,
+            value: normalized[key],
+          })
+        }
+
+        if (
+          updates.includes('GroupTypes') ||
+          updates.includes('GroupTypeMap')
+        ) {
+          await updateGroupTypeOptions.mutateAsync({
+            group_types: normalized.GroupTypes,
+            group_type_map: normalized.GroupTypeMap,
+          })
+        }
+
+        groupNormalizedDefaults.current = normalized
+        groupForm.reset({
+          ...values,
+          GroupTypeMap: formatJsonForTextarea(normalized.GroupTypeMap),
+        })
+      } catch (error) {
+        handleServerError(error)
       }
-
-      const updates = (
-        Object.keys(normalized) as Array<keyof typeof normalized>
-      ).filter(
-        (key) => normalized[key] !== groupNormalizedDefaults.current[key]
-      )
-
-      for (const key of updates) {
-        const apiKey = apiKeyMap[key] || key
-        await updateOption.mutateAsync({ key: apiKey, value: normalized[key] })
-      }
-
-      groupNormalizedDefaults.current = normalized
     },
-    [updateOption]
+    [groupForm, updateGroupTypeOptions, updateOption]
   )
 
   const handleResetRatios = useCallback(() => {
@@ -589,7 +646,7 @@ export function RatioSettingsCard({
         <GroupRatioForm
           form={groupForm}
           onSave={saveGroupRatios}
-          isSaving={updateOption.isPending}
+          isSaving={groupForm.formState.isSubmitting}
         />
       )
     }
