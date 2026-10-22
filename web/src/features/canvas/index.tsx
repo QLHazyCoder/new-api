@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
+import { getBuildRevision } from '@/lib/build-metadata'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -100,7 +101,9 @@ export function Canvas() {
     }
     frame.addEventListener('load', initialize)
     // This effect installs the listener before assigning src.
-    frame.src = '/canvas-app/index.html#/canvas'
+    // Older releases cached a permanent redirect for the unversioned entry.
+    // A new build must navigate past that cache before it can read new headers.
+    frame.src = `/canvas-app/index.html?v=${encodeURIComponent(getBuildRevision())}#/canvas`
     return () => {
       active = false
       frame.removeEventListener('load', initialize)

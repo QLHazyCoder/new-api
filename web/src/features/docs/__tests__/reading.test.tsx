@@ -302,7 +302,7 @@ test('the article navigation shows H2 and H3 sections and updates the same route
   expect(scroll.mock.contexts).toContain(
     screen.getByRole('heading', { name: 'Linux' })
   )
-  expect(requests.toSorted()).toEqual([
+  expect([...requests].sort()).toEqual([
     '/api/public/docs',
     '/api/public/docs/quick-start',
   ])

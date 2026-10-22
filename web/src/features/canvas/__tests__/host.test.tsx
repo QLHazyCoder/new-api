@@ -144,7 +144,10 @@ describe('Canvas host lifecycle', () => {
     render(<Canvas />)
     const frame = screen.getByTitle('Infinite Canvas') as HTMLIFrameElement
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-downloads')
-    expect(frame.src).toContain('/canvas-app/index.html#/canvas')
+    const frameURL = new URL(frame.src)
+    expect(frameURL.pathname).toBe('/canvas-app/index.html')
+    expect(frameURL.searchParams.get('v')).toBeTruthy()
+    expect(frameURL.hash).toBe('#/canvas')
     fireEvent.load(frame)
     const active = channels.at(-1)
     expect(active).toBeDefined()

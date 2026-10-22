@@ -30,8 +30,25 @@ const bundle = {
     expires_at: 2000000000,
   },
 };
+let legacyRedirects = false;
+let legacyEntryRequests = 0;
 const server = http.createServer(async (request, response) => {
-  const pathname = new URL(request.url, "http://localhost").pathname;
+  const url = new URL(request.url, "http://localhost");
+  const pathname = url.pathname;
+  if (pathname === "/canvas-app/index.html" && !url.search) legacyEntryRequests += 1;
+  if (
+    legacyRedirects &&
+    !url.search &&
+    ["/canvas-app", "/canvas-app/", "/canvas-app/index.html"].includes(pathname)
+  ) {
+    const headers = { Location: pathname === "/canvas-app" ? "/canvas-app/" : "/canvas-app" };
+    if (pathname !== "/canvas-app/") headers["Cache-Control"] = "max-age=604800";
+    if (pathname === "/canvas-app/index.html") {
+      headers.Location = "./";
+    }
+    response.writeHead(301, headers).end();
+    return;
+  }
   if (pathname.startsWith("/api/")) {
     let data = [];
     if (pathname === "/api/status") {
@@ -91,7 +108,13 @@ try {
     headless: true,
     args: ["--no-sandbox"],
   });
-  for (const scenario of ["success", "module-failure", "bootstrap-stall", "bootstrap-failure"]) {
+  for (const scenario of [
+    "cached-redirect",
+    "success",
+    "module-failure",
+    "bootstrap-stall",
+    "bootstrap-failure",
+  ]) {
     const page = await browser.newPage({
       viewport: { width: 1440, height: 1000 },
       locale: "zh-CN",
@@ -122,7 +145,47 @@ try {
       const library = page
         .frameLocator("iframe[title='无限画布']")
         .getByRole("heading", { name: "无限画布", exact: true });
-      if (scenario === "success") {
+      if (scenario === "cached-redirect") {
+        await library.waitFor();
+        legacyRedirects = true;
+        const blank = page.waitForEvent("framenavigated", {
+          predicate: (frame) => frame.url() === "about:blank",
+        });
+        await frame.evaluate((element) => {
+          element.src = "about:blank";
+        });
+        await blank;
+        const redirectFailure = page.waitForEvent("requestfailed", {
+          predicate: (request) =>
+            request.url().includes("/canvas-app/") && request.resourceType() === "document",
+          timeout: 15_000,
+        });
+        await frame.evaluate((element) => {
+          element.src = "/canvas-app/index.html#/canvas";
+        });
+        const failure = await redirectFailure;
+        assert.equal(failure.failure()?.errorText, "net::ERR_TOO_MANY_REDIRECTS");
+        assert.ok(legacyEntryRequests > 0, "legacy cache fixture was not requested");
+        const beforeUpgrade = legacyEntryRequests;
+        legacyRedirects = false;
+        await page.reload({ waitUntil: "domcontentloaded" });
+        try {
+          await library.waitFor();
+        } catch (error) {
+          console.error("Upgrade cache evidence", {
+            beforeUpgrade,
+            afterUpgrade: legacyEntryRequests,
+            frames: page.frames().map((frame) => frame.url()),
+          });
+          throw error;
+        }
+        assert.equal(
+          legacyEntryRequests,
+          beforeUpgrade,
+          "browser must retain its legacy cache across the upgrade",
+        );
+        assert.equal(await frame.getAttribute("aria-busy"), "false");
+      } else if (scenario === "success") {
         await library.waitFor();
         assert.equal(await frame.getAttribute("aria-busy"), "false");
       } else {
@@ -140,7 +203,7 @@ try {
       }
       assert.deepEqual(errors, [], `${scenario}: unexpected page errors`);
       console.log(
-        `PASS ${scenario}${scenario === "success" ? "" : ": failure shown, retry rendered canvas"}`,
+        `PASS ${scenario}${["success", "cached-redirect"].includes(scenario) ? "" : ": failure shown, retry rendered canvas"}`,
       );
     } finally {
       await page.close();

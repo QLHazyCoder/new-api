@@ -5,6 +5,8 @@ COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
 COPY ./web ./
 COPY ./VERSION /build/VERSION
+COPY ./integrations/infinite-canvas/overlay/bridge.ts /build/integrations/infinite-canvas/overlay/bridge.ts
+COPY ./pkg/billingexpr/testdata/frontend_simulation.json /build/pkg/billingexpr/testdata/frontend_simulation.json
 RUN bun run typecheck
 RUN DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat /build/VERSION) bun run build
 
