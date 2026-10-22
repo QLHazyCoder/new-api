@@ -18,6 +18,7 @@
 8. 引用检查覆盖节点 storageKey 和参考图列表；文档校验覆盖节点、连线、会话和视口，防止导入损坏下一次加载。生成入口移除内部 group 字段与请求幂等头，会话 Authorization、Cookie 在认证后移除。
 9. 持久任务在统一提交完成位置关联运行记录，覆盖图像、Responses 与视频；清理仅在主节点启动。生成记录分页读取；取消接口只在确实找到本地观察时报告取消成功。
 10. 子应用取消读取响应体时立即释放流记录和监听器，忽略迟到的结束消息，避免已关闭流被二次关闭；增加对应生产适配器回归测试。
+11. 生产静态服务对 `/canvas-app/index.html` 的标准 `http.FileServer` 行为会重定向到错误的 `index.html/` 路径；增加专用 index 入口，覆盖无斜杠、斜杠和明确 index 三种路径，保证 sandbox 握手可以开始。
 
 ## 文件结构与职责
 
@@ -31,6 +32,7 @@
 | `controller/canvas_run.go` | 幂等屏障、响应归档、取消观察和任务关联 |
 | `middleware/canvas.go` | 唯一会话认证、模块开关、组/模型与规范路径 |
 | `middleware/canvas_static.go` | 沙箱静态资源的 CSP、CORS 与内容安全策略 |
+| `middleware/frontend_static_test.go` | 画布 index 入口和既有前端静态压缩行为回归 |
 | `router/canvas-router.go` | 白名单接口和既有中继/插件链 |
 | `web/src/features/canvas/` | 沙箱容器、固定操作消息桥、加载与错误恢复 |
 | `web/src/routes/_authenticated/canvas/` | 登录后的独立控制台导航页 |

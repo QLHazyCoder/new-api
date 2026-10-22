@@ -104,3 +104,29 @@ func TestServeFrontendFilesCompressesEachFileOnce(t *testing.T) {
 	assert.Equal(t, http.StatusTeapot, missing.Code)
 	assert.Equal(t, "fallback", missing.Body.String())
 }
+
+func TestCanvasFrontendIndexAvoidsFileServerRedirect(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	frontendDir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(frontendDir, "canvas-app"), 0o755))
+	index := []byte("<!doctype html><script type=module src=\"/canvas-app/assets/app.js\"></script>")
+	require.NoError(t, os.WriteFile(filepath.Join(frontendDir, "canvas-app", "index.html"), index, 0o644))
+	frontendFS := static.LocalFile(frontendDir, false)
+
+	router := gin.New()
+	router.NoRoute(CanvasFrontendIndex(frontendFS), CanvasFrontendPolicy(frontendFS), func(c *gin.Context) {
+		c.String(http.StatusTeapot, "fallback")
+	})
+	for _, target := range []string{"/canvas-app", "/canvas-app/", "/canvas-app/index.html"} {
+		response := performFrontendRequest(router, http.MethodGet, target, "")
+		require.Equal(t, http.StatusOK, response.Code, target)
+		assert.Equal(t, index, response.Body.Bytes(), target)
+		assert.Equal(t, "*", response.Header().Get("Access-Control-Allow-Origin"), target)
+		assert.Contains(t, response.Header().Get("Content-Security-Policy"), "default-src 'none'", target)
+		assert.Empty(t, response.Header().Get("Location"), target)
+	}
+
+	head := performFrontendRequest(router, http.MethodHead, "/canvas-app/index.html", "")
+	assert.Equal(t, http.StatusOK, head.Code)
+	assert.Empty(t, head.Body.Bytes())
+}
