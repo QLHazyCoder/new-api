@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -371,6 +372,43 @@ func TestNewBillingSessionSubscriptionFirstPersistsMixedAllocations(t *testing.T
 	assert.Equal(t, 20, info.BillingAllocations[1].Quota)
 	assert.EqualValues(t, 980, getUserQuota(t, userID))
 	assert.EqualValues(t, 930, getTokenRemainQuota(t, tokenID))
+}
+
+func TestCanvasSessionChargesFundingWithoutModelToken(t *testing.T) {
+	for _, preference := range []string{"wallet_only", "subscription_first"} {
+		t.Run(preference, func(t *testing.T) {
+			truncate(t)
+			const userID = 931
+			seedUser(t, userID, 1000)
+			if preference == "subscription_first" {
+				seedSubscriptionPlan(t, userID, true)
+				seedSubscriptionWithPlan(t, userID, userID, userID, 1000, 950, true)
+			}
+			context := newBillingTestContext(1000)
+			context.Set(common.CanvasOriginContextKey, common.CanvasOrigin)
+			common.SetContextKey(context, constant.ContextKeyUserId, userID)
+			common.SetContextKey(context, constant.ContextKeyUsingGroup, "default")
+			info, err := relaycommon.GenRelayInfo(context, "openai_responses", &dto.OpenAIResponsesRequest{}, nil)
+			require.NoError(t, err)
+			info.RequestId = "canvas-funding-" + preference
+			info.ForcePreConsume = true
+			info.OriginModelName = "test-model"
+			info.UserSetting = dto.UserSetting{BillingPreference: preference}
+			session, apiErr := NewBillingSession(context, info, 100)
+			require.Nil(t, apiErr)
+			require.NoError(t, session.Settle(70))
+			require.NoError(t, session.Settle(70), "settlement is idempotent")
+			if preference == "wallet_only" {
+				assert.EqualValues(t, 930, getUserQuota(t, userID))
+			} else {
+				assert.EqualValues(t, 980, getUserQuota(t, userID))
+				assert.EqualValues(t, 1000, getSubscriptionUsed(t, userID))
+			}
+			var tokens int64
+			require.NoError(t, model.DB.Model(&model.Token{}).Count(&tokens).Error)
+			assert.Zero(t, tokens, "canvas does not mint model credentials")
+		})
+	}
 }
 
 func TestMixedTaskBillingPersistsAllocationsAcrossRecalculateAndRefund(t *testing.T) {

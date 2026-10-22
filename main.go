@@ -172,6 +172,7 @@ func main() {
 	// while the service package owns queue leases and result persistence.
 	service.ExecutePlaygroundImageTask = controller.ExecutePlaygroundImageRelay
 	service.StartPlaygroundImageTaskRunner()
+	service.StartCanvasCleanup()
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		model.InitBatchUpdater()

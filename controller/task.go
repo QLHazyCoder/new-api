@@ -269,6 +269,9 @@ func legacyVideoAvailable(task *model.Task) bool {
 }
 
 func getTaskForArtifactRequest(c *gin.Context, taskID string) (*model.Task, bool, error) {
+	if c.GetString(common.CanvasOriginContextKey) == common.CanvasOrigin {
+		return model.GetByTaskId(c.GetInt("id"), taskID)
+	}
 	if middleware.IsTaskArtifactAccess(c) {
 		task, exists, err := model.GetUniqueByOnlyTaskId(taskID)
 		if err != nil || !exists || task == nil {

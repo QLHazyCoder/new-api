@@ -226,11 +226,13 @@ func serveTaskPluginProtocol(
 		protocolRequest.Stream,
 	)
 
-	release, admissionErr := deps.admissions.acquire(
-		pinned.Plugin.Meta.Key,
-		common.GetContextKeyInt(c, constant.ContextKeyUserId),
-		common.GetContextKeyInt(c, constant.ContextKeyTokenId),
-	)
+	var release func()
+	var admissionErr error
+	if c.GetString(common.CanvasOriginContextKey) == common.CanvasOrigin {
+		release, admissionErr = deps.admissions.acquireSession(pinned.Plugin.Meta.Key, c.GetInt("id"), c.GetString("session_id"))
+	} else {
+		release, admissionErr = deps.admissions.acquire(pinned.Plugin.Meta.Key, common.GetContextKeyInt(c, constant.ContextKeyUserId), common.GetContextKeyInt(c, constant.ContextKeyTokenId))
+	}
 	if admissionErr != nil {
 		if errors.Is(admissionErr, errPluginProtocolObservationLimitExceeded) {
 			logger.LogDebug(c, "task_plugin subsystem=protocol event=admission_rejected generation=%d plugin=%q reason=observation_limit", generation, pluginKey)

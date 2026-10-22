@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/basketikun/infinite-canvas.git",
+  "tag": "v0.19.0",
+  "commit": "e856c878e0a34651bb828e28f0af20d71016a7d4",
+  "protocol": 1,
+  "base": "/canvas-app/"
+}

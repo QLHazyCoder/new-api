@@ -27,6 +27,22 @@ func TestRelayInfoGetFinalRequestRelayFormatPrefersExplicitFinal(t *testing.T) {
 	require.Equal(t, types.RelayFormat(types.RelayFormatOpenAIResponses), info.GetFinalRequestRelayFormat())
 }
 
+func TestCanvasRelayKeepsCanonicalProtocolAndDashboardFunding(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/images/generations", nil)
+	ctx.Set(common.CanvasOriginContextKey, common.CanvasOrigin)
+	common.SetContextKey(ctx, constant.ContextKeyUserId, 42)
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "canvas-group")
+	info, err := GenRelayInfo(ctx, types.RelayFormatOpenAIImage, nil, nil)
+	require.NoError(t, err)
+	assert.True(t, info.IsPlayground)
+	assert.Equal(t, common.CanvasOrigin, info.RequestOrigin)
+	assert.Zero(t, info.TokenId)
+	assert.Empty(t, info.TokenKey)
+	assert.Equal(t, "/v1/images/generations", info.RequestURLPath)
+	assert.Equal(t, "canvas-group", info.UsingGroup)
+}
+
 func TestRelayInfoGetFinalRequestRelayFormatFallsBackToConversionChain(t *testing.T) {
 	info := &RelayInfo{
 		RelayFormat:            types.RelayFormatOpenAI,

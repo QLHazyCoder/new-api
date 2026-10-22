@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Infinite Canvas": "无限画布",
+    "Unable to open canvas": "无法打开画布",
+    "Create with images, video, audio, and text on a canvas": "在画布上使用图片、视频、音频和文本创作",
+    "Canvas content changed in another window": "画布内容已被其他窗口修改",
+    "Invalid canvas content": "画布内容无效",
+    "Failed to save canvas content": "画布内容保存失败",
+    "Canvas content not found": "未找到画布内容",
+    "Canvas file is too large": "画布文件过大",
+    "Canvas request already exists": "画布请求已存在",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

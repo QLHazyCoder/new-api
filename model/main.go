@@ -397,6 +397,11 @@ func migrateDB() error {
 		&PlaygroundImageBatch{},
 		&PlaygroundImageTask{},
 		&UserAccessToken{},
+		&CanvasProject{},
+		&CanvasAsset{},
+		&CanvasProjectAssetRef{},
+		&CanvasGenerationRun{},
+		&CanvasUserSetting{},
 	)
 	if err != nil {
 		return err

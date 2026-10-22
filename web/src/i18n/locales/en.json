@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Infinite Canvas": "Infinite Canvas",
+    "Unable to open canvas": "Unable to open canvas",
+    "Create with images, video, audio, and text on a canvas": "Create with images, video, audio, and text on a canvas",
+    "Canvas content changed in another window": "Canvas content changed in another window",
+    "Invalid canvas content": "Invalid canvas content",
+    "Failed to save canvas content": "Failed to save canvas content",
+    "Canvas content not found": "Canvas content not found",
+    "Canvas file is too large": "Canvas file is too large",
+    "Canvas request already exists": "Canvas request already exists",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

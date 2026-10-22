@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Infinite Canvas": "無限キャンバス",
+    "Unable to open canvas": "キャンバスを開けません",
+    "Create with images, video, audio, and text on a canvas": "画像、動画、音声、テキストをキャンバスで作成",
+    "Canvas content changed in another window": "キャンバスは別のウィンドウで変更されました",
+    "Invalid canvas content": "キャンバスの内容が無効です",
+    "Failed to save canvas content": "キャンバスを保存できませんでした",
+    "Canvas content not found": "キャンバスの内容が見つかりません",
+    "Canvas file is too large": "キャンバスのファイルが大きすぎます",
+    "Canvas request already exists": "キャンバスのリクエストは既に存在します",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

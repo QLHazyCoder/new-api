@@ -74,6 +74,15 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
 }
 
 describe('security sidebar visibility', () => {
+  it('shows Infinite Canvas after Playground and honors the admin module gate', () => {
+    const visible = sidebarFor()
+    const chat = visible.result.current.find((group) => group.id === 'chat')
+    expect(chat?.items.map((item) => 'url' in item ? item.url : item.type)).toEqual(['/playground', '/canvas', 'chat-presets'])
+    visible.unmount()
+    const disabled = sidebarFor({ chat: { enabled: true, playground: true, canvas: false, chat: true } })
+    const hiddenChat = disabled.result.current.find((group) => group.id === 'chat')
+    expect(hiddenChat?.items.some((item) => 'url' in item && item.url === '/canvas')).toBe(false)
+  })
   it('old configurations show Security & Access immediately after Profile and keep API Keys', () => {
     const { result } = sidebarFor(
       { personal: { enabled: true, personal: true, topup: true } },

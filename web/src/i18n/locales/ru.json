@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Infinite Canvas": "Бесконечный холст",
+    "Unable to open canvas": "Не удалось открыть холст",
+    "Create with images, video, audio, and text on a canvas": "Создавайте изображения, видео, аудио и текст на холсте",
+    "Canvas content changed in another window": "Холст изменён в другом окне",
+    "Invalid canvas content": "Недопустимое содержимое холста",
+    "Failed to save canvas content": "Не удалось сохранить холст",
+    "Canvas content not found": "Содержимое холста не найдено",
+    "Canvas file is too large": "Файл холста слишком большой",
+    "Canvas request already exists": "Запрос холста уже существует",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

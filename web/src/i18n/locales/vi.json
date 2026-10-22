@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Infinite Canvas": "Bảng vẽ vô hạn",
+    "Unable to open canvas": "Không thể mở bảng vẽ",
+    "Create with images, video, audio, and text on a canvas": "Sáng tạo bằng hình ảnh, video, âm thanh và văn bản",
+    "Canvas content changed in another window": "Bảng vẽ đã thay đổi ở cửa sổ khác",
+    "Invalid canvas content": "Nội dung bảng vẽ không hợp lệ",
+    "Failed to save canvas content": "Không thể lưu bảng vẽ",
+    "Canvas content not found": "Không tìm thấy nội dung bảng vẽ",
+    "Canvas file is too large": "Tệp bảng vẽ quá lớn",
+    "Canvas request already exists": "Yêu cầu bảng vẽ đã tồn tại",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

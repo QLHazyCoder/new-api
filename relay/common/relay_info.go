@@ -95,6 +95,7 @@ type RelayInfo struct {
 	IsStream               bool
 	IsGeminiBatchEmbedding bool
 	IsPlayground           bool
+	RequestOrigin          string
 	UsePrice               bool
 	RelayMode              int
 	OriginModelName        string
@@ -685,6 +686,11 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		info.IsPlayground = true
 		info.RequestURLPath = strings.TrimPrefix(info.RequestURLPath, "/pg")
 		info.RequestURLPath = "/v1" + info.RequestURLPath
+	}
+	if c.GetString(common.CanvasOriginContextKey) == common.CanvasOrigin {
+		info.RequestOrigin = common.CanvasOrigin
+		// Reuse dashboard billing: no model-token quota, normal user funding.
+		info.IsPlayground = true
 	}
 
 	userSetting, ok := common.GetContextKeyType[dto.UserSetting](c, constant.ContextKeyUserSetting)

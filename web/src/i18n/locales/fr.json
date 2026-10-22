@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Infinite Canvas": "Canevas infini",
+    "Unable to open canvas": "Impossible d’ouvrir le canevas",
+    "Create with images, video, audio, and text on a canvas": "Créer avec des images, des vidéos, de l’audio et du texte",
+    "Canvas content changed in another window": "Le canevas a été modifié dans une autre fenêtre",
+    "Invalid canvas content": "Contenu du canevas invalide",
+    "Failed to save canvas content": "Échec de l’enregistrement du canevas",
+    "Canvas content not found": "Contenu du canevas introuvable",
+    "Canvas file is too large": "Le fichier du canevas est trop volumineux",
+    "Canvas request already exists": "La requête du canevas existe déjà",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

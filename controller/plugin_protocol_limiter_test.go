@@ -90,6 +90,25 @@ func TestPluginProtocolObservationLimiterCaps(t *testing.T) {
 	})
 }
 
+func TestCanvasSessionObservationsAreIsolatedAndBounded(t *testing.T) {
+	limiter := newPluginProtocolObservationLimiter(pluginProtocolObservationLimits{global: 10, perPlugin: 10, perUser: 4, perToken: 1})
+	first, err := limiter.acquireSession("plugin", 1, "session-a")
+	require.NoError(t, err)
+	defer first()
+	_, err = limiter.acquireSession("plugin", 1, "session-a")
+	assert.ErrorIs(t, err, errPluginProtocolObservationLimitExceeded)
+	second, err := limiter.acquireSession("plugin", 1, "session-b")
+	require.NoError(t, err)
+	defer second()
+	third, err := limiter.acquireSession("plugin", 2, "session-a")
+	require.NoError(t, err)
+	defer third()
+	_, err = limiter.acquireSession("plugin", 1, "")
+	assert.ErrorIs(t, err, errInvalidPluginProtocolObservationIdentity)
+	_, err = limiter.acquire("plugin", 1, 0)
+	assert.ErrorIs(t, err, errInvalidPluginProtocolObservationIdentity)
+}
+
 func TestPluginProtocolObservationLimiterRollsBackFailedAdmission(t *testing.T) {
 	t.Run("user failure", func(t *testing.T) {
 		limiter := newPluginProtocolObservationLimiter(pluginProtocolObservationLimits{

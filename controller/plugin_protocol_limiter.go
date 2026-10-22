@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"strings"
@@ -50,7 +51,7 @@ type pluginProtocolObservationLimiter struct {
 	global int
 	plugin map[string]int
 	user   map[int]int
-	token  map[int]int
+	token  map[string]int
 }
 
 func newPluginProtocolObservationLimiter(limits pluginProtocolObservationLimits) *pluginProtocolObservationLimiter {
@@ -58,7 +59,7 @@ func newPluginProtocolObservationLimiter(limits pluginProtocolObservationLimits)
 		limits: limits,
 		plugin: make(map[string]int),
 		user:   make(map[int]int),
-		token:  make(map[int]int),
+		token:  make(map[string]int),
 	}
 }
 
@@ -67,14 +68,26 @@ func (l *pluginProtocolObservationLimiter) acquire(
 	userID int,
 	tokenID int,
 ) (func(), error) {
+	if tokenID <= 0 {
+		return nil, fmt.Errorf("%w: token id must be positive", errInvalidPluginProtocolObservationIdentity)
+	}
+	return l.acquirePrincipal(pluginKey, userID, fmt.Sprintf("token:%d", tokenID))
+}
+
+func (l *pluginProtocolObservationLimiter) acquireSession(pluginKey string, userID int, sessionID string) (func(), error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("%w: session is required", errInvalidPluginProtocolObservationIdentity)
+	}
+	return l.acquirePrincipal(pluginKey, userID, fmt.Sprintf("session:%d:%x", userID, sha256.Sum256([]byte(sessionID))))
+}
+
+func (l *pluginProtocolObservationLimiter) acquirePrincipal(pluginKey string, userID int, principal string) (func(), error) {
 	pluginKey = strings.TrimSpace(pluginKey)
 	switch {
 	case pluginKey == "":
 		return nil, fmt.Errorf("%w: plugin key is required", errInvalidPluginProtocolObservationIdentity)
 	case userID <= 0:
 		return nil, fmt.Errorf("%w: user id must be positive", errInvalidPluginProtocolObservationIdentity)
-	case tokenID <= 0:
-		return nil, fmt.Errorf("%w: token id must be positive", errInvalidPluginProtocolObservationIdentity)
 	}
 
 	l.mu.Lock()
@@ -111,7 +124,7 @@ func (l *pluginProtocolObservationLimiter) acquire(
 	}
 	l.user[userID]++
 
-	if l.token[tokenID] >= l.limits.perToken {
+	if l.token[principal] >= l.limits.perToken {
 		l.global--
 		l.plugin[pluginKey]--
 		if l.plugin[pluginKey] == 0 {
@@ -127,7 +140,7 @@ func (l *pluginProtocolObservationLimiter) acquire(
 			limit: l.limits.perToken,
 		}
 	}
-	l.token[tokenID]++
+	l.token[principal]++
 	l.mu.Unlock()
 
 	var once sync.Once
@@ -148,9 +161,9 @@ func (l *pluginProtocolObservationLimiter) acquire(
 				delete(l.user, userID)
 			}
 
-			l.token[tokenID]--
-			if l.token[tokenID] == 0 {
-				delete(l.token, tokenID)
+			l.token[principal]--
+			if l.token[principal] == 0 {
+				delete(l.token, principal)
 			}
 		})
 	}, nil

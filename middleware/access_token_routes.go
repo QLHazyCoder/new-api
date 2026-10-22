@@ -365,6 +365,17 @@ func AccessTokenRouteRule(key string) (accessTokenRouteRule, bool) {
 	return rule, ok
 }
 
+// DeclareSessionOnlyDashboardRoute registers a route that rejects all PATs.
+func DeclareSessionOnlyDashboardRoute(method, path string) {
+	key := method + " " + path
+	permissionRouteRulesMu.Lock()
+	defer permissionRouteRulesMu.Unlock()
+	if previous, exists := permissionRouteRules[key]; exists && previous != accessTokenSessionRule {
+		panic("conflicting dashboard session route: " + key)
+	}
+	permissionRouteRules[key] = accessTokenSessionRule
+}
+
 // AccessTokenRouteRuleKeys lists every declared route key, sorted.
 func AccessTokenRouteRuleKeys() []string {
 	permissionRouteRulesMu.RLock()

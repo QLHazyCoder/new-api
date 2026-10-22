@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -362,6 +363,63 @@ func middlewareBearerRequest(router *gin.Engine, path, token string) *httptest.R
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	return response
+}
+
+func TestCanvasRequiresLiveBrowserSession(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	user := createMiddlewarePATUser(t, "canvas-session", "canvas-old-pat")
+	bundle, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "canvas-test")
+	require.NoError(t, err)
+	rawPAT, _ := createMiddlewareScopedToken(t, user.Id, time.Now().Add(time.Hour).Unix(), "profile:read")
+	common.OptionMapRWMutex.Lock()
+	previous := common.OptionMap["SidebarModulesAdmin"]
+	if common.OptionMap == nil {
+		common.OptionMap = map[string]string{}
+	}
+	common.OptionMap["SidebarModulesAdmin"] = ""
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap["SidebarModulesAdmin"] = previous
+		common.OptionMapRWMutex.Unlock()
+	})
+	engine := gin.New()
+	DeclareSessionOnlyDashboardRoute("GET", "/api/canvas/bootstrap")
+	engine.GET("/api/canvas/bootstrap", UserAuth(), CanvasSession(), func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"user": c.GetInt("id")}) })
+	assert.Equal(t, http.StatusOK, middlewareBearerRequest(engine, "/api/canvas/bootstrap", bundle.AccessToken).Code)
+	assert.Equal(t, http.StatusUnauthorized, middlewareBearerRequest(engine, "/api/canvas/bootstrap", "").Code)
+	assert.Equal(t, http.StatusForbidden, middlewareBearerRequest(engine, "/api/canvas/bootstrap", rawPAT).Code)
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap["SidebarModulesAdmin"] = `{"chat":{"enabled":true,"canvas":false}}`
+	common.OptionMapRWMutex.Unlock()
+	assert.Equal(t, http.StatusForbidden, middlewareBearerRequest(engine, "/api/canvas/bootstrap", bundle.AccessToken).Code)
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap["SidebarModulesAdmin"] = ""
+	common.OptionMapRWMutex.Unlock()
+	_, err = model.RevokeUserSession(user.Id, bundle.Session.SID, "canvas-test")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, middlewareBearerRequest(engine, "/api/canvas/bootstrap", bundle.AccessToken).Code)
+}
+
+func TestCanvasCanonicalVideoPathPreservesTheRetrievalProtocol(t *testing.T) {
+	engine := gin.New()
+	engine.GET("/api/canvas/v1/videos/:task_id", func(c *gin.Context) {
+		c.Set(common.CanvasOriginContextKey, common.CanvasOrigin)
+		common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+		c.Next()
+	}, CanvasRelay(""), func(c *gin.Context) {
+		assert.Empty(t, c.GetHeader("Authorization"))
+		assert.Empty(t, c.GetHeader("Cookie"))
+		c.JSON(http.StatusOK, gin.H{"path": c.Request.URL.Path, "request_uri": c.Request.RequestURI, "token_id": c.GetInt("token_id")})
+	})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/canvas/v1/videos/task-id", nil)
+	request.Header.Set("Authorization", "Bearer dashboard-secret")
+	request.Header.Set("Cookie", "refresh=dashboard-secret")
+	engine.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Body.String(), `"request_uri":"/v1/videos/task-id"`)
+	assert.Contains(t, response.Body.String(), `"token_id":0`)
 }
 
 func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {

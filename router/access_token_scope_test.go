@@ -89,6 +89,7 @@ func newAccessTokenScopeTestEngine(t *testing.T) *gin.Engine {
 	// A permission route that is also in the static table panics here.
 	require.NotPanics(t, func() {
 		SetApiRouter(engine)
+		SetCanvasRouter(engine)
 		SetDashboardRouter(engine)
 		SetRelayRouter(engine)
 		SetTaskPluginProtocolRouter(engine)

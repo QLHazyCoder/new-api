@@ -721,6 +721,7 @@ func executeTaskSubmissionWith(
 	service.LogTaskConsumption(c, relayInfo, task)
 	diagnostics.complete(task, result.Quota)
 
+	attachCanvasTask(c, task)
 	return &taskSubmissionOutcome{Result: result, Task: task, RelayInfo: relayInfo}, nil
 }
 
