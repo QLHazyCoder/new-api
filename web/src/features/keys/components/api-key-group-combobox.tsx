@@ -35,6 +35,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { useMediaQuery } from '@/hooks'
+import type { GroupTypeInfo } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 import {
@@ -48,6 +49,7 @@ export type ApiKeyGroupOption = {
   label: string
   desc?: string
   ratio?: number | string
+  type?: GroupTypeInfo
 }
 
 type ApiKeyGroupComboboxProps = {

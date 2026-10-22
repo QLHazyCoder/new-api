@@ -3,6 +3,7 @@ package ratio_setting
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -27,13 +28,25 @@ var groupGroupRatioMap = types.NewRWMap[string, map[string]float64]()
 
 var groupDescriptionsMap = types.NewRWMap[string, string]()
 
+var groupTypesMap = types.NewRWMap[string, GroupTypeInfo]()
+
+var groupTypeMap = types.NewRWMap[string, string]()
+
 var defaultGroupSpecialUsableGroup = map[string]map[string]string{}
+
+type GroupTypeInfo struct {
+	Name  string `json:"name"`
+	Icon  string `json:"icon,omitempty"`
+	Order int    `json:"order"`
+}
 
 type GroupRatioSetting struct {
 	GroupRatio              *types.RWMap[string, float64]            `json:"group_ratio"`
 	GroupGroupRatio         *types.RWMap[string, map[string]float64] `json:"group_group_ratio"`
 	GroupDescriptions       *types.RWMap[string, string]             `json:"group_descriptions"`
 	GroupSpecialUsableGroup *types.RWMap[string, map[string]string]  `json:"group_special_usable_group"`
+	GroupTypes              *types.RWMap[string, GroupTypeInfo]      `json:"group_types"`
+	GroupTypeMap            *types.RWMap[string, string]             `json:"group_type_map"`
 }
 
 var groupRatioSetting GroupRatioSetting
@@ -50,6 +63,8 @@ func init() {
 		GroupRatio:              groupRatioMap,
 		GroupGroupRatio:         groupGroupRatioMap,
 		GroupDescriptions:       groupDescriptionsMap,
+		GroupTypes:              groupTypesMap,
+		GroupTypeMap:            groupTypeMap,
 	}
 
 	config.GlobalConfig.Register("group_ratio_setting", &groupRatioSetting)
@@ -62,6 +77,12 @@ func GetGroupRatioSetting() *GroupRatioSetting {
 	}
 	if groupRatioSetting.GroupDescriptions == nil {
 		groupRatioSetting.GroupDescriptions = types.NewRWMap[string, string]()
+	}
+	if groupRatioSetting.GroupTypes == nil {
+		groupRatioSetting.GroupTypes = types.NewRWMap[string, GroupTypeInfo]()
+	}
+	if groupRatioSetting.GroupTypeMap == nil {
+		groupRatioSetting.GroupTypeMap = types.NewRWMap[string, string]()
 	}
 	return &groupRatioSetting
 }
@@ -76,6 +97,69 @@ func GetGroupDescription(name string) (string, bool) {
 
 func GetGroupDescriptionsCopy() map[string]string {
 	return GetGroupRatioSetting().GroupDescriptions.ReadAll()
+}
+
+func GetGroupTypesCopy() map[string]GroupTypeInfo {
+	return GetGroupRatioSetting().GroupTypes.ReadAll()
+}
+
+func GetGroupTypeMapCopy() map[string]string {
+	return GetGroupRatioSetting().GroupTypeMap.ReadAll()
+}
+
+func GroupTypes2JSONString() string {
+	return GetGroupRatioSetting().GroupTypes.MarshalJSONString()
+}
+
+func UpdateGroupTypesByJSONString(jsonStr string) error {
+	return types.LoadFromJsonString(GetGroupRatioSetting().GroupTypes, jsonStr)
+}
+
+func GroupTypeMap2JSONString() string {
+	return GetGroupRatioSetting().GroupTypeMap.MarshalJSONString()
+}
+
+func UpdateGroupTypeMapByJSONString(jsonStr string) error {
+	return types.LoadFromJsonString(GetGroupRatioSetting().GroupTypeMap, jsonStr)
+}
+
+func CheckGroupTypes(jsonStr string) error {
+	groupTypes := make(map[string]GroupTypeInfo)
+	if err := common.Unmarshal([]byte(jsonStr), &groupTypes); err != nil {
+		return err
+	}
+	names := make(map[string]struct{}, len(groupTypes))
+	for typeID, typeInfo := range groupTypes {
+		if strings.TrimSpace(typeID) == "" {
+			return errors.New("group type id must not be empty")
+		}
+		name := strings.TrimSpace(typeInfo.Name)
+		if name == "" {
+			return errors.New("group type name must not be empty: " + typeID)
+		}
+		nameKey := strings.ToLower(name)
+		if _, ok := names[nameKey]; ok {
+			return errors.New("group type name must be unique: " + name)
+		}
+		names[nameKey] = struct{}{}
+	}
+	return nil
+}
+
+func CheckGroupTypeMap(jsonStr string) error {
+	groupTypeMap := make(map[string]string)
+	if err := common.Unmarshal([]byte(jsonStr), &groupTypeMap); err != nil {
+		return err
+	}
+	for groupName, typeID := range groupTypeMap {
+		if strings.TrimSpace(groupName) == "" {
+			return errors.New("group name must not be empty")
+		}
+		if strings.TrimSpace(typeID) == "" {
+			return errors.New("group type id must not be empty: " + groupName)
+		}
+	}
+	return nil
 }
 
 func ContainsGroupRatio(name string) bool {

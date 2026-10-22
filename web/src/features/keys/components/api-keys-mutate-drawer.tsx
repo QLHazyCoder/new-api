@@ -18,7 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, KeyRound, Settings2, WalletCards } from 'lucide-react'
+import {
+  ChevronDown,
+  KeyRound,
+  Settings2,
+  WalletCards,
+  AlertTriangle,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useForm, type SubmitErrorHandler } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -87,11 +93,17 @@ import {
   transformFormDataToPayload,
   transformApiKeyToFormDefaults,
 } from '../lib'
+import {
+  AUTO_GROUP_TYPE_ID,
+  buildGroupTypeOptions,
+  pickDefaultGroupForType,
+} from '../lib/api-key-group-types'
 import type { ApiKey } from '../types'
 import {
   ApiKeyGroupCombobox,
   type ApiKeyGroupOption,
 } from './api-key-group-combobox'
+import { ApiKeyGroupTypePicker } from './api-key-group-type-picker'
 import { useApiKeys } from './api-keys-provider'
 import { AutoGroupOrderEditor } from './auto-group-order-editor'
 
@@ -113,6 +125,7 @@ export function ApiKeysMutateDrawer({
   const { status, loading: statusLoading } = useStatus()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [selectedTypeID, setSelectedTypeID] = useState<string | null>(null)
   const [initializedTarget, setInitializedTarget] = useState<string | null>(
     null
   )
@@ -169,8 +182,22 @@ export function ApiKeysMutateDrawer({
         label: key,
         desc: info.desc ? translateServerText(t, info.desc) : key,
         ratio: info.ratio,
+        type: info.type,
       })),
     [groupsData, t]
+  )
+  const configuredGroupTypes = useMemo(
+    () => groupsData?.group_types ?? [],
+    [groupsData]
+  )
+  const typeModeActive = configuredGroupTypes.length > 0
+  const availableGroupTypes = useMemo(
+    () => buildGroupTypeOptions(configuredGroupTypes, groups),
+    [configuredGroupTypes, groups]
+  )
+  const autoAvailable = useMemo(
+    () => groups.some((group) => group.value === 'auto'),
+    [groups]
   )
   const backendHasAuto = groups.some((g) => g.value === 'auto')
   const availableAutoGroupNames = useMemo(
@@ -204,6 +231,35 @@ export function ApiKeysMutateDrawer({
     resolver: zodResolver(schema),
     defaultValues: getApiKeyFormDefaultValues(defaultUseAutoGroup),
   })
+  const selectedGroup = form.watch('group')
+  const selectedTypeIsAuto = selectedTypeID === AUTO_GROUP_TYPE_ID
+  const selectedTypeOption = availableGroupTypes.find(
+    (type) => type.id === selectedTypeID
+  )
+  const groupOptions = useMemo(() => {
+    if (!typeModeActive) return groups
+    if (selectedTypeIsAuto) {
+      return groups.filter((group) => group.value === 'auto')
+    }
+    if (selectedTypeOption) return selectedTypeOption.groups
+    if (!selectedGroup) return []
+    const currentGroup = groups.find((group) => group.value === selectedGroup)
+    return currentGroup ? [currentGroup] : []
+  }, [
+    groups,
+    selectedGroup,
+    selectedTypeIsAuto,
+    selectedTypeOption,
+    typeModeActive,
+  ])
+  const groupSelectDisabled = typeModeActive && !selectedTypeID
+  const noSelectableTypedGroups =
+    typeModeActive && availableGroupTypes.length === 0 && !autoAvailable
+  const unclassifiedCurrentGroup =
+    typeModeActive &&
+    Boolean(selectedGroup) &&
+    selectedGroup !== 'auto' &&
+    !selectedTypeID
 
   // Load existing data when updating
   useEffect(() => {
@@ -264,17 +320,25 @@ export function ApiKeysMutateDrawer({
   const formTarget =
     isUpdate && currentRow ? `update:${currentRow.id}` : 'create'
   const isFormInitialized = initializedTarget === formTarget
-  const selectedGroup = form.watch('group')
 
   // Correct group after groups load: if the form value is not in available groups, fall back
   useEffect(() => {
     if (groups.length === 0) return
     const currentGroup = selectedGroup
     if (currentGroup && !groups.some((g) => g.value === currentGroup)) {
-      const fallback =
-        groups.find((g) => g.value === 'default')?.value ??
-        groups[0]?.value ??
-        ''
+      let fallback = ''
+      if (typeModeActive) {
+        const firstType = availableGroupTypes[0]
+        fallback = firstType
+          ? (pickDefaultGroupForType(firstType)?.value ?? '')
+          : ''
+        if (!fallback && autoAvailable) fallback = 'auto'
+      } else {
+        fallback =
+          groups.find((g) => g.value === 'default')?.value ??
+          groups[0]?.value ??
+          ''
+      }
       form.setValue('group', fallback)
       if (currentGroup === 'auto') {
         form.setValue('auto_groups', [])
@@ -282,9 +346,39 @@ export function ApiKeysMutateDrawer({
         form.setValue('cross_group_retry', false)
       }
     }
-  }, [groups, form, selectedGroup])
+  }, [
+    groups,
+    form,
+    selectedGroup,
+    typeModeActive,
+    availableGroupTypes,
+    autoAvailable,
+  ])
+
+  useEffect(() => {
+    if (!isFormInitialized) return
+    if (!typeModeActive) {
+      setSelectedTypeID(null)
+      return
+    }
+    if (!selectedGroup) return
+    if (selectedGroup === 'auto') {
+      setSelectedTypeID(AUTO_GROUP_TYPE_ID)
+      return
+    }
+    const typeID =
+      groups.find((group) => group.value === selectedGroup)?.type?.id ?? null
+    setSelectedTypeID(typeID)
+  }, [isFormInitialized, typeModeActive, selectedGroup, groups])
 
   const onSubmit = async (data: ApiKeyFormValues) => {
+    if (typeModeActive && !data.group && !isUpdate) {
+      form.setError('group', {
+        type: 'manual',
+        message: t('Please select a group type and group'),
+      })
+      return
+    }
     setIsSubmitting(true)
     try {
       const basePayload = transformFormDataToPayload(data)
@@ -367,6 +461,7 @@ export function ApiKeysMutateDrawer({
   const autoGroupsMode = form.watch('auto_groups_mode')
   const unlimitedQuota = form.watch('unlimited_quota')
   const handleGroupChange = (value: string) => {
+    form.clearErrors('group')
     form.setValue('group', value, {
       shouldDirty: true,
       shouldTouch: true,
@@ -379,6 +474,21 @@ export function ApiKeysMutateDrawer({
     })
   }
 
+  const handleTypeChange = (typeID: string) => {
+    setSelectedTypeID(typeID)
+    form.clearErrors('group')
+    if (typeID === AUTO_GROUP_TYPE_ID) {
+      handleGroupChange('auto')
+      return
+    }
+    const type = availableGroupTypes.find((item) => item.id === typeID)
+    if (!type) return
+    const currentGroup = groups.find((group) => group.value === selectedGroup)
+    if (currentGroup?.type?.id === typeID) return
+    const nextGroup = pickDefaultGroupForType(type)
+    if (nextGroup) handleGroupChange(nextGroup.value)
+  }
+
   return (
     <Sheet
       open={open}
@@ -386,6 +496,7 @@ export function ApiKeysMutateDrawer({
         onOpenChange(v)
         if (!v) {
           form.reset()
+          setSelectedTypeID(null)
         }
       }}
     >
@@ -431,6 +542,49 @@ export function ApiKeysMutateDrawer({
                 )}
               />
 
+              {typeModeActive && (
+                <div className='flex flex-col gap-2'>
+                  <p className='text-sm font-medium'>{t('Group type')}</p>
+                  {noSelectableTypedGroups ? (
+                    <div
+                      role='status'
+                      className='flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200'
+                    >
+                      <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
+                      <p>
+                        {t(
+                          'No groups are available under the configured group types. Please contact the administrator.'
+                        )}
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <ApiKeyGroupTypePicker
+                        options={availableGroupTypes}
+                        autoAvailable={autoAvailable}
+                        value={selectedTypeID}
+                        onValueChange={handleTypeChange}
+                      />
+                      {availableGroupTypes.length === 0 && autoAvailable && (
+                        <p className='text-muted-foreground text-xs'>
+                          {t(
+                            'No typed groups are available. You can still use automatic routing.'
+                          )}
+                        </p>
+                      )}
+                      {unclassifiedCurrentGroup && (
+                        <p className='flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300'>
+                          <AlertTriangle className='mt-0.5 h-3.5 w-3.5 shrink-0' />
+                          {t(
+                            'This key currently uses a group without a type. It will keep working, but select a type to change the group.'
+                          )}
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
               <FormField
                 control={form.control}
                 name='group'
@@ -439,12 +593,24 @@ export function ApiKeysMutateDrawer({
                     <FormLabel>{t('Group')}</FormLabel>
                     <FormControl>
                       <ApiKeyGroupCombobox
-                        options={groups}
+                        options={groupOptions}
                         value={field.value}
                         onValueChange={handleGroupChange}
-                        placeholder={t('Select a group')}
+                        disabled={groupSelectDisabled}
+                        placeholder={
+                          groupSelectDisabled
+                            ? t('Select a group type first')
+                            : t('Select a group')
+                        }
                       />
                     </FormControl>
+                    {typeModeActive && (
+                      <FormDescription>
+                        {t(
+                          'Select a type first. Only groups in that type are shown.'
+                        )}
+                      </FormDescription>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -793,7 +959,11 @@ export function ApiKeysMutateDrawer({
           <Button
             type='button'
             onClick={form.handleSubmit(onSubmit, onInvalid)}
-            disabled={!isFormInitialized || isSubmitting}
+            disabled={
+              !isFormInitialized ||
+              isSubmitting ||
+              (noSelectableTypedGroups && !isUpdate)
+            }
             className='w-full sm:w-auto'
           >
             {isSubmitting ? t('Saving...') : t('Save changes')}

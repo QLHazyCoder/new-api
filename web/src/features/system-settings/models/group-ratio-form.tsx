@@ -75,6 +75,8 @@ type GroupFormValues = {
   MaxTokenAutoGroups: number
   DefaultUseAutoGroup: boolean
   GroupSpecialUsableGroup: string
+  GroupTypes: string
+  GroupTypeMap: string
 }
 
 type GroupRatioFormProps = {
@@ -226,6 +228,8 @@ export const GroupRatioForm = memo(function GroupRatioForm({
               />
             }
             groupSpecialUsableGroup={values.GroupSpecialUsableGroup ?? ''}
+            groupTypes={values.GroupTypes ?? ''}
+            groupTypeMap={values.GroupTypeMap ?? ''}
             onChange={(field, value) =>
               handleFieldChange(field as keyof GroupFormValues, value)
             }
@@ -329,6 +333,58 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   <FormDescription>
                     {t(
                       'JSON map of group → display description used by pricing and group selectors.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='GroupTypes'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Group type definitions')}</FormLabel>
+                  <FormControl>
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      textareaRef={field.ref}
+                      heightClassName='h-40 min-h-40 max-h-40'
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map of type ID to name, icon, and order. These types are shown before groups when creating API keys.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='GroupTypeMap'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Group type assignments')}</FormLabel>
+                  <FormControl>
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      textareaRef={field.ref}
+                      heightClassName='h-40 min-h-40 max-h-40'
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map of group name to type ID. User-selectable groups without a type are hidden while group types are configured.'
                     )}
                   </FormDescription>
                   <FormMessage />

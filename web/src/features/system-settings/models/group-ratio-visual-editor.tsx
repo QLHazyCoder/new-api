@@ -23,6 +23,7 @@ import {
   X,
   Info,
   Plus,
+  Tags,
   Trash2,
 } from 'lucide-react'
 import { Reorder } from 'motion/react'
@@ -81,9 +82,19 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
+import { getLobeIcon } from '@/lib/lobe-icon'
 
 import { safeJsonParse } from '../utils/json-parser'
 import { GroupSpecialUsableRulesEditor } from './group-special-usable-editor'
+import {
+  parseGroupTypeMap,
+  parseGroupTypes,
+  serializeGroupTypeMap,
+  serializeGroupTypes,
+  type GroupTypeDefinition,
+  type GroupTypeMap,
+} from './group-type'
+import { GroupTypeManagerDialog } from './group-type-manager-dialog'
 
 export type GroupSettingsSection =
   | 'pricing'
@@ -102,6 +113,8 @@ type GroupRatioVisualEditorProps = {
   autoGroups: string
   maxTokenAutoGroupsField: ReactNode
   groupSpecialUsableGroup: string
+  groupTypes: string
+  groupTypeMap: string
   onChange: (field: string, value: string) => void
 }
 
@@ -112,6 +125,7 @@ type GroupPricingRow = {
   topupRatio: string
   selectable: boolean
   description: string
+  typeId: string
 }
 
 type RegistryEntry = {
@@ -156,18 +170,38 @@ function parseNestedRatioMap(
   })
 }
 
+function normalizeGroupTypeAssignments(
+  value: string,
+  validTypeIDs: ReadonlySet<string>
+): GroupTypeMap {
+  const assignments = parseGroupTypeMap(value)
+  const normalized: GroupTypeMap = {}
+  for (const [groupName, typeID] of Object.entries(assignments)) {
+    if (!validTypeIDs.has(typeID)) continue
+    normalized[groupName] = typeID
+  }
+  return normalized
+}
+
 function buildGroupPricingRows(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string
+  topupGroupRatio: string,
+  groupTypeMap: string,
+  validTypeIDs: ReadonlySet<string>
 ): GroupPricingRow[] {
   const ratioMap = parseRatioMap(groupRatio)
   const usableMap = parseUsableMap(userUsableGroups)
   const topupMap = parseRatioMap(topupGroupRatio)
+  const typeAssignments = normalizeGroupTypeAssignments(
+    groupTypeMap,
+    validTypeIDs
+  )
   const names = new Set([
     ...Object.keys(ratioMap),
     ...Object.keys(usableMap),
     ...Object.keys(topupMap),
+    ...Object.keys(typeAssignments),
   ])
 
   return [...names].map((name) => ({
@@ -177,13 +211,18 @@ function buildGroupPricingRows(
     topupRatio: Object.hasOwn(topupMap, name) ? String(topupMap[name]) : '',
     selectable: Object.hasOwn(usableMap, name),
     description: String(usableMap[name] ?? ''),
+    typeId: typeAssignments[name] ?? '',
   }))
 }
 
-function serializeGroupPricingRows(rows: GroupPricingRow[]) {
+function serializeGroupPricingRows(
+  rows: GroupPricingRow[],
+  validTypeIDs: ReadonlySet<string>
+) {
   const groupRatio: Record<string, number> = {}
   const userUsableGroups: Record<string, string> = {}
   const topupGroupRatio: Record<string, number> = {}
+  const groupTypeMap: GroupTypeMap = {}
 
   for (const row of rows) {
     const name = row.name.trim()
@@ -196,33 +235,46 @@ function serializeGroupPricingRows(rows: GroupPricingRow[]) {
     if (topup !== '' && Number.isFinite(Number(topup))) {
       topupGroupRatio[name] = Number(topup)
     }
+    if (row.typeId && validTypeIDs.has(row.typeId)) {
+      groupTypeMap[name] = row.typeId
+    }
   }
 
   return {
     GroupRatio: JSON.stringify(groupRatio, null, 2),
     UserUsableGroups: JSON.stringify(userUsableGroups, null, 2),
     TopupGroupRatio: JSON.stringify(topupGroupRatio, null, 2),
+    GroupTypeMap: serializeGroupTypeMap(groupTypeMap, validTypeIDs),
   }
 }
 
-function groupPricingSignature(rows: GroupPricingRow[]): string {
-  const serialized = serializeGroupPricingRows(rows)
+function groupPricingSignature(
+  rows: GroupPricingRow[],
+  validTypeIDs: ReadonlySet<string>
+): string {
+  const serialized = serializeGroupPricingRows(rows, validTypeIDs)
   return JSON.stringify({
     groupRatio: parseRatioMap(serialized.GroupRatio),
     userUsableGroups: parseUsableMap(serialized.UserUsableGroups),
     topupGroupRatio: parseRatioMap(serialized.TopupGroupRatio),
+    groupTypeMap: parseGroupTypeMap(serialized.GroupTypeMap),
+    typeIDs: [...validTypeIDs].sort(),
   })
 }
 
 function sourceGroupPricingSignature(
   groupRatio: string,
   userUsableGroups: string,
-  topupGroupRatio: string
+  topupGroupRatio: string,
+  groupTypeMap: string,
+  validTypeIDs: ReadonlySet<string>
 ): string {
   return JSON.stringify({
     groupRatio: parseRatioMap(groupRatio),
     userUsableGroups: parseUsableMap(userUsableGroups),
     topupGroupRatio: parseRatioMap(topupGroupRatio),
+    groupTypeMap: normalizeGroupTypeAssignments(groupTypeMap, validTypeIDs),
+    typeIDs: [...validTypeIDs].sort(),
   })
 }
 
@@ -277,6 +329,8 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   autoGroups,
   maxTokenAutoGroupsField,
   groupSpecialUsableGroup,
+  groupTypes,
+  groupTypeMap,
   onChange,
 }: GroupRatioVisualEditorProps) {
   const { t, i18n } = useTranslation()
@@ -370,6 +424,8 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
           groupRatio={groupRatio}
           userUsableGroups={userUsableGroups}
           topupGroupRatio={topupGroupRatio}
+          groupTypes={groupTypes}
+          groupTypeMap={groupTypeMap}
           onChange={onChange}
           onShowDetail={setDetailGroup}
         />
@@ -475,6 +531,8 @@ type GroupPricingTableProps = {
   groupRatio: string
   userUsableGroups: string
   topupGroupRatio: string
+  groupTypes: string
+  groupTypeMap: string
   onChange: (field: string, value: string) => void
   onShowDetail: (name: string) => void
 }
@@ -483,42 +541,76 @@ function GroupPricingTable({
   groupRatio,
   userUsableGroups,
   topupGroupRatio,
+  groupTypes,
+  groupTypeMap,
   onChange,
   onShowDetail,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
+  const [typeManagerOpen, setTypeManagerOpen] = useState(false)
+  const typeDefinitions = useMemo(
+    () => parseGroupTypes(groupTypes),
+    [groupTypes]
+  )
+  const validTypeIDs = useMemo(
+    () => new Set(typeDefinitions.map((type) => type.id)),
+    [typeDefinitions]
+  )
+  const typeNameByID = useMemo(
+    () => new Map(typeDefinitions.map((type) => [type.id, type.name])),
+    [typeDefinitions]
+  )
   const [rows, setRows] = useState<GroupPricingRow[]>(() =>
-    buildGroupPricingRows(groupRatio, userUsableGroups, topupGroupRatio)
+    buildGroupPricingRows(
+      groupRatio,
+      userUsableGroups,
+      topupGroupRatio,
+      groupTypeMap,
+      validTypeIDs
+    )
   )
 
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
       groupRatio,
       userUsableGroups,
-      topupGroupRatio
+      topupGroupRatio,
+      groupTypeMap,
+      validTypeIDs
     )
     setRows((currentRows) => {
-      if (groupPricingSignature(currentRows) === incomingSignature) {
+      if (
+        groupPricingSignature(currentRows, validTypeIDs) === incomingSignature
+      ) {
         return currentRows
       }
       return buildGroupPricingRows(
         groupRatio,
         userUsableGroups,
-        topupGroupRatio
+        topupGroupRatio,
+        groupTypeMap,
+        validTypeIDs
       )
     })
-  }, [groupRatio, userUsableGroups, topupGroupRatio])
+  }, [
+    groupRatio,
+    userUsableGroups,
+    topupGroupRatio,
+    groupTypeMap,
+    validTypeIDs,
+  ])
 
   const emitRows = useCallback(
     (nextRows: GroupPricingRow[]) => {
       setRows(nextRows)
-      const serialized = serializeGroupPricingRows(nextRows)
+      const serialized = serializeGroupPricingRows(nextRows, validTypeIDs)
       onChange('GroupRatio', serialized.GroupRatio)
       onChange('UserUsableGroups', serialized.UserUsableGroups)
       onChange('TopupGroupRatio', serialized.TopupGroupRatio)
+      onChange('GroupTypeMap', serialized.GroupTypeMap)
     },
-    [onChange]
+    [onChange, validTypeIDs]
   )
 
   const updateRow = useCallback(
@@ -551,6 +643,7 @@ function GroupPricingTable({
         topupRatio: '',
         selectable: true,
         description: '',
+        typeId: '',
       },
       ...rows,
     ])
@@ -562,6 +655,34 @@ function GroupPricingTable({
     },
     [emitRows, rows]
   )
+
+  const applyTypes = useCallback(
+    (nextTypes: GroupTypeDefinition[], removedTypeIDs: string[]) => {
+      onChange('GroupTypes', serializeGroupTypes(nextTypes))
+      if (removedTypeIDs.length === 0) return
+      const removed = new Set(removedTypeIDs)
+      emitRows(
+        rows.map((row) =>
+          removed.has(row.typeId) ? { ...row, typeId: '' } : row
+        )
+      )
+    },
+    [emitRows, onChange, rows]
+  )
+
+  const groupCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const row of rows) {
+      if (!row.typeId) continue
+      counts[row.typeId] = (counts[row.typeId] ?? 0) + 1
+    }
+    return counts
+  }, [rows])
+
+  const untypedSelectableCount = rows.filter(
+    (row) => row.selectable && !row.typeId
+  ).length
+  const typeModeActive = typeDefinitions.length > 0
 
   const duplicateNames = useMemo(() => {
     const counts = new Map<string, number>()
@@ -576,12 +697,15 @@ function GroupPricingTable({
   }, [rows])
 
   const query = search.trim().toLowerCase()
-  const visibleRows = rows.filter(
-    (row) =>
-      !query ||
+  const visibleRows = rows.filter((row) => {
+    if (!query) return true
+    const typeName = typeNameByID.get(row.typeId) ?? ''
+    return (
       row.name.toLowerCase().includes(query) ||
-      row.description.toLowerCase().includes(query)
-  )
+      row.description.toLowerCase().includes(query) ||
+      typeName.toLowerCase().includes(query)
+    )
+  })
 
   return (
     <Card className={sectionCardClassName}>
@@ -595,10 +719,20 @@ function GroupPricingTable({
               )}
             </CardDescription>
           </div>
-          <Button onClick={addRow} size='sm' className='sm:self-start'>
-            <Plus className='mr-2 h-4 w-4' />
-            {t('Add group')}
-          </Button>
+          <div className='flex shrink-0 flex-wrap gap-2 sm:self-start'>
+            <Button
+              onClick={() => setTypeManagerOpen(true)}
+              size='sm'
+              variant='outline'
+            >
+              <Tags className='mr-2 h-4 w-4' />
+              {t('Group types')}
+            </Button>
+            <Button onClick={addRow} size='sm'>
+              <Plus className='mr-2 h-4 w-4' />
+              {t('Add group')}
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -625,8 +759,22 @@ function GroupPricingTable({
               </InputGroupAddon>
             )}
           </InputGroup>
+          {typeModeActive && untypedSelectableCount > 0 && (
+            <div
+              role='status'
+              className='flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200'
+            >
+              <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0' />
+              <p>
+                {t(
+                  '{{count}} user-selectable group(s) have no type and will not appear when creating API keys.',
+                  { count: untypedSelectableCount }
+                )}
+              </p>
+            </div>
+          )}
           <StaticDataTable
-            tableClassName='min-w-[760px]'
+            tableClassName='min-w-[920px]'
             tableProps={{ 'aria-label': t('Pricing groups') }}
             data={visibleRows}
             getRowKey={(row) => row._id}
@@ -665,6 +813,35 @@ function GroupPricingTable({
                       updateRow(row._id, 'name', event.target.value)
                     }
                     aria-invalid={duplicateNames.includes(row.name.trim())}
+                  />
+                ),
+              },
+              {
+                id: 'type',
+                header: t('Group type'),
+                className: 'min-w-44',
+                cell: (row) => (
+                  <Combobox
+                    options={[
+                      { value: '', label: t('Unclassified') },
+                      ...typeDefinitions.map((type) => ({
+                        value: type.id,
+                        label: type.name || type.id,
+                        icon: type.icon ? (
+                          getLobeIcon(type.icon, 16)
+                        ) : (
+                          <Tags className='text-muted-foreground size-4' />
+                        ),
+                      })),
+                    ]}
+                    value={row.typeId}
+                    onValueChange={(value) =>
+                      updateRow(row._id, 'typeId', value ?? '')
+                    }
+                    placeholder={t('Select a group type')}
+                    aria-label={t('Group type')}
+                    showSelectedIcon
+                    className='w-44'
                   />
                 ),
               },
@@ -777,6 +954,13 @@ function GroupPricingTable({
             </p>
           )}
         </div>
+        <GroupTypeManagerDialog
+          open={typeManagerOpen}
+          onOpenChange={setTypeManagerOpen}
+          types={typeDefinitions}
+          groupCounts={groupCounts}
+          onApply={applyTypes}
+        />
       </CardContent>
     </Card>
   )

@@ -27,6 +27,9 @@ const { api } = await import('@/lib/api')
 const { ApiKeysProvider } = await import('../api-keys-provider')
 const { ApiKeysMutateDrawer } = await import('../api-keys-mutate-drawer')
 
+type DrawerProps = Parameters<typeof ApiKeysMutateDrawer>[0]
+type ApiKeyRow = NonNullable<DrawerProps['currentRow']>
+
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
   lng: 'en',
@@ -37,39 +40,88 @@ type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
 type MockableApi = {
   get: ApiMethod
   post: ApiMethod
+  put: ApiMethod
 }
 type RenderedDrawer = {
   queryClient: InstanceType<typeof QueryClient>
 }
 
+type FixtureGroupType = {
+  id: string
+  name: string
+  icon?: string
+  order?: number
+}
+
+type FixtureGroup = {
+  desc: string
+  ratio: number | string
+  type?: FixtureGroupType
+}
+
+type DrawerFixture = {
+  defaultUseAutoGroup: boolean
+  groups: Record<string, FixtureGroup>
+  groupTypes?: FixtureGroupType[]
+  autoGroups: string[]
+  maxAutoGroups: number
+  existingApiKey?: ApiKeyRow
+}
+
+const DEFAULT_FIXTURE: DrawerFixture = {
+  defaultUseAutoGroup: true,
+  groups: {
+    auto: { desc: 'Automatic routing', ratio: 'auto' },
+    default: { desc: 'Standard access', ratio: 1 },
+    vip: { desc: 'Priority access', ratio: 2 },
+  },
+  autoGroups: ['vip', 'default'],
+  maxAutoGroups: 3,
+}
+
 const apiClient = api as unknown as MockableApi
 const originalGet = apiClient.get
 const originalPost = apiClient.post
+const originalPut = apiClient.put
 let renderedDrawer: RenderedDrawer | null = null
 
-function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
+function installApiFixtures(
+  createdPayloads: Array<Record<string, unknown>>,
+  fixture: DrawerFixture = DEFAULT_FIXTURE,
+  updatedPayloads: Array<Record<string, unknown>> = []
+) {
   apiClient.get = async (url) => {
+    if (
+      fixture.existingApiKey &&
+      url === `/api/token/${fixture.existingApiKey.id}`
+    ) {
+      return { data: { success: true, data: fixture.existingApiKey } }
+    }
     switch (url) {
       case '/api/status':
-        return { data: { data: { default_use_auto_group: true } } }
+        return {
+          data: {
+            data: { default_use_auto_group: fixture.defaultUseAutoGroup },
+          },
+        }
       case '/api/user/models':
         return { data: { success: true, data: [] } }
       case '/api/user/self/groups':
         return {
           data: {
             success: true,
-            data: {
-              auto: { desc: 'Automatic routing', ratio: 'auto' },
-              default: { desc: 'Standard access', ratio: 1 },
-              vip: { desc: 'Priority access', ratio: 2 },
-            },
+            data: fixture.groups,
+            group_types: fixture.groupTypes,
           },
         }
       case '/api/token/auto-groups':
         return {
           data: {
             success: true,
-            data: { groups: ['vip', 'default'], max_count: 3 },
+            data: {
+              groups: fixture.autoGroups,
+              max_count: fixture.maxAutoGroups,
+            },
           },
         }
       default:
@@ -82,16 +134,25 @@ function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
     createdPayloads.push(data as Record<string, unknown>)
     return { data: { success: true, data: {} } }
   }
+  apiClient.put = async (url, data) => {
+    expect(url).toBe('/api/token/')
+    expect(data && typeof data === 'object').toBeTruthy()
+    updatedPayloads.push(data as Record<string, unknown>)
+    return { data: { success: true, data: {} } }
+  }
 }
 
-async function renderCreateDrawer(): Promise<void> {
+async function renderCreateDrawer(
+  fixture: DrawerFixture = DEFAULT_FIXTURE,
+  options: { expectSaveEnabled?: boolean } = {}
+): Promise<void> {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   const freshAt = Date.now() + 60_000
   queryClient.setQueryData(
     ['status'],
-    { default_use_auto_group: true },
+    { default_use_auto_group: fixture.defaultUseAutoGroup },
     { updatedAt: freshAt }
   )
   queryClient.setQueryData(
@@ -103,11 +164,8 @@ async function renderCreateDrawer(): Promise<void> {
     ['user-groups'],
     {
       success: true,
-      data: {
-        auto: { desc: 'Automatic routing', ratio: 'auto' },
-        default: { desc: 'Standard access', ratio: 1 },
-        vip: { desc: 'Priority access', ratio: 2 },
-      },
+      data: fixture.groups,
+      group_types: fixture.groupTypes,
     },
     { updatedAt: freshAt }
   )
@@ -115,7 +173,10 @@ async function renderCreateDrawer(): Promise<void> {
     ['token-auto-groups'],
     {
       success: true,
-      data: { groups: ['vip', 'default'], max_count: 3 },
+      data: {
+        groups: fixture.autoGroups,
+        max_count: fixture.maxAutoGroups,
+      },
     },
     { updatedAt: freshAt }
   )
@@ -125,7 +186,11 @@ async function renderCreateDrawer(): Promise<void> {
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
         <ApiKeysProvider>
-          <ApiKeysMutateDrawer open onOpenChange={() => undefined} />
+          <ApiKeysMutateDrawer
+            open
+            onOpenChange={() => undefined}
+            currentRow={fixture.existingApiKey}
+          />
         </ApiKeysProvider>
       </I18nextProvider>
     </QueryClientProvider>
@@ -133,7 +198,10 @@ async function renderCreateDrawer(): Promise<void> {
   await waitFor(
     () => {
       const saveButton = findButton('Save changes', false)
-      expect(saveButton).toBeEnabled()
+      expect(saveButton).not.toBeNull()
+      if (options.expectSaveEnabled !== false) {
+        expect(saveButton).toBeEnabled()
+      }
     },
     { timeout: 1500 }
   )
@@ -196,6 +264,7 @@ function selectComboboxOption(
 afterEach(() => {
   apiClient.get = originalGet
   apiClient.post = originalPost
+  apiClient.put = originalPut
   localStorage.clear()
   if (renderedDrawer) {
     renderedDrawer.queryClient.clear()
@@ -297,5 +366,193 @@ describe('API keys mutate drawer user quota query switch', () => {
     fireEvent.click(findButton('Save changes', true))
     await waitFor(() => expect(createdPayloads).toHaveLength(1))
     expect(createdPayloads[0]?.allow_user_quota_query).toBe(false)
+  })
+})
+
+const TYPE_A: FixtureGroupType = {
+  id: 'type-a',
+  name: 'Type A',
+  icon: 'OpenAI',
+  order: 1,
+}
+const TYPE_B: FixtureGroupType = {
+  id: 'type-b',
+  name: 'Type B',
+  icon: 'Claude',
+  order: 2,
+}
+const TYPED_FIXTURE: DrawerFixture = {
+  defaultUseAutoGroup: false,
+  groups: {
+    auto: { desc: 'Automatic routing', ratio: 'auto' },
+    default: { desc: 'Standard access', ratio: 1, type: TYPE_A },
+    vip: { desc: 'Priority access', ratio: 2, type: TYPE_B },
+    untyped: { desc: 'Untyped access', ratio: 1 },
+  },
+  groupTypes: [TYPE_A, TYPE_B],
+  autoGroups: ['vip', 'default'],
+  maxAutoGroups: 3,
+}
+
+describe('API keys mutate drawer group types', () => {
+  test('requires a type before selecting a group and filters groups by type', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads, TYPED_FIXTURE)
+    await renderCreateDrawer(TYPED_FIXTURE)
+
+    const typeA = screen.getByRole('button', { name: /Type A/ })
+    const typeB = screen.getByRole('button', { name: /Type B/ })
+    expect(typeA).toHaveAttribute('aria-pressed', 'false')
+    expect(typeB).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.queryByText('Untyped access')).toBe(null)
+
+    const groupTrigger = getControlByLabel('Group')
+    expect(groupTrigger.disabled).toBe(true)
+
+    fireEvent.click(typeA)
+    expect(typeA).toHaveAttribute('aria-pressed', 'true')
+    expect(groupTrigger.disabled).toBe(false)
+    expect(groupTrigger.textContent).toContain('default')
+
+    fireEvent.click(groupTrigger)
+    const options = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="command-item"]'),
+    ]
+    expect(options).toHaveLength(1)
+    expect(options[0].textContent).toContain('Standard access')
+    fireEvent.click(options[0])
+
+    changeInput(getControlByLabel('Name'), 'typed')
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(createdPayloads).toHaveLength(1))
+    expect(createdPayloads[0]?.group).toBe('default')
+    expect(createdPayloads[0]).not.toHaveProperty('type')
+  })
+
+  test('selects the built-in automatic routing card', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads, TYPED_FIXTURE)
+    await renderCreateDrawer(TYPED_FIXTURE)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Automatic routing' }))
+    const groupTrigger = getControlByLabel('Group')
+    expect(groupTrigger.textContent).toContain('auto')
+    expect(document.body.textContent).toContain(
+      'Using the complete global Auto order (2 groups)'
+    )
+
+    changeInput(getControlByLabel('Name'), 'typed-auto')
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(createdPayloads).toHaveLength(1))
+    expect(createdPayloads[0]?.group).toBe('auto')
+    expect(createdPayloads[0]?.cross_group_retry).toBe(true)
+  })
+
+  test('shows an empty state and blocks saving when no typed groups are available', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    const fixture: DrawerFixture = {
+      defaultUseAutoGroup: false,
+      groups: {
+        untyped: { desc: 'Untyped access', ratio: 1 },
+      },
+      groupTypes: [TYPE_A],
+      autoGroups: [],
+      maxAutoGroups: 3,
+    }
+    installApiFixtures(createdPayloads, fixture)
+    await renderCreateDrawer(fixture, { expectSaveEnabled: false })
+
+    expect(
+      screen.getByText(
+        'No groups are available under the configured group types. Please contact the administrator.'
+      )
+    ).toBeVisible()
+    expect(getControlByLabel('Group').disabled).toBe(true)
+    expect(findButton('Save changes', true).disabled).toBe(true)
+    expect(screen.queryByText('Untyped access')).toBe(null)
+  })
+})
+
+const EXISTING_UNCLASSIFIED_KEY: ApiKeyRow = {
+  id: 7,
+  name: 'legacy',
+  key: 'sk-legacy',
+  status: 1,
+  remain_quota: 0,
+  used_quota: 0,
+  unlimited_quota: true,
+  expired_time: -1,
+  created_time: 1,
+  accessed_time: 1,
+  group: 'untyped',
+  auto_groups: null,
+  cross_group_retry: false,
+  model_limits_enabled: false,
+  model_limits: '',
+  allow_ips: '',
+  allow_user_quota_query: false,
+}
+
+describe('API keys mutate drawer legacy unclassified groups', () => {
+  test('warns but preserves the existing group when no type is selected', async () => {
+    const updatedPayloads: Array<Record<string, unknown>> = []
+    const fixture: DrawerFixture = {
+      ...TYPED_FIXTURE,
+      existingApiKey: EXISTING_UNCLASSIFIED_KEY,
+    }
+    installApiFixtures([], fixture, updatedPayloads)
+    await renderCreateDrawer(fixture)
+
+    expect(
+      screen.getByText(
+        'This key currently uses a group without a type. It will keep working, but select a type to change the group.'
+      )
+    ).toBeVisible()
+    const groupTrigger = getControlByLabel('Group')
+    expect(groupTrigger.disabled).toBe(true)
+    expect(groupTrigger.textContent).toContain('untyped')
+
+    changeInput(getControlByLabel('Name'), 'legacy-renamed')
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(updatedPayloads).toHaveLength(1))
+    expect(updatedPayloads[0]?.id).toBe(7)
+    expect(updatedPayloads[0]?.group).toBe('untyped')
+  })
+})
+
+const EXISTING_EMPTY_GROUP_KEY: ApiKeyRow = {
+  ...EXISTING_UNCLASSIFIED_KEY,
+  id: 8,
+  group: '',
+}
+
+describe('API keys mutate drawer legacy empty groups', () => {
+  test('allows saving when no typed groups are available', async () => {
+    const updatedPayloads: Array<Record<string, unknown>> = []
+    const fixture: DrawerFixture = {
+      defaultUseAutoGroup: false,
+      groups: {
+        untyped: { desc: 'Untyped access', ratio: 1 },
+      },
+      groupTypes: [TYPE_A],
+      autoGroups: [],
+      maxAutoGroups: 3,
+      existingApiKey: EXISTING_EMPTY_GROUP_KEY,
+    }
+    installApiFixtures([], fixture, updatedPayloads)
+    await renderCreateDrawer(fixture)
+
+    expect(
+      screen.getByText(
+        'No groups are available under the configured group types. Please contact the administrator.'
+      )
+    ).toBeVisible()
+    expect(findButton('Save changes', true).disabled).toBe(false)
+
+    changeInput(getControlByLabel('Name'), 'legacy-empty')
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(updatedPayloads).toHaveLength(1))
+    expect(updatedPayloads[0]?.id).toBe(8)
+    expect(updatedPayloads[0]?.group).toBe('')
   })
 })

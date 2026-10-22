@@ -299,6 +299,18 @@ func UpdateOption(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
+	case "group_ratio_setting.group_types":
+		err = ratio_setting.CheckGroupTypes(option.Value.(string))
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	case "group_ratio_setting.group_type_map":
+		err = ratio_setting.CheckGroupTypeMap(option.Value.(string))
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	case "gemini.safety_settings":
 		err = model_setting.ValidateGeminiSafetySettings(option.Value.(string))
 		if err != nil {

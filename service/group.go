@@ -1,6 +1,8 @@
 package service
 
 import (
+	"cmp"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -10,6 +12,81 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 )
+
+type GroupTypeOption struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Icon  string `json:"icon,omitempty"`
+	Order int    `json:"order"`
+}
+
+type UserGroupOption struct {
+	Ratio any              `json:"ratio"`
+	Desc  string           `json:"desc"`
+	Type  *GroupTypeOption `json:"type,omitempty"`
+}
+
+type UserGroupOptions struct {
+	Groups map[string]UserGroupOption
+	Types  []GroupTypeOption
+}
+
+func GetUserGroupOptions(userGroup string) UserGroupOptions {
+	usableGroups := GetUserUsableGroups(userGroup)
+	groupRatios := ratio_setting.GetGroupRatioCopy()
+	groupTypes := ratio_setting.GetGroupTypesCopy()
+	groupTypeMap := ratio_setting.GetGroupTypeMapCopy()
+
+	types := make([]GroupTypeOption, 0, len(groupTypes))
+	for typeID, typeInfo := range groupTypes {
+		types = append(types, GroupTypeOption{
+			ID:    typeID,
+			Name:  typeInfo.Name,
+			Icon:  typeInfo.Icon,
+			Order: typeInfo.Order,
+		})
+	}
+	slices.SortFunc(types, func(a, b GroupTypeOption) int {
+		if a.Order != b.Order {
+			return cmp.Compare(a.Order, b.Order)
+		}
+		if a.Name != b.Name {
+			return cmp.Compare(a.Name, b.Name)
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+
+	groups := make(map[string]UserGroupOption, len(groupRatios)+1)
+	for groupName := range groupRatios {
+		desc, ok := usableGroups[groupName]
+		if !ok {
+			continue
+		}
+		option := UserGroupOption{
+			Ratio: GetUserGroupRatio(userGroup, groupName),
+			Desc:  desc,
+		}
+		if typeID, ok := groupTypeMap[groupName]; ok && typeID != "" {
+			if typeInfo, ok := groupTypes[typeID]; ok {
+				option.Type = &GroupTypeOption{
+					ID:    typeID,
+					Name:  typeInfo.Name,
+					Icon:  typeInfo.Icon,
+					Order: typeInfo.Order,
+				}
+			}
+		}
+		groups[groupName] = option
+	}
+	if _, ok := usableGroups["auto"]; ok {
+		groups["auto"] = UserGroupOption{
+			Ratio: "auto",
+			Desc:  setting.GetUsableGroupDescription("auto"),
+		}
+	}
+
+	return UserGroupOptions{Groups: groups, Types: types}
+}
 
 func GetUserUsableGroups(userGroup string) map[string]string {
 	groupsCopy := setting.GetUserUsableGroupsCopy()

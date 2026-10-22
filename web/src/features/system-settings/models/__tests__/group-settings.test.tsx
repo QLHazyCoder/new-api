@@ -44,6 +44,8 @@ const defaults = {
   MaxTokenAutoGroups: 5,
   DefaultUseAutoGroup: false,
   GroupSpecialUsableGroup: '{}',
+  GroupTypes: '{}',
+  GroupTypeMap: '{}',
 }
 
 const schema = z.object({
@@ -56,6 +58,8 @@ const schema = z.object({
   MaxTokenAutoGroups: positiveIntegerSchema('Enter a positive integer'),
   DefaultUseAutoGroup: z.boolean(),
   GroupSpecialUsableGroup: z.string(),
+  GroupTypes: z.string(),
+  GroupTypeMap: z.string(),
 })
 
 function Fixture(props: {
@@ -351,5 +355,129 @@ describe('group settings workspace', () => {
     expect(
       screen.getAllByRole('textbox', { name: 'Group description' })[1]
     ).toHaveValue('Updated description')
+  })
+})
+
+describe('group type management', () => {
+  function getGroupRow(name: string): HTMLElement {
+    const row = screen.getByDisplayValue(name).closest('tr')
+    if (!row) throw new Error(`Expected a row for group "${name}"`)
+    return row
+  }
+
+  it('adds a type, assigns it to a group, and saves both maps', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_values: typeof defaults) => {})
+    render(<Fixture onSave={onSave} />)
+
+    await user.click(screen.getByRole('button', { name: 'Group types' }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByText('No group types configured')).toBeVisible()
+    expect(
+      within(dialog).getByText(
+        'Adding the first group type enables type-first API key creation. User-selectable groups without a type will be hidden from that flow.'
+      )
+    ).toBeVisible()
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Add group type' })
+    )
+    const nameInput = within(dialog).getByRole('textbox', { name: 'Name' })
+    await user.clear(nameInput)
+    await user.type(nameInput, 'OpenAI')
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    const row = getGroupRow('default')
+    const typeCombobox = within(row).getByRole('combobox', {
+      name: 'Group type',
+    })
+    await user.click(typeCombobox)
+    await user.click(await screen.findByRole('option', { name: 'OpenAI' }))
+
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const saved = onSave.mock.calls[0][0]
+    const types = JSON.parse(saved.GroupTypes) as Record<
+      string,
+      { name: string }
+    >
+    expect(Object.values(types)).toHaveLength(1)
+    expect(Object.values(types)[0]?.name).toBe('OpenAI')
+    expect(JSON.parse(saved.GroupTypeMap)).toEqual({
+      default: Object.keys(types)[0],
+    })
+  })
+
+  it('warns about user-selectable groups without a type and updates the count', async () => {
+    const user = userEvent.setup()
+    render(
+      <Fixture
+        initial={{
+          GroupTypes: JSON.stringify({
+            vendor: { name: 'Vendor', icon: '', order: 0 },
+          }),
+          GroupTypeMap: '{}',
+        }}
+      />
+    )
+
+    expect(
+      screen.getByText(
+        '2 user-selectable group(s) have no type and will not appear when creating API keys.'
+      )
+    ).toBeVisible()
+
+    const row = getGroupRow('default')
+    const typeCombobox = within(row).getByRole('combobox', {
+      name: 'Group type',
+    })
+    await user.click(typeCombobox)
+    await user.click(await screen.findByRole('option', { name: 'Vendor' }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          '1 user-selectable group(s) have no type and will not appear when creating API keys.'
+        )
+      ).toBeVisible()
+    )
+  })
+
+  it('deletes a type, clears its assignments, and saves empty maps', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_values: typeof defaults) => {})
+    render(
+      <Fixture
+        onSave={onSave}
+        initial={{
+          GroupTypes: JSON.stringify({
+            vendor: { name: 'Vendor', icon: '', order: 0 },
+          }),
+          GroupTypeMap: JSON.stringify({ default: 'vendor' }),
+        }}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Group types' }))
+    const dialog = screen.getByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    const confirm = await screen.findByRole('alertdialog')
+    await user.click(within(confirm).getByRole('button', { name: 'Delete' }))
+    await user.click(within(dialog).getByRole('button', { name: 'Done' }))
+
+    const row = getGroupRow('default')
+    expect(
+      within(row).getByRole('combobox', { name: 'Group type' })
+    ).toHaveValue('Unclassified')
+
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const saved = onSave.mock.calls[0][0]
+    expect(JSON.parse(saved.GroupTypes)).toEqual({})
+    expect(JSON.parse(saved.GroupTypeMap)).toEqual({})
   })
 })

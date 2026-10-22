@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,4 +56,35 @@ func TestUpdateOptionMapPlaygroundImageMaxConcurrency(t *testing.T) {
 
 	require.Error(t, updateOptionMap(playgroundImageConcurrencyKey, "-1"))
 	require.Equal(t, "3", common.OptionMap[playgroundImageConcurrencyKey])
+}
+
+func TestGroupTypeOptionsPersistAndReload(t *testing.T) {
+	db := setupRegistrationGroupPolicyTest(t)
+	originalGroupTypes := ratio_setting.GroupTypes2JSONString()
+	originalGroupTypeMap := ratio_setting.GroupTypeMap2JSONString()
+	originalOptionMap := common.OptionMap
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() {
+		common.OptionMap = originalOptionMap
+		require.NoError(t, ratio_setting.UpdateGroupTypesByJSONString(originalGroupTypes))
+		require.NoError(t, ratio_setting.UpdateGroupTypeMapByJSONString(originalGroupTypeMap))
+	})
+
+	require.NoError(t, UpdateOption("group_ratio_setting.group_types", `{"vendor":{"name":"Vendor","icon":"OpenAI","order":1}}`))
+	require.NoError(t, UpdateOption("group_ratio_setting.group_type_map", `{"default":"vendor"}`))
+
+	var options []Option
+	require.NoError(t, db.Find(&options).Error)
+	stored := make(map[string]string, len(options))
+	for _, option := range options {
+		stored[option.Key] = option.Value
+	}
+	require.Equal(t, `{"vendor":{"name":"Vendor","icon":"OpenAI","order":1}}`, stored["group_ratio_setting.group_types"])
+	require.Equal(t, `{"default":"vendor"}`, stored["group_ratio_setting.group_type_map"])
+
+	require.NoError(t, ratio_setting.UpdateGroupTypesByJSONString(`{}`))
+	require.NoError(t, ratio_setting.UpdateGroupTypeMapByJSONString(`{}`))
+	require.NoError(t, config.GlobalConfig.LoadFromDB(stored))
+	require.Equal(t, "Vendor", ratio_setting.GetGroupTypesCopy()["vendor"].Name)
+	require.Equal(t, "vendor", ratio_setting.GetGroupTypeMapCopy()["default"])
 }

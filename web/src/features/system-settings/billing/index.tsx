@@ -62,6 +62,8 @@ const defaultBillingSettings: BillingSettings = {
   MaxTokenAutoGroups: 5,
   DefaultUseAutoGroup: false,
   'group_ratio_setting.group_special_usable_group': '{}',
+  'group_ratio_setting.group_types': '{}',
+  'group_ratio_setting.group_type_map': '{}',
   PayAddress: '',
   EpayId: '',
   EpayKey: '',
