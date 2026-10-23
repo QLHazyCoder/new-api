@@ -11,7 +11,8 @@ import { useAgentStore } from "../stores/use-agent-store";
 import { usePromptSourceStore } from "../stores/use-prompt-source-store";
 import { initializeConfig } from "./config";
 import { router } from "./layout";
-import { reportCanvasFailure, reportCanvasReady } from "./bridge";
+import { getCanvasTheme, reportCanvasFailure, reportCanvasReady, subscribeCanvasTheme } from "./bridge";
+import { useThemeStore } from "../stores/use-theme-store";
 
 export function CanvasApplication() {
   React.useEffect(reportCanvasReady, []);
@@ -25,6 +26,10 @@ export function CanvasApplication() {
 const rootElement = document.querySelector<HTMLElement>("#root");
 if (!rootElement) throw new Error("Canvas root element is unavailable");
 const root = createRoot(rootElement);
+// The host theme is authoritative. Apply it before the first React commit so
+// the child never paints its persisted default as a different color scheme.
+useThemeStore.setState({ theme: getCanvasTheme() });
+subscribeCanvasTheme((theme) => useThemeStore.getState().setTheme(theme));
 // Agent is disabled at its execution/store boundary as well as at the UI.
 useAgentStore.setState({
   enabled: false,

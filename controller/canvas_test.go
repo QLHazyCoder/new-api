@@ -69,6 +69,12 @@ func TestCanvasProjectsAssetsAndConflicts(t *testing.T) {
 	png := "\x89PNG\r\n\x1a\nimage-bytes"
 	response := perform(http.MethodPut, "/api/canvas/assets/image:one/content", png, "image/png", "")
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.NoError(t, model.DB.Create(&model.CanvasGenerationRun{UserID: 1, RunID: "owned-image-run", ClientRequestID: "owned-request", Operation: "/v1/images/generations"}).Error)
+	response = perform(http.MethodPut, "/api/canvas/assets/image:from-run/content?run_id=owned-image-run", png, "image/png", "")
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assert.Contains(t, response.Body.String(), `"source_run_id":"owned-image-run"`)
+	response = perform(http.MethodPut, "/api/canvas/assets/image:other-run/content?run_id=owned-image-run", png, "image/png", "2")
+	assert.Equal(t, http.StatusNotFound, response.Code, "another user cannot claim the run")
 	doc := `{"project_id":"project","revision":0,"document":{"id":"project","title":"中文🙂","nodes":[{"id":"node","type":"image","position":{"x":0,"y":0},"width":200,"height":100,"storageKey":"image:one","content":"blob:temporary"}],"connections":[],"chatSessions":[],"backgroundMode":"lines","viewport":{"x":0,"y":0,"k":1}}}`
 	response = perform(http.MethodPost, "/api/canvas/projects", doc, "application/json", "")
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
@@ -138,6 +144,25 @@ func TestCanvasGenerationIdempotencyAndArchive(t *testing.T) {
 	assert.Equal(t, response.Body.Bytes(), raw, "SSE UTF-8 bytes are archived intact")
 }
 
+func TestCanvasObservedResultPreservesBusinessFailures(t *testing.T) {
+	for _, test := range []struct{ name, mime, body, want string }{
+		{"JSON error", "application/json", `{"error":{"message":"upstream refused"}}`, "failed"},
+		{"SSE failure", "text/event-stream", "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"message\":\"refused\"}}}\n\ndata: [DONE]\n\n", "failed"},
+		{"SSE truncated", "text/event-stream", "data: {\"type\":\"response.output_text.delta\",\"delta\":\"中文\"}\n\n", "interrupted"},
+		{"SSE completed", "text/event-stream", "data: {\"type\":\"response.completed\"}\n\n", "succeeded"},
+		{"image JSON", "application/json", `{"data":[{"b64_json":"image"}]}`, "succeeded"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			file, err := os.CreateTemp(t.TempDir(), "result")
+			require.NoError(t, err)
+			defer file.Close()
+			_, err = file.WriteString(test.body)
+			require.NoError(t, err)
+			assert.Equal(t, test.want, canvasObservedResult(file, test.mime))
+		})
+	}
+}
+
 // This harness is opt-in and serves only a temporary test database. It never
 // starts the production service or touches live users/channels.
 func TestCanvasBrowserHarness(t *testing.T) {
@@ -150,7 +175,7 @@ func TestCanvasBrowserHarness(t *testing.T) {
 	testBridge, err := os.ReadFile(os.Getenv("CANVAS_BROWSER_BRIDGE_FILE"))
 	require.NoError(t, err, "bundle integrations/infinite-canvas/browser-host.ts for the fixture")
 	engine.GET("/api/canvas/bootstrap", func(c *gin.Context) {
-		common.ApiSuccess(c, gin.H{"user_id": 1, "groups": gin.H{"default": "Default"}, "models": []gin.H{{"name": "image-test", "group": "default", "capability": "image"}, {"name": "text-test", "group": "default", "capability": "text"}, {"name": "video-test", "group": "default", "capability": "video"}, {"name": "audio-test", "group": "default", "capability": "audio"}}})
+		common.ApiSuccess(c, gin.H{"user_id": 1, "groups": gin.H{"default": "Default"}, "models": []gin.H{{"name": "image-test", "group": "default", "capability": "image", "image_capabilities": gin.H{"provider": "openai", "size_mode": "dimensions", "sizes": []string{"1024x1024"}, "qualities": []string{"auto"}, "output_formats": []string{"png"}, "supports_editing": true, "max_images": 1}}, {"name": "text-test", "group": "default", "capability": "text"}, {"name": "video-test", "group": "default", "capability": "video", "video_adapter": "openai"}, {"name": "audio-test", "group": "default", "capability": "audio"}}})
 	})
 	engine.GET("/api/canvas/test/project-count", func(c *gin.Context) {
 		var count int64

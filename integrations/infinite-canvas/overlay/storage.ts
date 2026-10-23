@@ -1,12 +1,13 @@
 import { canvasData, canvasRequest } from "./bridge";
 
-type Project = { project_id: string; revision: number };
+type Project = { project_id: string; revision: number; title: string; created_at: number; updated_at: number };
 type Setting = { key: string; value: string; revision: number };
 type Asset = { asset_id: string };
 type Page<T> = { items: T[]; next_offset: number };
 const canvasKey = "infinite-canvas:canvas_store";
 const projectRevisions = new Map<string, number>();
 const documents = new Map<string, string>();
+const summaries = new Map<string, string>();
 let writeQueue: Promise<unknown> = Promise.resolve();
 let projectLoad: Promise<string> | undefined;
 
@@ -26,17 +27,27 @@ async function loadProjects(): Promise<string> {
   do {
     const page = await canvasData<Page<Project>>("projects.list", { offset });
     for (const item of page.items) {
-      const result = await canvasData<{ project: Project; document: Record<string, unknown> }>(
-        "projects.get",
-        { id: item.project_id },
-      );
-      projectRevisions.set(item.project_id, result.project.revision);
-      documents.set(item.project_id, JSON.stringify(result.document));
-      projects.push(result.document);
+      const summary = {
+        id: item.project_id, title: item.title, createdAt: new Date(item.created_at).toISOString(), updatedAt: new Date(item.updated_at).toISOString(),
+        nodes: [], connections: [], chatSessions: [], activeChatId: null, backgroundMode: "lines", showImageInfo: false,
+        viewport: { x: 0, y: 0, k: 1 }, embeddedSummary: true,
+      };
+      projectRevisions.set(item.project_id, item.revision);
+      summaries.set(item.project_id, JSON.stringify(summary));
+      projects.push(summary);
     }
     offset = page.next_offset;
   } while (offset >= 0);
   return JSON.stringify({ state: { projects, deletedProjects: [] }, version: 0 });
+}
+
+export async function loadCanvasProject(id: string): Promise<Record<string, unknown>> {
+  const cached = documents.get(id);
+  if (cached) return JSON.parse(cached) as Record<string, unknown>;
+  const result = await canvasData<{ project: Project; document: Record<string, unknown> }>("projects.get", { id });
+  projectRevisions.set(id, result.project.revision);
+  documents.set(id, JSON.stringify(result.document));
+  return result.document;
 }
 
 async function saveProjects(value: string): Promise<void> {
@@ -47,6 +58,22 @@ async function saveProjects(value: string): Promise<void> {
     };
   };
   for (const project of state.projects) {
+    if (project.embeddedSummary === true) {
+      const original = summaries.get(project.id);
+      if (original === JSON.stringify(project)) continue;
+      if (!original) throw new Error("Invalid canvas project summary");
+      // Renaming from the library must preserve every node in the full
+      // document. Only the title and timestamp are editable on a summary.
+      const document = await loadCanvasProject(project.id);
+      const saved = await canvasData<Project>("projects.save", {
+        id: project.id, revision: projectRevisions.get(project.id),
+        document: { ...document, title: project.title, updatedAt: project.updatedAt },
+      });
+      projectRevisions.set(project.id, saved.revision);
+      documents.set(project.id, JSON.stringify({ ...document, title: project.title, updatedAt: project.updatedAt }));
+      summaries.set(project.id, JSON.stringify(project));
+      continue;
+    }
     const encoded = JSON.stringify(project);
     if (documents.get(project.id) === encoded) continue;
     const saved = await canvasData<Project>("projects.save", {
@@ -63,6 +90,7 @@ async function saveProjects(value: string): Promise<void> {
     await canvasData("projects.delete", { id: deleted.id, revision });
     projectRevisions.delete(deleted.id);
     documents.delete(deleted.id);
+    summaries.delete(deleted.id);
   }
 }
 
@@ -108,7 +136,8 @@ class CanvasStorage {
     }
     if (this.isMedia()) {
       if (!(value instanceof Blob)) throw new Error("Canvas media must be a file");
-      await canvasData("assets.upload", { id: key, blob: value });
+      const runId = (value as Blob & { canvasRunId?: string }).canvasRunId;
+      await canvasData("assets.upload", { id: key, blob: value, ...(runId ? { run_id: runId } : {}) });
       return value;
     }
     const persist = async () => {

@@ -93,7 +93,7 @@ export function canvasEndpoint(
         throw new Error('Invalid canvas content')
       }
       return {
-        path: `/assets/${resource(payload)}/content`,
+        path: `/assets/${resource(payload)}/content${payload.run_id ? `?run_id=${resource(payload, 'run_id')}` : ''}`,
         method: 'PUT',
         body: payload.blob,
       }
@@ -277,6 +277,9 @@ export function createCanvasBridge(
         headers: {
           'content-type': response.headers.get('content-type') ?? '',
           'x-canvas-run-id': response.headers.get('x-canvas-run-id') ?? '',
+          'x-request-id': response.headers.get('x-request-id') ?? '',
+          'x-oneapi-request-id':
+            response.headers.get('x-oneapi-request-id') ?? '',
         },
       })
       if (response.body) {

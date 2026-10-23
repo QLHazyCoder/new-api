@@ -15,10 +15,11 @@ frame.addEventListener("load", () => {
     createCanvasBridge(channel.port1, () => {
       throw new Error("Canvas child failed");
     });
+    (window as Window & { canvasSetTheme?: (theme: "light" | "dark") => void }).canvasSetTheme = (theme) => channel.port1.postMessage({ type: "theme", theme });
     (window as Window & { bridgeReady?: boolean }).bridgeReady = true;
   };
   channel.port1.start();
-  frame.contentWindow?.postMessage({ type: "canvas:init", protocol: 1, nonce }, "*", [
+  frame.contentWindow?.postMessage({ type: "canvas:init", protocol: 1, nonce, theme: "light" }, "*", [
     channel.port2,
   ]);
 });

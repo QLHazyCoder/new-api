@@ -8,21 +8,32 @@ import {
 } from "../stores/use-config-store";
 import { canvasData } from "./bridge";
 import storage from "./storage";
-import { useThemeStore } from "../stores/use-theme-store";
+import type { ImageModelCapabilities } from "./playground/types";
+export type { ImageModelCapabilities } from "./playground/types";
 
 export * from "../stores/use-config-store";
 export { useConfigStore };
 type SessionConfig = AiConfig & { canvasGroup?: string };
 const channelGroups = new Map<string, string>();
+const imageCapabilities = new Map<string, ImageModelCapabilities>();
+const videoAdapters = new Map<string, string>();
 export type Bootstrap = {
   user_id: number;
-  models: Array<{ name: string; group: string; capability: ModelCapability }>;
-  groups: Record<string, string>;
+  models: Array<{
+    name: string;
+    group: string;
+    capability: ModelCapability;
+    image_capabilities?: ImageModelCapabilities;
+    video_adapter?: string;
+  }>;
 };
 
 export async function initializeConfig(): Promise<Bootstrap> {
   const bootstrap = await canvasData<Bootstrap>("bootstrap");
   const config = useConfigStore.getState().config;
+  channelGroups.clear();
+  imageCapabilities.clear();
+  videoAdapters.clear();
   const groups = [...new Set(bootstrap.models.map((item) => item.group))];
   config.channels = groups.flatMap((group) =>
     (["image", "video", "text", "audio"] as const).flatMap((capability) => {
@@ -35,11 +46,18 @@ export async function initializeConfig(): Promise<Bootstrap> {
       return [
         {
           id,
-          name: bootstrap.groups[group] || group,
+          // The group remains a routing/authorization identity. It is not a
+          // model description and must not be appended to every model label.
+          name: group,
           baseUrl: "",
           apiKey: "",
           apiFormat: "openai" as const,
-          models: models.map((item) => ({ name: item.name, capability })),
+          models: models.map((item) => {
+            const value = id + "::" + item.name;
+            if (item.image_capabilities) imageCapabilities.set(value, item.image_capabilities);
+            if (item.video_adapter) videoAdapters.set(value, item.video_adapter);
+            return { name: item.name, capability };
+          }),
         },
       ];
     }),
@@ -113,10 +131,13 @@ export async function initializeConfig(): Promise<Bootstrap> {
     "background",
     "count",
     "canvasImageCount",
+    "imageAspectRatio",
+    "imageResolution",
+    "imageOutputFormat",
+    "imageModeration",
+    "imageOutputCompression",
   ] as const;
-  const saved = await storage.getItem<{ preferences: Partial<AiConfig>; theme: "light" | "dark" }>(
-    "canvas:preferences",
-  );
+  const saved = await storage.getItem<{ preferences: Partial<AiConfig> }>("canvas:preferences");
   // Initial business-data failures must reach the host's retry state; an
   // empty UI after a failed hydration must never look like an empty account.
   await Promise.all([
@@ -134,8 +155,6 @@ export async function initializeConfig(): Promise<Bootstrap> {
       } else (clean as unknown as Record<string, unknown>)[key] = value;
     }
     useConfigStore.setState({ config: clean });
-    if (saved.theme === "light" || saved.theme === "dark")
-      useThemeStore.getState().setTheme(saved.theme);
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
   const persist = () => {
@@ -144,14 +163,13 @@ export async function initializeConfig(): Promise<Bootstrap> {
       const current = useConfigStore.getState().config;
       const preferences = Object.fromEntries(preferenceKeys.map((key) => [key, current[key]]));
       void storage
-        .setItem("canvas:preferences", { preferences, theme: useThemeStore.getState().theme })
+        .setItem("canvas:preferences", { preferences })
         .catch((error: Error) =>
           window.dispatchEvent(new CustomEvent("canvas:save-error", { detail: error.message })),
         );
     }, 500);
   };
   useConfigStore.subscribe(persist);
-  useThemeStore.subscribe(persist);
   return bootstrap;
 }
 
@@ -175,9 +193,20 @@ export function resolveModelRequestConfig(config: AiConfig, value: string): Sess
   };
 }
 
+export function imageCapabilitiesForModel(value: string): ImageModelCapabilities | undefined {
+  return imageCapabilities.get(value);
+}
+
+export function videoAdapterForModel(value: string): string {
+  return videoAdapters.get(value) || "unsupported";
+}
+
 export function canvasHeaders(config: SessionConfig, contentType?: string): Record<string, string> {
+  const group = config.canvasGroup || "";
   return {
-    "X-Canvas-Group": config.canvasGroup || "",
+    // HTTP headers are ASCII-only in both fetch and Axios. Keep the original
+    // group in the in-app model value, and encode it only at this boundary.
+    "X-Canvas-Group": group ? encodeURIComponent(group) : "",
     ...(contentType ? { "Content-Type": contentType } : {}),
   };
 }

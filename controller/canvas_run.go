@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +20,75 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm/clause"
 )
+
+// HTTP 200 also carries Responses SSE errors and JSON business failures. This
+// describes the observed result only; settlement remains in the existing relay.
+func canvasObservedResult(file *os.File, mime string) string {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return "interrupted"
+	}
+	if strings.Contains(mime, "text/event-stream") {
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 4096), model.CanvasMaxDocumentBytes)
+		complete := false
+		for scanner.Scan() {
+			data, ok := strings.CutPrefix(scanner.Text(), "data:")
+			if !ok {
+				continue
+			}
+			data = strings.TrimSpace(data)
+			if data == "[DONE]" {
+				complete = true
+				continue
+			}
+			if data == "" {
+				continue
+			}
+			var event struct {
+				Type     string `json:"type"`
+				Error    any    `json:"error"`
+				Response struct {
+					Status string `json:"status"`
+					Error  any    `json:"error"`
+				} `json:"response"`
+			}
+			if common.UnmarshalJsonStr(data, &event) != nil {
+				return "interrupted"
+			}
+			if event.Error != nil || event.Response.Error != nil || event.Type == "error" || event.Type == "response.failed" || event.Response.Status == "failed" {
+				return "failed"
+			}
+			if event.Type == "response.incomplete" {
+				return "interrupted"
+			}
+			if event.Type == "response.completed" || event.Type == "image_generation.completed" || event.Type == "image_edit.completed" {
+				complete = true
+			}
+		}
+		if scanner.Err() != nil || !complete {
+			return "interrupted"
+		}
+		return "succeeded"
+	}
+	if strings.Contains(mime, "json") {
+		var result struct {
+			Error   any    `json:"error"`
+			Success *bool  `json:"success"`
+			Code    any    `json:"code"`
+			Status  string `json:"status"`
+		}
+		if common.DecodeJson(io.LimitReader(file, int64(max(1, constant.MaxFileDownloadMB))<<20), &result) != nil {
+			return "interrupted"
+		}
+		if result.Error != nil || result.Success != nil && !*result.Success || result.Status == "failed" || result.Status == "cancelled" {
+			return "failed"
+		}
+		if result.Code != nil && fmt.Sprint(result.Code) != "0" && fmt.Sprint(result.Code) != "200" {
+			return "failed"
+		}
+	}
+	return "succeeded"
+}
 
 var canvasRunCancels sync.Map
 
@@ -120,6 +191,8 @@ func CanvasGeneration() gin.HandlerFunc {
 		status := "succeeded"
 		if wrapped.Status() >= 400 {
 			status = "failed"
+		} else if wrapped.err == nil {
+			status = canvasObservedResult(file, wrapped.Header().Get("Content-Type"))
 		}
 		if ctx.Err() != nil {
 			status = "interrupted"

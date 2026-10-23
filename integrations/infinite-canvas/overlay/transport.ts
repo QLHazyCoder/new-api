@@ -34,7 +34,12 @@ function relayOperation(
 async function rememberImageSources(response: Response): Promise<void> {
   const run = response.headers.get("x-canvas-run-id");
   if (!run || !response.ok || !response.headers.get("content-type")?.includes("json")) return;
-  const payload = await response.clone().json();
+  let payload: { data?: Array<{ url?: unknown }> };
+  try {
+    payload = (await response.clone().json()) as { data?: Array<{ url?: unknown }> };
+  } catch {
+    return;
+  }
   if (Array.isArray(payload.data)) {
     for (const image of payload.data) {
       if (typeof image.url === "string") imageSources.set(image.url, run);
@@ -86,24 +91,55 @@ axios.defaults.adapter = async (config) => {
   const headers = new Headers();
   const group = config.headers.get("X-Canvas-Group");
   if (group) headers.set("X-Canvas-Group", String(group));
-  const response = await window.fetch(config.url!, {
-    method: config.method?.toUpperCase(),
-    body: config.data as BodyInit,
-    headers,
-    signal: config.signal as AbortSignal | undefined,
-  });
-  let data: unknown;
-  if (config.responseType === "blob") data = await response.blob();
-  else if (config.responseType === "arraybuffer") data = await response.arrayBuffer();
-  else if (config.responseType === "text") data = await response.text();
-  else data = await response.json();
-  const result = {
-    data,
-    status: response.status,
-    statusText: response.statusText,
-    headers: new AxiosHeaders(Object.fromEntries(response.headers.entries())),
-    config,
-  };
-  if (!response.ok) throw new AxiosError("Request failed", undefined, config, undefined, result);
-  return result;
+  const controller = new AbortController();
+  let timedOut = false;
+  const abort = () => controller.abort();
+  const requestSignal = config.signal as AbortSignal | undefined;
+  const timeout = Number(config.timeout) > 0 ? Number(config.timeout) : 10 * 60_000;
+  if (requestSignal?.aborted) abort();
+  else if (requestSignal) requestSignal.addEventListener("abort", abort, { once: true });
+  const timer = timeout > 0 ? window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeout) : undefined;
+  try {
+    const response = await window.fetch(config.url!, {
+      method: config.method?.toUpperCase(),
+      body: config.data as BodyInit,
+      headers,
+      signal: controller.signal,
+    });
+    let data: unknown;
+    if (config.responseType === "blob") data = await response.blob();
+    else if (config.responseType === "arraybuffer") data = await response.arrayBuffer();
+    else if (config.responseType === "text") data = await response.text();
+    else {
+      const text = await response.text();
+      if (!text.trim()) data = null;
+      else {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = text;
+        }
+      }
+    }
+    const result = {
+      data,
+      status: response.status,
+      statusText: response.statusText,
+      headers: new AxiosHeaders(Object.fromEntries(response.headers.entries())),
+      config,
+    };
+    if (!response.ok)
+      throw new AxiosError(`Canvas request failed (${response.status})`, undefined, config, undefined, result);
+    return result;
+  } catch (error) {
+    if (timedOut)
+      throw new AxiosError(`timeout of ${timeout}ms exceeded`, "ECONNABORTED", config);
+    throw error;
+  } finally {
+    if (timer !== undefined) window.clearTimeout(timer);
+    requestSignal?.removeEventListener("abort", abort);
+  }
 };

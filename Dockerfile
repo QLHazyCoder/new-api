@@ -14,6 +14,8 @@ FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY integrations/infinite-canvas ./integrations/infinite-canvas
+COPY web/src/features/playground/types.ts web/src/features/playground/constants.ts ./web/src/features/playground/
+COPY web/src/features/playground/lib/image-generation-capabilities.ts web/src/features/playground/lib/image-payload-builder.ts ./web/src/features/playground/lib/
 RUN sh integrations/infinite-canvas/build.sh
 
 FROM golang:1.26.1-alpine@sha256:2389ebfa5b7f43eeafbd6be0c3700cc46690ef842ad962f6c5bd6be49ed82039 AS builder2

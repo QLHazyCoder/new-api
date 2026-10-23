@@ -6,15 +6,52 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	imagedto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 )
 
 type CanvasModelOption struct {
-	Name       string `json:"name"`
-	Group      string `json:"group"`
-	Capability string `json:"capability"`
+	Name              string                           `json:"name"`
+	Group             string                           `json:"group"`
+	Capability        string                           `json:"capability"`
+	ImageCapabilities *imagedto.ImageModelCapabilities `json:"image_capabilities,omitempty"`
+	VideoAdapter      string                           `json:"video_adapter,omitempty"`
+}
+
+func canvasVideoAdapter(ability model.AbilityWithChannel, generation *jsplugin.RoutingGeneration) string {
+	if ability.ChannelType == constant.ChannelTypeDoubaoVideo || ability.ChannelType == constant.ChannelTypeVolcEngine {
+		return "doubao"
+	}
+	if ability.ChannelType == constant.ChannelTypeSora {
+		return "sora"
+	}
+	settings := dto.ChannelSettings{}
+	if ability.ChannelSetting != "" && common.UnmarshalJsonStr(ability.ChannelSetting, &settings) != nil {
+		return "unsupported"
+	}
+	upstream, _, err := common.ResolveModelMapping(ability.Model, ability.ChannelModelMapping)
+	if err != nil {
+		return "unsupported"
+	}
+	declared, ok := generation.CanonicalModel(ability.Model)
+	if !ok {
+		declared, _ = generation.CanonicalModel(upstream)
+	}
+	for _, candidate := range generation.LookupEndpointCandidates("POST", "/v1/videos", declared) {
+		if candidate.Plugin == nil {
+			continue
+		}
+		plugin := candidate.Plugin.Meta
+		eligible := ability.ChannelType == constant.ChannelTypeTaskPlugin && settings.TaskPluginKey == plugin.Key ||
+			ability.ChannelType == constant.ChannelTypeNewAPI && slices.Contains(settings.TaskPluginBindings(), plugin.Key) ||
+			ability.ChannelType != constant.ChannelTypeTaskPlugin && ability.ChannelType != constant.ChannelTypeNewAPI && slices.Contains(plugin.ChannelTypes, ability.ChannelType)
+		if eligible && (plugin.Key == "sora" || plugin.Key == "doubao") {
+			return plugin.Key
+		}
+	}
+	return "openai"
 }
 
 // Catalog capability follows published endpoint metadata, never a model-name
@@ -72,6 +109,7 @@ func CanvasModelCatalog(userGroup string) ([]CanvasModelOption, error) {
 			queryGroups = GetUserAutoGroup(userGroup)
 		}
 		seen := map[string]bool{}
+		videoAdapters := map[string]string{}
 		for _, ability := range abilities {
 			if !slices.Contains(queryGroups, ability.Group) {
 				continue
@@ -85,6 +123,11 @@ func CanvasModelCatalog(userGroup string) ([]CanvasModelOption, error) {
 					capability = "image"
 				case constant.EndpointTypeOpenAIVideo:
 					capability = "video"
+					adapter := canvasVideoAdapter(ability, generation)
+					if current, ok := videoAdapters[ability.Model]; ok && current != adapter {
+						adapter = "unsupported"
+					}
+					videoAdapters[ability.Model] = adapter
 				}
 				key := ability.Model + "\x00" + capability
 				if capability != "" && !seen[key] {
@@ -110,6 +153,11 @@ func CanvasModelCatalog(userGroup string) ([]CanvasModelOption, error) {
 					options = append(options, CanvasModelOption{Name: ability.Model, Group: group, Capability: capability})
 					seen[key] = true
 				}
+			}
+		}
+		for i := range options {
+			if options[i].Group == group && options[i].Capability == "video" {
+				options[i].VideoAdapter = videoAdapters[options[i].Name]
 			}
 		}
 	}

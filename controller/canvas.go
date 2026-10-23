@@ -52,13 +52,35 @@ func CanvasBootstrap(c *gin.Context) {
 		canvasError(c, err)
 		return
 	}
-	common.ApiSuccess(c, gin.H{"protocol": 1, "user_id": user.Id, "models": options, "groups": service.GetUserUsableGroups(user.Group), "embedded": true, "extensions": false, "max_document_bytes": model.CanvasMaxDocumentBytes})
+	imageGroups, err := service.GetUserImageModelGroups(user.Group)
+	if err != nil {
+		canvasError(c, err)
+		return
+	}
+	for i := range options {
+		if options[i].Capability != "image" {
+			continue
+		}
+		for _, group := range imageGroups {
+			if group.Value != options[i].Group {
+				continue
+			}
+			for _, imageModel := range group.Models {
+				if imageModel.Value == options[i].Name {
+					capabilities := imageModel.Capabilities
+					options[i].ImageCapabilities = &capabilities
+					break
+				}
+			}
+		}
+	}
+	common.ApiSuccess(c, gin.H{"protocol": 1, "user_id": user.Id, "models": options, "embedded": true, "extensions": false, "max_document_bytes": model.CanvasMaxDocumentBytes})
 }
 
 func ListCanvasProjects(c *gin.Context) {
 	offset, _ := strconv.Atoi(c.Query("offset"))
 	var records []model.CanvasProject
-	query := model.DB.Where("user_id = ?", c.GetInt("id"))
+	query := model.DB.Omit("document").Where("user_id = ?", c.GetInt("id"))
 	if c.Query("trash") == "true" {
 		query = query.Where("deleted_at > 0")
 	} else {
@@ -232,6 +254,18 @@ func ListCanvasAssets(c *gin.Context) {
 }
 
 func UploadCanvasAsset(c *gin.Context) {
+	runID := c.Query("run_id")
+	if runID != "" {
+		var run model.CanvasGenerationRun
+		if err := model.DB.Where("user_id = ? AND run_id = ?", c.GetInt("id"), runID).First(&run).Error; err != nil {
+			canvasError(c, err)
+			return
+		}
+		if run.Operation != "/v1/images/generations" && run.Operation != "/v1/images/edits" {
+			canvasError(c, model.ErrCanvasInvalid)
+			return
+		}
+	}
 	var existing model.CanvasAsset
 	err := model.DB.Where("user_id = ? AND asset_id = ? AND deleted_at = 0", c.GetInt("id"), c.Param("asset_id")).First(&existing).Error
 	if err == nil {
@@ -242,7 +276,7 @@ func UploadCanvasAsset(c *gin.Context) {
 		canvasError(c, err)
 		return
 	}
-	asset, err := service.SaveCanvasAsset(c.GetInt("id"), c.Param("asset_id"), "", c.ContentType(), "", c.Request.Body)
+	asset, err := service.SaveCanvasAsset(c.GetInt("id"), c.Param("asset_id"), "", c.ContentType(), runID, c.Request.Body)
 	if err != nil {
 		canvasError(c, err)
 		return

@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
+import { useTheme } from '@/context/theme-provider'
 import { getBuildRevision } from '@/lib/build-metadata'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
@@ -30,13 +31,21 @@ import { createCanvasBridge } from './bridge'
 
 export function Canvas() {
   const { t } = useTranslation()
+  const { resolvedTheme } = useTheme()
   const iframe = useRef<HTMLIFrameElement>(null)
+  const themeRef = useRef<'light' | 'dark'>(resolvedTheme)
+  const portRef = useRef<MessagePort | undefined>(undefined)
   const [version, setVersion] = useState(0)
   const [status, setStatus] = useState<'loading' | 'ready' | 'failed'>(
     'loading'
   )
   const userID = useAuthStore((state) => state.auth.user?.id)
   const sid = useAuthStore((state) => state.auth.session?.sid)
+
+  useEffect(() => {
+    themeRef.current = resolvedTheme
+    portRef.current?.postMessage({ type: 'theme', theme: resolvedTheme })
+  }, [resolvedTheme])
 
   useEffect(() => {
     setStatus('loading')
@@ -52,6 +61,7 @@ export function Canvas() {
       window.clearTimeout(timeout)
       dispose?.()
       channel?.port1.close()
+      portRef.current = undefined
       frame.src = 'about:blank'
       setStatus('failed')
     }
@@ -91,10 +101,15 @@ export function Canvas() {
             setStatus('ready')
           }
         )
+        portRef.current = activeChannel.port1
+        activeChannel.port1.postMessage({
+          type: 'theme',
+          theme: themeRef.current,
+        })
       }
       channel.port1.start()
       frame.contentWindow?.postMessage(
-        { type: 'canvas:init', protocol: 1, nonce },
+        { type: 'canvas:init', protocol: 1, nonce, theme: themeRef.current },
         '*',
         [channel.port2]
       )
@@ -110,6 +125,7 @@ export function Canvas() {
       window.clearTimeout(timeout)
       dispose?.()
       channel?.port1.close()
+      portRef.current = undefined
       frame.src = 'about:blank'
     }
   }, [userID, sid, version])

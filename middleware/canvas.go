@@ -3,13 +3,41 @@ package middleware
 import (
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 )
+
+// canvasGroupFromHeader decodes the transport representation exactly once.
+// Canvas group names are user-configured text (often Chinese), while HTTP
+// header values must stay ASCII. A malformed value must fail closed instead of
+// being interpreted as a different group.
+func canvasGroupFromHeader(value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	for _, char := range value {
+		if char > 0x7f || char < 0x20 || char == 0x7f {
+			return "", url.EscapeError("canvas group header is not ASCII")
+		}
+	}
+	decoded, err := url.PathUnescape(value)
+	if err != nil || decoded == "" || !utf8.ValidString(decoded) {
+		return "", url.EscapeError("invalid canvas group encoding")
+	}
+	for _, char := range decoded {
+		if unicode.IsControl(char) {
+			return "", url.EscapeError("invalid canvas group text")
+		}
+	}
+	return decoded, nil
+}
 
 func CanvasSession() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -46,16 +74,20 @@ func CanvasSession() gin.HandlerFunc {
 func CanvasRelay(capability string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if c.GetString(common.CanvasOriginContextKey) != common.CanvasOrigin {
-			c.AbortWithStatus(http.StatusUnauthorized)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{"code": "canvas_origin_required", "message": "Canvas origin is required"}})
 			return
 		}
-		group := c.GetHeader("X-Canvas-Group")
+		group, err := canvasGroupFromHeader(c.GetHeader("X-Canvas-Group"))
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "canvas_invalid_group", "message": "Invalid canvas group"}})
+			return
+		}
 		userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 		if group == "" {
 			group = userGroup
 		}
 		if !service.GroupInUserUsableGroups(userGroup, group) {
-			c.AbortWithStatus(http.StatusForbidden)
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": gin.H{"code": "canvas_group_forbidden", "message": "Canvas group is not available"}})
 			return
 		}
 		if c.Request.Method == http.MethodPost {

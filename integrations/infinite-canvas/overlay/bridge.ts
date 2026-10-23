@@ -1,11 +1,14 @@
-type Reply = {
-  type: string;
-  id: string;
-  status?: number;
-  headers?: Record<string, string>;
-  data?: ArrayBuffer;
-  message?: string;
-};
+type ThemeName = "light" | "dark";
+type Reply =
+  | {
+      type: "response" | "chunk" | "end" | "error";
+      id: string;
+      status?: number;
+      headers?: Record<string, string>;
+      data?: ArrayBuffer;
+      message?: string;
+    }
+  | { type: "theme"; theme: ThemeName };
 type Pending = {
   resolve: (response: Response) => void;
   reject: (error: Error) => void;
@@ -15,6 +18,8 @@ type Pending = {
 };
 
 let port: MessagePort;
+let canvasTheme: ThemeName = "light";
+const themeListeners = new Set<(theme: ThemeName) => void>();
 const pending = new Map<string, Pending>();
 export const ready = new Promise<void>((resolve) => {
   window.addEventListener("message", function initialize(event: MessageEvent) {
@@ -28,10 +33,19 @@ export const ready = new Promise<void>((resolve) => {
     }
     const parentOrigin = new URL(document.referrer).origin;
     if (event.origin !== parentOrigin || typeof event.data.nonce !== "string") return;
+    if (event.data.theme === "light" || event.data.theme === "dark")
+      canvasTheme = event.data.theme;
     window.removeEventListener("message", initialize);
     port = event.ports[0];
     port.onmessage = (message: MessageEvent<Reply>) => {
       const reply = message.data;
+      if (reply?.type === "theme") {
+        if (reply.theme !== "light" && reply.theme !== "dark") return;
+        canvasTheme = reply.theme;
+        themeListeners.forEach((listener) => listener(canvasTheme));
+        return;
+      }
+      if (!reply?.id) return;
       const request = pending.get(reply.id);
       if (!request) return;
       if (reply.type === "response") {
@@ -85,6 +99,15 @@ export function reportCanvasReady(): void {
   port.postMessage({ type: "loaded" });
 }
 
+export function getCanvasTheme(): ThemeName {
+  return canvasTheme;
+}
+
+export function subscribeCanvasTheme(listener: (theme: ThemeName) => void): () => void {
+  themeListeners.add(listener);
+  return () => themeListeners.delete(listener);
+}
+
 export async function canvasRequest(
   operation: string,
   payload: Record<string, unknown> = {},
@@ -118,11 +141,31 @@ export async function canvasData<T>(
   payload: Record<string, unknown> = {},
 ): Promise<T> {
   const response = await canvasRequest(operation, payload);
-  const result = await response.json();
-  if (!response.ok || !result.success) {
-    const error = new Error(result.message || result.error?.message || "Request failed");
-    window.dispatchEvent(new CustomEvent("canvas:save-error", { detail: error.message }));
+  const mediaErrorKey = operation === "assets.upload" && typeof payload.run_id === "string" ? `media:${payload.run_id}` : "";
+  const text = await response.text();
+  type CanvasEnvelope = {
+    success?: boolean;
+    data?: T;
+    message?: string;
+    error?: { message?: string };
+  };
+  let result: CanvasEnvelope | null = null;
+  if (text.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+        result = parsed as CanvasEnvelope;
+    } catch {
+      throw new Error(`Canvas request failed (${response.status})`);
+    }
+  }
+  if (!response.ok || !result?.success) {
+    const error = new Error(
+      result?.message || result?.error?.message || `Canvas request failed (${response.status})`,
+    );
+    window.dispatchEvent(new CustomEvent("canvas:save-error", { detail: mediaErrorKey ? { key: mediaErrorKey, message: error.message } : error.message }));
     throw error;
   }
+  if (mediaErrorKey) window.dispatchEvent(new CustomEvent("canvas:saved", { detail: { key: mediaErrorKey } }));
   return result.data as T;
 }

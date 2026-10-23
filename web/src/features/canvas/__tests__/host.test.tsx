@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ThemeProvider, useTheme } from '@/context/theme-provider'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { Canvas } from '..'
@@ -80,6 +81,49 @@ afterEach(() => {
 })
 
 describe('Canvas host lifecycle', () => {
+  it('sends the resolved host theme during the canvas handshake', () => {
+    function ThemeControl() {
+      const { setTheme } = useTheme()
+      return (
+        <button type='button' onClick={() => setTheme('light')}>
+          Use light theme
+        </button>
+      )
+    }
+    render(
+      <ThemeProvider defaultTheme='dark' storageKey='canvas-host-theme-test'>
+        <Canvas />
+        <ThemeControl />
+      </ThemeProvider>
+    )
+    const frame = screen.getByTitle('Infinite Canvas') as HTMLIFrameElement
+    const frameWindow = frame.contentWindow
+    if (!frameWindow) throw new Error('Iframe window is unavailable')
+    const postMessage = vi.spyOn(frameWindow, 'postMessage')
+    fireEvent.load(frame)
+    const initialization = postMessage.mock.calls.at(-1)?.[0] as {
+      theme: string
+      nonce: string
+    }
+    expect(initialization.theme).toBe('dark')
+    const port = channels.at(-1)?.port1
+    act(() => {
+      port?.onmessage?.(
+        new MessageEvent('message', {
+          data: { type: 'ready', nonce: initialization.nonce },
+        })
+      )
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Use light theme' }))
+    expect(port?.postMessage).toHaveBeenCalledWith({
+      type: 'theme',
+      theme: 'light',
+    })
+    expect(screen.getByTitle('Infinite Canvas')).toBe(frame)
+    expect(channels).toHaveLength(1)
+    window.localStorage.removeItem('canvas-host-theme-test')
+  })
+
   it('keeps loading until the connected child has rendered its application', () => {
     render(<Canvas />)
     const frame = screen.getByTitle('Infinite Canvas') as HTMLIFrameElement

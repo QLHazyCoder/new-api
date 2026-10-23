@@ -2,14 +2,13 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Alert, Button, Modal } from "antd";
 import { Link, Outlet, createHashRouter, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useThemeStore } from "../stores/use-theme-store";
 import { canvasData, canvasRequest } from "./bridge";
 import { unsavedCanvasValues } from "./localforage-storage";
 import { restoreCanvasProject } from "./storage";
 import { useCanvasStore, type CanvasProject } from "../stores/canvas/use-canvas-store";
 
 import CanvasPage from "../pages/canvas";
-import CanvasProjectPage from "../pages/canvas/project";
+import CanvasProjectPage from "./project";
 import ImagePage from "../pages/image";
 import VideoPage from "../pages/video";
 import AssetsPage from "../pages/assets";
@@ -21,13 +20,8 @@ export function UserStatusActions(props: {
   onOpenShortcuts?: () => void;
   onOpenPlugins?: () => void;
 }) {
-  const theme = useThemeStore((state) => state.theme);
-  const setTheme = useThemeStore((state) => state.setTheme);
   return (
     <>
-      <Button type="text" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-        {theme === "dark" ? "浅色" : "深色"}
-      </Button>
       {props.onOpenShortcuts ? (
         <Button type="text" onClick={props.onOpenShortcuts}>
           快捷键
@@ -64,13 +58,28 @@ function EmbeddedLayout() {
   const { pathname } = useLocation();
   const { t } = useTranslation();
   const [error, setError] = useState("");
+  const [mediaErrors, setMediaErrors] = useState<Record<string, string>>({});
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [runOffset, setRunOffset] = useState(-1);
   const [busy, setBusy] = useState(false);
   const [trash, setTrash] = useState<Array<{ project_id: string; title: string }> | null>(null);
   useEffect(() => {
-    const failed = (event: Event) => setError(String((event as CustomEvent).detail));
-    const saved = () => setError("");
+    const failed = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail && typeof detail.key === "string" && typeof detail.message === "string") {
+        setMediaErrors((current) => ({ ...current, [detail.key]: detail.message }));
+      } else setError(String(detail));
+    };
+    const saved = (event: Event) => {
+      const key = (event as CustomEvent).detail?.key;
+      if (typeof key === "string") {
+        setMediaErrors((current) => {
+          const next = { ...current };
+          delete next[key];
+          return next;
+        });
+      } else setError("");
+    };
     window.addEventListener("canvas:save-error", failed);
     window.addEventListener("canvas:saved", saved);
     return () => {
@@ -113,6 +122,7 @@ function EmbeddedLayout() {
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+  const visibleError = [error, ...Object.values(mediaErrors)].filter(Boolean).join("\n");
   return (
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-background text-foreground">
       <nav
@@ -153,12 +163,12 @@ function EmbeddedLayout() {
           <UserStatusActions />
         </div>
       </nav>
-      {error ? (
+      {visibleError ? (
         <Alert
           type="error"
           showIcon
           title="画布操作未完成"
-          description={error}
+          description={visibleError}
           action={
             <Button
               onClick={() => {

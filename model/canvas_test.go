@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm/logger"
 )
 
 func TestCanvasDatabaseMatrix(t *testing.T) {
@@ -18,6 +19,10 @@ func TestCanvasDatabaseMatrix(t *testing.T) {
 				t.Skip("database DSN not configured")
 			}
 			db := openSensitiveWordMatrixDB(t, dialect, dsn)
+			db.Logger = logger.Default.LogMode(logger.Silent)
+			if dialect != "sqlite" {
+				t.Log("isolated database:", db.Migrator().CurrentDatabase())
+			}
 			oldDB := DB
 			oldMain, oldLog := common.MainDatabaseType(), common.LogDatabaseType()
 			DB = db
@@ -50,6 +55,11 @@ func TestCanvasDatabaseMatrix(t *testing.T) {
 			assert.EqualValues(t, 1, project.Revision)
 			assert.Greater(t, len(project.Document), 65535, "MySQL must not truncate a large document")
 			assert.NotContains(t, string(project.Document), "blob:transient")
+			var summaries []CanvasProject
+			require.NoError(t, db.Omit("document").Where("user_id = ? AND deleted_at = 0", legacy.Id).Find(&summaries).Error)
+			require.Len(t, summaries, 1)
+			assert.Empty(t, summaries[0].Document, "the library query must not load every full document")
+			assert.Equal(t, project.Title, summaries[0].Title)
 			_, err = SaveCanvasProject(legacy.Id, "project-1", 0, doc)
 			assert.ErrorIs(t, err, ErrCanvasConflict)
 			project, err = SaveCanvasProject(legacy.Id, "project-1", 1, doc)
