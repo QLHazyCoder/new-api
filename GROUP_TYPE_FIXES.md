@@ -101,3 +101,5 @@ MySQL 与 PostgreSQL 运行在本次临时创建的 loopback 容器内，矩阵�
 失败用例先在旧实现运行：SQLite 冷启动报同一错误，预期类型名“标准类型”实际为空；保持旧蓝槽服务，候选绿槽正常停止，未切换公网流量。
 
 修复后 `TestGroupTypeOptionsReloadsLegacyAutomaticRoutingAssignment` 在 SQLite 3.50.4、MySQL 8.2.0、PostgreSQL 18.4 的隔离测试库均通过。两次冷态重载保留“标准类型”和两个真实组映射，原数据库 JSON 不变，新写入旧 auto 绑定仍被拒绝；既有缺失类型错误保留最后有效快照、成对保存和数据库故障回滚用例也通过。临时库已清理，未修改生产分组配置。补丁需重新经 Actions 与候选启动/周期重载检查后才切流。
+
+最终补丁 `12441adcce4a95c39732db112a4ecd0e50f9cb50` 经 [Actions 40038154053](https://github.com/QLHazyCoder/new-api/actions/runs/40038154053) 两架构发布完成。候选启动及周期同步无旧分类错误，2026-10-23 23:31:40 UTC 切至绿槽，旧蓝槽 23:47:22 UTC 正常退出；五公网 `main-12441ad`、健康、重启/OOM 与数据库原 JSON 哈希复核通过。最终身份和观测边界见 `CANVAS_IMPLEMENTATION.md` 的发布章节。

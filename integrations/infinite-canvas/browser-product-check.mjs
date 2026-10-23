@@ -248,9 +248,13 @@ try {
   await frame.getByText("请求失败（HTTP 403）", { exact: true }).first().waitFor();
   assert.equal(await frame.getByText(/Unexpected end of JSON/).count(), 0);
   await frame.getByRole("link", { name: "视频创作台", exact: true }).click();
-  await frame.locator("textarea").first().fill("视频请求契约验证");
+  await frame.getByRole("heading", { name: "视频创作台", exact: true }).waitFor();
+  const videoPrompt = frame.getByPlaceholder("描述镜头运动、主体动作、场景氛围和画面风格", { exact: true });
+  await videoPrompt.fill("视频请求契约验证");
+  assert.equal(await videoPrompt.inputValue(), "视频请求契约验证");
   await frame.locator('input[type="file"]').first().setInputFiles({ name: "ref.png", mimeType: "image/png", buffer: Buffer.from(png, "base64") });
   await frame.getByRole("img", { name: "ref.png", exact: true }).waitFor();
+  assert.equal(await videoPrompt.inputValue(), "视频请求契约验证", "the video prompt must survive reference upload");
   await frame.getByRole("button", { name: "开始生成", exact: true }).click();
   await frame.getByText("Fixture video stops after checking request fields", { exact: true }).first().waitFor();
   assert.equal(videoRequests, 1);
