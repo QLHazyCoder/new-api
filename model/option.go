@@ -45,6 +45,22 @@ func normalizeLegacyOptionValue(key, value string) (string, bool) {
 	return value, false
 }
 
+// Automatic routing is a synthetic entry, not a group classification. Older
+// versions stored an auto assignment; omit only that obsolete entry when
+// loading while leaving the database and strict write validation unchanged.
+func normalizeStoredGroupTypeAssignments(value string) (string, error) {
+	var assignments map[string]string
+	if err := common.UnmarshalJsonStr(value, &assignments); err != nil {
+		return "", err
+	}
+	if _, exists := assignments["auto"]; !exists {
+		return value, nil
+	}
+	delete(assignments, "auto")
+	normalized, err := common.Marshal(assignments)
+	return string(normalized), err
+}
+
 func AllOption() ([]*Option, error) {
 	var options []*Option
 	var err error
@@ -261,8 +277,12 @@ func loadOptionsFromDatabase() {
 			common.SysLog(common.LogText("failed to update option map: %s", err.Error()))
 		}
 	}
-	if err := applyGroupTypeOptionsToRuntime(groupTypesJSON, groupTypeMapJSON); err != nil {
-		common.SysError("failed to update group type options: " + err.Error())
+	loadedGroupTypeMap, groupTypeErr := normalizeStoredGroupTypeAssignments(groupTypeMapJSON)
+	if groupTypeErr == nil {
+		groupTypeErr = applyGroupTypeOptionsToRuntime(groupTypesJSON, loadedGroupTypeMap)
+	}
+	if groupTypeErr != nil {
+		common.SysError("failed to update group type options: " + groupTypeErr.Error())
 		updateGroupTypeOptionValues(groupTypesJSON, groupTypeMapJSON)
 	}
 	applyPasskeyDomainOptions(passkeyOptions)

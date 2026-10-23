@@ -2,12 +2,53 @@ package model
 
 import (
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGroupTypeOptionsReloadsLegacyAutomaticRoutingAssignment(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			dsn := os.Getenv("TEST_" + strings.ToUpper(dialect) + "_DSN")
+			if dialect != "sqlite" && dsn == "" {
+				t.Skip("database DSN not configured")
+			}
+			db := openSensitiveWordMatrixDB(t, dialect, dsn)
+			previousDB := DB
+			previousOptions := common.OptionMap
+			previousPolicy := CurrentRequestPolicy()
+			previousTypes, previousAssignments := ratio_setting.GroupTypeOptions2JSONString()
+			DB = db
+			common.OptionMap = map[string]string{}
+			t.Cleanup(func() {
+				DB = previousDB
+				common.OptionMap = previousOptions
+				requestPolicySnapshot.Store(previousPolicy)
+				require.NoError(t, ratio_setting.UpdateGroupTypeOptionsByJSONString(previousTypes, previousAssignments))
+			})
+			require.NoError(t, db.AutoMigrate(&Option{}))
+			typesJSON := `{"vendor":{"name":"标准类型","order":1}}`
+			legacyMap := `{"auto":"vendor","default":"vendor","vip":"vendor"}`
+			require.NoError(t, db.Create(&[]Option{{Key: groupTypesOptionKey, Value: typesJSON}, {Key: groupTypeMapOptionKey, Value: legacyMap}}).Error)
+			for range 2 {
+				require.NoError(t, ratio_setting.UpdateGroupTypeOptionsByJSONString(`{}`, `{}`))
+				loadOptionsFromDatabase()
+				require.Equal(t, "标准类型", ratio_setting.GetGroupTypesCopy()["vendor"].Name)
+				require.Equal(t, map[string]string{"default": "vendor", "vip": "vendor"}, ratio_setting.GetGroupTypeMapCopy())
+				require.JSONEq(t, `{"default":"vendor","vip":"vendor"}`, common.OptionMap[groupTypeMapOptionKey])
+			}
+			var stored Option
+			require.NoError(t, db.Where(&Option{Key: groupTypeMapOptionKey}).First(&stored).Error)
+			require.Equal(t, legacyMap, stored.Value, "startup must leave stored configuration intact for rollback")
+			require.Error(t, UpdateGroupTypeOptions(typesJSON, legacyMap), "new writes must still reject auto assignments")
+		})
+	}
+}
 
 func TestNormalizeLegacyAudioCompletionRatioOptionValue(t *testing.T) {
 	normalized, repaired := normalizeLegacyOptionValue("AudioCompletionRatio", " <nil> ")
